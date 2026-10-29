@@ -43,6 +43,9 @@ internal/web      single-file /dev/ testing table
 
 ## Rule decisions (where the brief left room)
 
+Colin reviewed and confirmed these on 2026-10-29, including the play-test balance
+changes below (enemies act once per round, softer early fights).
+
 - The party moves as one: one `Campaign.LocationID`; characters only have a zone. Fleeing
   through an exit moves the whole party (down allies carried) and ends the encounter, no XP.
 - A second move in a turn is a dash paid with the action, in and out of combat.
@@ -54,7 +57,8 @@ internal/web      single-file /dev/ testing table
   intimidate/calm/persuade reach 1 zone.
 - Free: look, say, equip, drop, accept_quest, and (outside combat) reposition.
   Move: go through an exit, travel, reposition in combat. Action: everything else,
-  including fleeing through an exit in combat and talk_to. turn_in_quest is free (it pairs
+  including fleeing through an exit in combat. Talking and trading are free outside
+  combat and cost the action in a fight. turn_in_quest is free (it pairs
   with handing over the item, which costs the action).
 - Rest: a long rest (full HP, next dawn) only at danger-0 places; elsewhere a short rest
   (half max HP, down allies to 1, one time segment, random-encounter roll).

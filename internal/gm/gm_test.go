@@ -266,6 +266,21 @@ func TestStartNeedsEveryCharacter(t *testing.T) {
 	}
 }
 
+func TestTalkKeepsTurnWithFullNarration(t *testing.T) {
+	r := newRig(t, 2, 1)
+	r.start(t)
+	res := r.act(t, "u1", "I ask the elder about the bell", llm.Call("talk_to", map[string]any{"npc": "Elder Corbin", "text": "the bell?"}))
+	if res.Quick || res.TurnEnded || res.Budget == nil || res.Budget.Action != 1 {
+		t.Fatalf("quick %v ended %v budget %+v", res.Quick, res.TurnEnded, res.Budget)
+	}
+	if len(r.f.Tagged("narrate")) != 1 || len(r.f.Tagged("narrate_quick")) != 0 {
+		t.Fatal("a conversation got the quick narrator")
+	}
+	if r.world(t).ActiveCharacter().PlayerID != "u1" {
+		t.Fatal("talking outside combat passed the turn")
+	}
+}
+
 func TestQuickFreeActionKeepsTurn(t *testing.T) {
 	r := newRig(t, 2, 1)
 	r.start(t)

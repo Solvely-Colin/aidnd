@@ -101,7 +101,7 @@ type Resolution struct {
 	Skipped       []Step        `json:"skipped,omitempty"`
 	TurnEnded     bool          `json:"turn_ended"`
 	Budget        Budget        `json:"budget"`
-	AllFree       bool          `json:"all_free"` // only free actions were taken
+	AllFree       bool          `json:"all_free"` // only minor free actions were taken (not talk or trade)
 	Arrived       string        `json:"arrived,omitempty"`
 	CombatStarted bool          `json:"combat_started,omitempty"`
 	CombatEnded   bool          `json:"combat_ended,omitempty"`
@@ -149,6 +149,10 @@ func SlotFor(w *World, a Action) Slot {
 			return SlotFree
 		}
 		return SlotMove
+	case ActTalkTo, ActBuy, ActSell:
+		if !w.InCombat() {
+			return SlotFree // talking and trading only cost the action in a fight
+		}
 	}
 	return SlotAction
 }
@@ -202,8 +206,8 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		if !wasCombat && w.InCombat() && (budget.Free == Unlimited || budget.Free > CombatFreeActions) {
 			budget.Free = CombatFreeActions // a fight broke out during this step
 		}
-		if used != SlotFree && used != SlotNone {
-			res.AllFree = false
+		if (used != SlotFree && used != SlotNone) || a.Kind == ActTalkTo || a.Kind == ActBuy || a.Kind == ActSell {
+			res.AllFree = false // talk and trade are free outside fights but still get full narration
 		}
 		// automatic quest ticks after every successful step
 		ups, ch := EvaluateQuests(w)
