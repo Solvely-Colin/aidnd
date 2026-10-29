@@ -46,7 +46,6 @@ const S = {
   hint: {},
   composer: "",
   collapsed: false,  // phone banner
-  stageBoard: false,
   open: {},          // roll id -> breakdown shown
   journal: null,
   map: null,
@@ -175,7 +174,7 @@ function leaveCampaign() {
   S.es?.close();
   Object.assign(S, {
     es: null, view: null, events: [], lastId: 0, progress: null, draft: null, step: 0, swap: "", panel: null, sheetFor: "",
-    talkTo: "", asked: {}, tray: "", hint: {}, composer: "", collapsed: false, stageBoard: false, open: {}, journal: null, map: null, stock: {},
+    talkTo: "", asked: {}, tray: "", hint: {}, composer: "", collapsed: false, open: {}, journal: null, map: null, stock: {},
   });
   J.notesFor = ""; J.notes = null; J.tab = "quests"; J.q = "";
   DIE.queue = []; DIE.cur = null;
@@ -527,12 +526,13 @@ function renderPlay() {
   const stage = stageMode();
   app.innerHTML = `
   <div class="play ${stage ? "stage" : ""} ${sideMode() ? "side" : ""}" id="play">
-    ${stage ? `<div class="stage-art" id="top"></div>` : ""}
+    ${stage ? `<aside class="rail rail-l" id="rail-l" aria-label="Party"></aside>` : ""}
     <div class="storycol">
-      ${stage ? "" : `<div class="banner ${S.collapsed ? "collapsed" : ""}" id="top"></div>`}
+      <div class="${stage ? "sbanner" : `banner ${S.collapsed ? "collapsed" : ""}`}" id="top"></div>
       <div class="feedwrap"><div class="feed-scroll" id="scroll"><div class="feed" id="feed"></div></div><div class="die-layer" id="die"></div></div>
       <footer class="dock" id="dock"></footer>
     </div>
+    ${stage ? `<aside class="rail rail-r" id="rail-r" aria-label="Board and journal"></aside>` : ""}
     <div id="dimmer"></div>
     <aside class="panel" id="panel" aria-label="Panel"></aside>
   </div>`;
@@ -544,7 +544,7 @@ function renderPlay() {
 
 function renderChrome() {
   if (!$("#play")) return;
-  renderTop(); renderDock(); renderPanel();
+  renderTop(); renderDock(); renderPanel(); renderRails();
 }
 
 function sceneLine(upper) {
@@ -573,25 +573,53 @@ function renderTop() {
       </div>`;
     return;
   }
-  const btn = (k, label, on) => `<button class="pill-btn ${on ? "on" : ""}" data-act="${k === "board" ? "board" : "panel"}" data-k="${k}">${label}</button>`;
-  el.innerHTML = `${placeArt(loc.id)}<div class="shade"></div><div class="fade-r"></div>
-    <div class="stage-top">
-      <button class="round" data-act="home" aria-label="Back home">${ICON.back}</button>
-      <span class="tchip"><b>${esc(v.title)}</b><span>${esc(when)}</span></span>
-      <span style="flex:1"></span>
-      ${enc ? `<span class="fight">FIGHT · ROUND ${enc.round}</span>` : ""}
-      ${btn("board", S.stageBoard && !enc ? "Hide board" : "Board", S.stageBoard || enc)}${btn("journal", "Journal", S.panel === "journal")}${btn("map", "Map", S.panel === "map")}
-    </div>
-    ${S.stageBoard || enc ? `<div class="stage-board">${boardHTML()}</div>` : ""}
-    <div class="stage-foot">
-      <div class="where"><span class="mono-k">${esc(sceneLine(true))}</span><b>${esc(loc.name)}</b></div>
-      <div class="portraits">${v.party.map(c => {
-        const acting = v.active?.character_id === c.id;
-        return `<button class="ptile ${acting ? "acting" : ""} ${isMe(c.id) ? "you" : ""} ${c.down ? "down" : ""}" data-sheet="${esc(c.id)}" title="${esc(c.name)} · ${c.hp}/${c.max_hp} HP">
-          ${face(c)}<span>${esc(firstName(c.name))}</span>${hpline(c)}</button>`;
-      }).join("")}</div>
+  const btn = (k, label) => `<button class="pill-btn ${S.panel === k ? "on" : ""}" data-act="panel" data-k="${k}">${label}</button>`;
+  el.innerHTML = `${placeArt(loc.id)}<div class="shade"></div>
+    <div class="sbanner-in">
+      <div class="bar">
+        <button class="round" data-act="home" aria-label="Back home">${ICON.back}</button>
+        <span class="tchip"><b>${esc(v.title)}</b><span>${esc(when)}</span></span>
+        <span style="flex:1"></span>
+        ${enc ? `<span class="fight">FIGHT · ROUND ${enc.round}</span>` : ""}
+        ${btn("scene", "Scene")}${btn("map", "Map")}
+      </div>
+      <div class="place-t"><span class="mono-k">${esc(sceneLine(true))}</span><b>${esc(loc.name)}</b></div>
     </div>`;
 }
+
+// ---- rails (wide layout): the party and a sheet on the left, the board and
+// the journal on the right, so nothing a player checks mid-turn hides in a panel.
+
+function renderRails() {
+  const l = $("#rail-l"), r = $("#rail-r");
+  if (!l || !r) return;
+  if (panelBusy()) { J.stale = true; return; }
+  const v = S.view, loc = v.location || {};
+  const sel = (v.party.find(p => p.id === S.sheetFor) || mine() || v.party[0])?.id;
+  const keep = el => el.querySelector(".rail-scroll")?.scrollTop || 0, ls = keep(l), rs = keep(r);
+  l.innerHTML = `<div class="rail-scroll"><div class="panel-body">
+      <p class="rail-h">Party</p>
+      <div class="pcards">${v.party.map(c => pcardHTML(c, c.id === sel)).join("")}</div>
+      ${v.party.length ? `<p class="rail-h">${isMe(sel) ? "Your character" : `${esc(firstName(v.party.find(p => p.id === sel).name))}’s sheet`}</p>${sheetHTML(true)}` : ""}
+    </div></div>`;
+  r.innerHTML = `<div class="rail-board">${placeArt(loc.id)}<div class="shade"></div>${loc.zones?.length ? boardHTML() : ""}</div>
+    <div class="rail-scroll"><div class="panel-body"><p class="rail-h">Journal</p>${journalHTML()}</div></div>`;
+  l.querySelector(".rail-scroll").scrollTop = ls; r.querySelector(".rail-scroll").scrollTop = rs;
+}
+
+function pcardHTML(c, sel) {
+  const v = S.view, acting = v.active?.character_id === c.id;
+  const conds = (c.conditions || []).filter(k => k.key !== "acting");
+  return `<button class="pcard ${acting ? "acting" : ""} ${isMe(c.id) ? "you" : ""} ${c.down ? "down" : ""} ${sel ? "sel" : ""}" data-sheet="${esc(c.id)}" title="${esc(c.name)}${acting ? " · taking their turn" : ""}">
+    ${face(c)}<span class="pc-b"><b>${esc(String(c.name).replace(TITLES, "") || c.name)}</b>
+      <span class="pc-k">${esc(c.class)} · L${c.level}</span>
+      ${hpline(c)}<span class="pc-k">${c.hp}/${c.max_hp} HP · AC ${c.ac}${c.zone_name ? ` · <span class="dim">${esc(c.zone_name)}</span>` : ""}</span>
+      ${conds.length ? `<span class="conds">${conds.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note || "")}">${esc(k.label)}</span>`).join("")}</span>` : ""}
+    </span></button>`;
+}
+
+// refreshJournal redraws the journal wherever it is showing.
+function refreshJournal() { renderPanel(); renderRails(); }
 
 const hpPct = c => Math.max(0, Math.min(100, Math.round(100 * c.hp / (c.max_hp || 1))));
 const hpline = c => `<span class="hpline"><i class="${c.hp / c.max_hp <= .5 ? "low" : ""}" style="width:${hpPct(c)}%"></i></span>`;
@@ -1033,7 +1061,9 @@ function submit() {
 
 // ---- panels
 
-const PANEL_TABS = [["scene", "Scene"], ["journal", "Journal"], ["map", "Map"], ["sheet", "Character"]];
+const ALL_TABS = [["scene", "Scene"], ["journal", "Journal"], ["map", "Map"], ["sheet", "Character"]];
+// On wide screens the journal and sheets live in the rails.
+const panelTabs = () => stageMode() ? ALL_TABS.filter(([k]) => k === "scene" || k === "map") : ALL_TABS;
 
 function openPanel(k) {
   S.panel = k;
@@ -1054,13 +1084,14 @@ function renderPanel() {
   if (!el) return;
   if (!S.panel) { el.classList.remove("open"); $("#dimmer").innerHTML = ""; return; }
   if (panelBusy()) { J.stale = true; return; }
+  if (stageMode() && !panelTabs().some(([t]) => t === S.panel) && S.panel !== "talk") { S.panel = null; return renderPanel(); }
   const k = S.panel;
   const n = k === "talk" && (S.view.location?.npcs || []).find(x => x.id === S.talkTo);
   if (k === "talk" && !n) { S.panel = null; return renderPanel(); }
   const scroll = el.classList.contains("open") && el.dataset.k === k ? el.scrollTop : 0;
   el.dataset.k = k;
   el.innerHTML = `<div class="panel-head">
-      ${k === "talk" ? `<h3>Talking</h3>` : `<div class="ptabs" role="tablist">${PANEL_TABS.map(([t, l]) => `<button role="tab" class="${t === k ? "on" : ""}" data-act="panel" data-k="${t}">${l}</button>`).join("")}</div>`}
+      ${k === "talk" ? `<h3>Talking</h3>` : `<div class="ptabs" role="tablist">${panelTabs().map(([t, l]) => `<button role="tab" class="${t === k ? "on" : ""}" data-act="panel" data-k="${t}">${l}</button>`).join("")}</div>`}
       <button class="close" data-act="close-panel" aria-label="Close">${ICON.close}</button></div>
     <div class="panel-body">${({ scene: sceneHTML, talk: () => talkHTML(n), sheet: sheetHTML, journal: journalHTML, map: mapHTML })[k]()}</div>`;
   el.classList.add("open");
@@ -1072,9 +1103,9 @@ function renderPanel() {
 // typing in it and catch up when they leave the field.
 function panelBusy() {
   const a = document.activeElement;
-  return !!a && !!a.closest?.("#panel") && a.matches("input, textarea");
+  return !!a && !!a.closest?.("#panel, .rail") && a.matches("input, textarea");
 }
-document.addEventListener("focusout", () => setTimeout(() => { if (J.stale && !panelBusy()) { J.stale = false; renderPanel(); } }, 0));
+document.addEventListener("focusout", () => setTimeout(() => { if (J.stale && !panelBusy()) { J.stale = false; refreshJournal(); } }, 0));
 
 // relax pushes apart labels that overlap (boxes of w by h, in percent)
 // and keeps them inside the frame. Pinned points do not move.
@@ -1215,7 +1246,7 @@ function itemFacts(i) {
   return f.filter(Boolean).join(" · ");
 }
 
-function sheetHTML() {
+function sheetHTML(inRail) {
   const v = S.view, me = mine();
   const c = v.party.find(p => p.id === S.sheetFor) || me || v.party[0];
   if (!c) return `<p class="empty-line">No one has made a character yet.</p>`;
@@ -1224,7 +1255,7 @@ function sheetHTML() {
   const worn = new Set([c.weapon?.id, c.armor?.id].filter(Boolean));
   const items = (c.inventory || []).slice().sort((a, b) => (b.equipped || worn.has(b.id)) - (a.equipped || worn.has(a.id)));
   const atk = c.attack || (c.weapon ? { weapon: c.weapon.name, bonus: c.weapon.to_hit, damage: c.weapon.damage, reach: c.weapon.reach } : null);
-  return `${v.party.length > 1 ? `<div class="tabs">${v.party.map(p => `<button class="${p.id === c.id ? "on" : ""}" data-sheet="${esc(p.id)}">${esc(firstName(p.name))}${isMe(p.id) ? " (you)" : ""}</button>`).join("")}</div>` : ""}
+  return `${v.party.length > 1 && !inRail ? `<div class="tabs">${v.party.map(p => `<button class="${p.id === c.id ? "on" : ""}" data-sheet="${esc(p.id)}">${esc(firstName(p.name))}${isMe(p.id) ? " (you)" : ""}</button>`).join("")}</div>` : ""}
     <div class="cs-id">${face(c)}<div>
       <span class="nm">${esc(c.name)}</span>
       <span class="sub-line">Level ${c.level} ${esc(c.class)} · ${esc(kitName(c.kit))} · ${esc(c.pronouns || "they/them")}</span>
@@ -1263,13 +1294,13 @@ const J = { tab: "quests", q: "", notes: null, notesFor: "", draft: "", editing:
 const JTABS = [["quests", "Quests"], ["people", "People"], ["places", "Places"], ["clues", "Clues"], ["notes", "Notes"]];
 
 function loadJournal() {
-  api("GET", `/campaigns/${S.route}/journal`).then(j => { S.journal = j; if (S.panel === "journal") renderPanel(); }).catch(() => {});
+  api("GET", `/campaigns/${S.route}/journal`).then(j => { S.journal = j; refreshJournal(); }).catch(() => {});
 }
 function loadNotes() {
   if (J.notesFor === S.route) return;
   J.notesFor = S.route; J.notes = null;
   if (!S.view?.you?.joined) { J.notes = []; return; }
-  api("GET", `/campaigns/${S.route}/notes`).then(r => { J.notes = r.notes; if (S.panel === "journal") renderPanel(); }).catch(() => { J.notes = []; });
+  api("GET", `/campaigns/${S.route}/notes`).then(r => { J.notes = r.notes; refreshJournal(); }).catch(() => { J.notes = []; });
 }
 async function addNote(text) {
   const n = await api("POST", `/campaigns/${S.route}/notes`, { text });
@@ -1415,7 +1446,7 @@ document.addEventListener("submit", async e => {
     e.preventDefault();
     const text = $("#n-text").value.trim();
     if (!text) return;
-    try { await addNote(text); J.draft = ""; renderPanel(); } catch (er) { toast(er.message); }
+    try { await addNote(text); J.draft = ""; refreshJournal(); } catch (er) { toast(er.message); }
   } else if (f.dataset?.note) {
     e.preventDefault();
     const id = f.dataset.note, text = $("#n-edit").value.trim();
@@ -1423,7 +1454,7 @@ document.addEventListener("submit", async e => {
     try {
       await api("POST", `/campaigns/${S.route}/notes/${id}`, { text });
       const n = J.notes.find(n => n.id === id); if (n) n.text = text;
-      J.editing = ""; renderPanel();
+      J.editing = ""; refreshJournal();
     } catch (er) { toast(er.message); }
   }
 });
@@ -1450,7 +1481,7 @@ document.addEventListener("click", async e => {
     return renderBuilder();
   }
   if (ds.step) { readEditor(); S.step = +ds.step; return renderBuilder(); }
-  if (ds.sheet) { S.sheetFor = ds.sheet; return openPanel("sheet"); }
+  if (ds.sheet) { S.sheetFor = ds.sheet; return stageMode() ? renderRails() : openPanel("sheet"); }
   if (ds.dock) {
     const k = ds.dock;
     if (k === "look") return send("I look around carefully");
@@ -1542,16 +1573,15 @@ document.addEventListener("click", async e => {
       case "menu": return S.panel ? closePanel() : openPanel(S.lastPanel || "scene");
       case "panel": return S.panel === ds.k && stageMode() ? closePanel() : openPanel(ds.k);
       case "close-panel": if (S.panel === "talk") S.talkTo = S.talkTo; return closePanel();
-      case "board": S.stageBoard = !S.stageBoard; return renderTop();
-      case "leave-talk": S.talkTo = ""; closePanel(); renderDock(); return renderFeed();
+            case "leave-talk": S.talkTo = ""; closePanel(); renderDock(); return renderFeed();
       case "clear-check": S.hint = {}; return renderDock();
       case "skip": return api("POST", `/campaigns/${S.route}/skip`, {});
-      case "jtab": J.tab = ds.k; J.q = ""; J.editing = ""; return renderPanel();
-      case "note-edit": J.editing = ds.id; renderPanel(); return $("#n-edit")?.focus();
-      case "note-cancel": J.editing = ""; return renderPanel();
+      case "jtab": J.tab = ds.k; J.q = ""; J.editing = ""; return refreshJournal();
+      case "note-edit": J.editing = ds.id; refreshJournal(); return $("#n-edit")?.focus();
+      case "note-cancel": J.editing = ""; return refreshJournal();
       case "note-del":
         await api("DELETE", `/campaigns/${S.route}/notes/${ds.id}`);
-        J.notes = J.notes.filter(n => n.id !== ds.id); J.editing = ""; return renderPanel();
+        J.notes = J.notes.filter(n => n.id !== ds.id); J.editing = ""; return refreshJournal();
       case "jot":
         loadNotes();
         await addNote(`“${ds.text.slice(0, 3900)}”`);
