@@ -23,6 +23,7 @@ const ICON = {
   fight: svg(`<path d="M14.5 4H20v5.5L9 20.5 3.5 15z"/><path d="M5 13l6 6M3 21l3-3"/>`),
   use: svg(`<path d="M6 8h12l-1 12H7z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>`),
   end: svg(`<path d="M6 6h12v12H6z"/>`),
+  expand: svg(`<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>`),
   heart: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z"/></svg>`,
   logo: `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13z" fill="var(--accent)"/><path d="M16 8 23 20H9z" fill="var(--bg)"/></svg>`,
 };
@@ -57,6 +58,8 @@ const S = {
   tray: "",          // open action group in the dock
   journal: null,
   map: null,
+  sheet: "",         // character whose sheet is shown ("" = yours)
+  sheetOpen: false,  // wide: full sheet over the story
   hint: {},
   composer: "",
 };
@@ -173,7 +176,7 @@ async function route() {
 
 function leaveCampaign() {
   S.es?.close();
-  Object.assign(S, { es: null, view: null, events: [], lastId: 0, draft: null, step: 0, journal: null, map: null, tab: "story", tray: "", composer: "", hint: {} });
+  Object.assign(S, { es: null, view: null, events: [], lastId: 0, draft: null, step: 0, journal: null, map: null, tab: "story", tray: "", composer: "", hint: {}, sheet: "", sheetOpen: false });
 }
 
 // ---- sign in
@@ -490,6 +493,7 @@ function renderPlay() {
         <footer class="dock" id="dock"></footer>
       </section>
       <aside class="side" id="side"></aside>
+      <div class="sheet-over" id="sheet-over" hidden></div>
     </div>
     <nav class="bottom-nav" id="nav"></nav>
   </div>`;
@@ -499,7 +503,7 @@ function renderPlay() {
 
 function renderChrome() {
   if (!$("#hud")) return;
-  renderHud(); renderRail(); renderSceneBar(); renderDock(); renderSide(); renderNav();
+  renderHud(); renderRail(); renderSceneBar(); renderDock(); renderSide(); renderNav(); renderSheetOver();
 }
 
 function renderHud() {
@@ -507,7 +511,7 @@ function renderHud() {
   $("#hud").innerHTML = `
     <button class="icon-btn" data-act="home" aria-label="Back">${ICON.back}</button>
     <div class="titles"><h1>${esc(v.title)}</h1><div class="sub">${v.scene ? `Day ${v.scene.day} · ${esc(v.scene.time)}` : ""}</div></div>
-    <div class="party-mini">${v.party.map(c => `<button class="mini ${v.active?.character_id === c.id ? "acting" : ""} ${c.down ? "down" : ""}" data-tab="you" title="${esc(c.name)} ${c.hp}/${c.max_hp}">
+    <div class="party-mini">${v.party.map(c => `<button class="mini ${v.active?.character_id === c.id ? "acting" : ""} ${c.down ? "down" : ""}" data-sheet="${esc(c.id)}" title="${esc(c.name)} ${c.hp}/${c.max_hp}">
       <span class="avatar sm">${esc(c.name[0])}${portrait(c)}</span>${ring(c.hp, c.max_hp)}</button>`).join("")}</div>
     ${me ? `<span class="hp ${me.hp <= me.max_hp / 3 ? "low" : ""}">${ICON.heart}${me.hp}<small>/${me.max_hp}</small></span>` : ""}`;
 }
@@ -521,10 +525,10 @@ function renderRail() {
   const v = S.view, me = mine();
   $("#rail").innerHTML = `
     <p class="rail-title">Party</p>
-    ${v.party.map(c => `<div class="member ${v.active?.character_id === c.id ? "acting" : ""} ${c.id === me?.id ? "me" : ""}">
+    ${v.party.map(c => `<button class="member ${v.active?.character_id === c.id ? "acting" : ""} ${c.id === me?.id ? "me" : ""} ${c.down ? "down" : ""}" data-sheet="${esc(c.id)}" data-expand="1" title="Open ${esc(c.name)}'s sheet">
       <div class="avatar">${esc(c.name[0])}${portrait(c)}</div>
       <div class="grow"><b>${esc(c.name)}${c.id === me?.id ? ` <span class="muted">(you)</span>` : ""}</b><span>${esc(c.class)} · lvl ${c.level ?? 1}</span>${hpbar(c.hp, c.max_hp)}</div>
-      <span class="num">${c.hp}</span></div>`).join("")}
+      <span class="num">${c.hp}</span></button>`).join("")}
     ${v.encounter ? `<p class="rail-title">Enemies · round ${v.encounter.round}</p>${v.encounter.enemies.map(e => `<div class="member foe ${e.hp <= 0 ? "down" : ""}"><div class="avatar">${esc(e.display[0])}</div>
       <div class="grow"><b>${esc(e.display)}</b>${e.hp > 0 ? hpbar(e.hp, e.max_hp) : "<span>Defeated</span>"}</div><span class="num">${Math.max(0, e.hp)}</span></div>`).join("")}` : ""}`;
 }
@@ -537,7 +541,7 @@ function renderSceneBar() {
 }
 
 function renderNav() {
-  const tabs = [["story", "Story", ICON.story], ["scene", "Scene", ICON.scene], ["you", "You", ICON.you], ["journal", "Journal", ICON.book], ["map", "Map", ICON.map]];
+  const tabs = [["story", "Story", ICON.story], ["scene", "Scene", ICON.scene], ["you", "Sheet", ICON.you], ["journal", "Journal", ICON.book], ["map", "Map", ICON.map]];
   $("#nav").innerHTML = tabs.map(([k, l, ic]) => `<button class="nav-item ${S.tab === k ? "on" : ""}" data-tab="${k}">${ic}<span>${l}</span></button>`).join("");
 }
 
@@ -545,9 +549,9 @@ function renderSide() {
   const el = $("#side");
   if (!el) return;
   const key = wide() ? S.panel : (S.tab === "story" ? S.panel : S.tab);
-  const tabs = [["scene", "Scene"], ["you", "You"], ["journal", "Journal"], ["map", "Map"]];
+  const tabs = [["scene", "Scene"], ["you", "Sheet"], ["journal", "Journal"], ["map", "Map"]];
   el.innerHTML = `<div class="side-tabs">${tabs.map(([k, l]) => `<button class="tab ${key === k ? "on" : ""}" data-panel="${k}">${l}</button>`).join("")}</div>
-    <div class="side-body">${({ scene: sceneHTML, you: youHTML, journal: journalHTML, map: mapHTML })[key]()}</div>`;
+    <div class="side-body">${({ scene: sceneHTML, you: () => sheetHTML(false), journal: journalHTML, map: mapHTML })[key]()}</div>`;
 }
 
 // feed
@@ -682,6 +686,7 @@ function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.
 
 function fill(text, hint = {}) {
   if (!wide() && S.tab !== "story") { S.tab = "story"; S.tray = ""; renderPlay(); }
+  if (S.sheetOpen) { S.sheetOpen = false; renderSheetOver(); }
   const ta = $("#say");
   if (!ta || ta.disabled) return toast("It is not your turn yet.");
   S.hint = hint;
@@ -757,23 +762,165 @@ function zoneMap() {
   return s + `</svg><div class="muted small">Lime is you, blue are allies, red are enemies. Tap a zone to move.</div>`;
 }
 
-function youHTML() {
-  const c = mine();
-  if (!c) return `<div class="muted">You are watching this story.</div>`;
-  return `
-    <section class="sheet-head"><div class="avatar xl">${esc(c.name[0])}${portrait(c)}</div>
-      <div class="grow"><h3>${esc(c.name)}</h3><div class="muted small">${esc(c.class)} · level ${c.level} · ${esc(c.pronouns || "they/them")}</div></div></section>
-    <section class="vitals">
-      <div class="vital big"><span class="k">Health</span><span class="v">${c.hp}<small>/${c.max_hp}</small></span>${hpbar(c.hp, c.max_hp)}</div>
-      <div class="vital"><span class="k">Armor</span><span class="v">${c.ac}</span></div>
-      <div class="vital"><span class="k">Gold</span><span class="v">${c.gold}</span></div>
-      <div class="vital"><span class="k">XP</span><span class="v">${c.xp}${c.next_level_xp ? `<small>/${c.next_level_xp}</small>` : ""}</span></div>
+// character sheet: yours to act from, the rest of the party read-only
+
+function sheetChar() {
+  const v = S.view;
+  return v.party.find(c => c.id === S.sheet) || mine() || v.party[0] || null;
+}
+
+function showSheet(id, expand) {
+  S.sheet = id;
+  if (wide()) {
+    if (expand) S.sheetOpen = true;
+    S.panel = "you";
+    renderSide(); renderSheetOver();
+    return;
+  }
+  S.tab = "you"; S.panel = "you";
+  renderPlay();
+  $("#side")?.scrollTo(0, 0);
+}
+
+function renderSheetOver() {
+  const el = $("#sheet-over");
+  if (!el) return;
+  el.hidden = !(S.sheetOpen && wide());
+  if (!el.hidden) el.innerHTML = sheetHTML(true);
+}
+
+const KIND_GROUPS = [
+  ["Ready to use", ["consumable"]],
+  ["Arms & armor", ["weapon", "armor", "shield"]],
+  ["Gear & tools", ["gear"]],
+  ["Keys & clues", ["key", "quest"]],
+  ["Valuables", ["treasure"]],
+];
+
+function effectText(e) {
+  return String(e || "").split(";").filter(Boolean).map(p =>
+    p.startsWith("heal:") ? `heals ${p.slice(5)}` : p === "revive" ? "revives the fallen" : p === "lockpick" ? "opens locks" : p).join(", ");
+}
+
+function itemFacts(i) {
+  const f = [];
+  if (i.kind === "weapon") f.push(`${signed(i.to_hit ?? 0)} hit`, i.damage, i.reach);
+  if (i.kind === "armor") f.push(`AC ${i.ac}`);
+  if (i.kind === "shield") f.push(`+${i.ac} AC`);
+  if (i.effect) f.push(effectText(i.effect));
+  return f.filter(Boolean).join(" · ");
+}
+
+function slotHTML(label, it, sub) {
+  return `<div class="slot ${it ? "" : "empty"}"><span class="k">${label}</span><b>${it ? esc(it.name) : "Empty"}</b><span>${esc(sub || "")}</span></div>`;
+}
+
+function packHTML(c, own) {
+  const worn = new Set([c.weapon?.id, c.armor?.id].filter(Boolean));
+  c.inventory.forEach(i => { if (i.equipped) worn.add(i.id); });
+  const loose = c.inventory.filter(i => !worn.has(i.id));
+  if (!loose.length) return `<div class="muted small">Nothing else in the pack.</div>`;
+  const stacks = new Map();
+  loose.forEach(i => { const k = i.kind + "|" + i.name; stacks.has(k) ? stacks.get(k).n++ : stacks.set(k, { i, n: 1 }); });
+  const known = KIND_GROUPS.flatMap(g => g[1]);
+  const groups = [...KIND_GROUPS, ["Other", null]];
+  return groups.map(([title, kinds]) => {
+    const rows = [...stacks.values()].filter(({ i }) => kinds ? kinds.includes(i.kind) : !known.includes(i.kind));
+    if (!rows.length) return "";
+    return `<div class="pack-group"><p class="pack-k">${title}</p>${rows.map(({ i, n }) => {
+      const verb = i.kind === "consumable" ? "Use" : ["weapon", "armor", "shield"].includes(i.kind) ? "Equip" : "";
+      const body = `<span class="nm"><b>${esc(i.name)}${n > 1 ? ` <span class="qty">×${n}</span>` : ""}</b><span>${esc(itemFacts(i))}</span></span>`;
+      return own && verb
+        ? `<button class="pack-row" data-fill="I ${verb.toLowerCase()} the ${esc(i.name)}">${body}<span class="verb">${verb}</span></button>`
+        : `<div class="pack-row">${body}</div>`;
+    }).join("")}</div>`;
+  }).join("");
+}
+
+function sheetHTML(full) {
+  const v = S.view, c = sheetChar(), me = mine();
+  if (!c) return `<div class="muted">No one has joined this story yet.</div>`;
+  const own = c.id === me?.id;
+  const hpP = Math.max(0, Math.min(1, c.hp / c.max_hp));
+  const xpFloor = c.level_xp || 0;
+  const xpP = c.next_level_xp ? Math.max(0, Math.min(1, (c.xp - xpFloor) / (c.next_level_xp - xpFloor))) : 1;
+  const acEq = (c.ac_parts || []).map((p, n) => `${n ? (p.value < 0 ? " − " : " + ") : ""}<span>${esc(p.label)}</span> ${n ? Math.abs(p.value) : p.value}`).join("");
+  const others = c.inventory.filter(i => i.kind === "weapon" && i.id !== c.weapon?.id);
+  const shield = c.inventory.find(i => i.kind === "shield" && i.equipped);
+  const switcher = v.party.length > 1 ? `<div class="cs-switch" role="tablist">${v.party.map(p => `
+    <button role="tab" class="${p.id === c.id ? "on" : ""} ${p.down ? "down" : ""}" data-sheet="${esc(p.id)}" aria-selected="${p.id === c.id}">
+      <span class="avatar sm">${esc(p.name[0])}${portrait(p)}</span><span>${esc(p.name.split(" ")[0])}${p.id === me?.id ? " (you)" : ""}</span></button>`).join("")}</div>` : "";
+  return `<article class="cs ${full ? "full" : ""}">
+    <div class="cs-top">${switcher}
+      ${full ? `<button class="icon-btn" data-act="sheet-close" aria-label="Close sheet">${ICON.close}</button>`
+        : `<button class="icon-btn wide-only" data-sheet="${esc(c.id)}" data-expand="1" aria-label="Open full sheet" title="Open full sheet">${ICON.expand}</button>`}
+    </div>
+    <header class="cs-id">
+      <div class="avatar xl">${esc(c.name[0])}${portrait(c)}</div>
+      <div class="grow">
+        <h3>${esc(c.name)}</h3>
+        <div class="cs-line">Level ${c.level} ${esc(c.class)} · ${esc(kitName(c.kit))} kit · ${esc(c.pronouns || "they/them")}</div>
+        ${c.concept ? `<div class="cs-concept">${esc(c.concept)}</div>` : ""}
+        <div class="cs-conds">${c.conditions?.length ? c.conditions.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note)}">${esc(k.label)}</span>`).join("") : `<span class="cond none">No conditions</span>`}
+          ${c.zone_name ? `<span class="cs-where">at ${esc(c.zone_name)}</span>` : ""}</div>
+      </div>
+    </header>
+
+    <div class="cs-cols"><div class="cs-col">
+    <section class="cs-vitals">
+      <div class="cs-hp ${hpP <= .34 ? "low" : ""}">
+        <span class="k">Hit points</span>
+        <span class="v">${c.hp}<small>/${c.max_hp}</small></span>
+        <div class="track"><i style="width:${hpP * 100}%"></i></div>
+      </div>
+      <div class="cs-ac"><span class="k">Armor</span><span class="v">${c.ac}</span></div>
+      <div class="cs-pb"><span class="k">Prof.</span><span class="v">${signed(c.proficiency_bonus)}</span></div>
     </section>
-    <section class="statgrid">${ABIL.map(a => `<div class="stat ${c.proficient.includes(a) ? "prof" : ""}" title="${ABIL_NAME[a]}"><div class="k">${a}</div><div class="v">${signed(c.modifiers[a])}</div><div class="m">${c.scores[a]}</div></div>`).join("")}</section>
-    ${c.weapon ? `<section><p class="eyebrow">Weapon</p><div class="row-item"><b>${esc(c.weapon.name)}</b><span>${esc(c.weapon.damage)} · ${esc(c.weapon.reach)}</span></div></section>` : ""}
-    <section><p class="eyebrow">Carrying</p><div class="list">${c.inventory.map(i => `
-      <button class="row-item" data-fill="${i.equipped ? `I use the ${esc(i.name)}` : `I ${i.kind === "consumable" ? "use" : "equip"} the ${esc(i.name)}`}"><b>${esc(i.name)}${i.equipped ? ` <span class="pill">equipped</span>` : ""}</b>${i.effect ? `<span>${esc(i.effect)}</span>` : ""}</button>`).join("") || `<div class="muted">Nothing.</div>`}</div></section>
-    ${c.backstory ? `<section><p class="eyebrow">Backstory</p><p class="muted">${esc(c.backstory)}</p></section>` : ""}`;
+    <div class="cs-ac-eq"><span class="k">AC</span>${acEq} = <b>${c.ac}</b></div>
+
+    <section class="cs-xp">
+      <div class="row spread"><span class="k">Experience</span><span class="num">${c.xp}${c.next_level_xp ? ` / ${c.next_level_xp}` : ""} XP</span></div>
+      <div class="track"><i style="width:${xpP * 100}%"></i></div>
+      <div class="muted small">${c.level_up ? `Level ${c.level_up.level} in ${c.next_level_xp - c.xp} XP: +${c.level_up.hp} max HP${c.level_up.proficiency_bonus > c.proficiency_bonus ? `, proficiency ${signed(c.level_up.proficiency_bonus)}` : ""}${c.level_up.level === 4 ? ", +2 to the best ability" : ""}.` : "Highest level reached."}</div>
+    </section>
+
+    <section>
+      <p class="eyebrow">Abilities <span class="cs-legend"><i></i>proficient, adds ${signed(c.proficiency_bonus)}</span></p>
+      <div class="cs-abil">${ABIL.map(a => {
+        const p = c.proficient.includes(a);
+        return `<div class="ab ${p ? "prof" : ""}" title="${ABIL_NAME[a]} ${c.scores[a]}: checks ${signed(c.modifiers[a])}">
+          <span class="nm">${ABIL_NAME[a]}</span><span class="md">${signed(c.modifiers[a])}</span><span class="sc">${c.scores[a]}</span></div>`;
+      }).join("")}</div>
+    </section>
+
+    ${c.backstory ? `<section class="cs-story"><p class="eyebrow">Backstory</p><p>${esc(c.backstory)}</p></section>` : ""}
+    </div><div class="cs-col">
+
+    <section>
+      <p class="eyebrow">Attacks</p>
+      <div class="cs-atk">
+        <div class="atk main"><span class="nm"><b>${esc(c.attack.weapon)}</b><span>${esc(c.attack.reach)} · uses ${esc(c.attack.ability)}</span></span><span class="hit">${signed(c.attack.bonus)}</span><span class="dmg">${esc(c.attack.damage)}</span></div>
+        ${others.map(i => `<div class="atk"><span class="nm"><b>${esc(i.name)}</b><span>${esc(i.reach || "")} · carried</span></span><span class="hit">${signed(i.to_hit ?? 0)}</span><span class="dmg">${esc(i.damage)}</span></div>`).join("")}
+        <div class="atk-head"><span></span><span>to hit</span><span>damage</span></div>
+      </div>
+    </section>
+
+    <section>
+      <p class="eyebrow">Equipped</p>
+      <div class="cs-slots">
+        ${slotHTML("Weapon", c.weapon?.id ? c.weapon : null, c.weapon?.id ? `${c.weapon.damage} · ${c.weapon.reach}` : "fists, 1d2")}
+        ${slotHTML("Armor", c.armor, c.armor ? `AC ${c.armor.ac}` : "")}
+        ${slotHTML("Shield", shield, shield ? `+${shield.ac} AC` : "")}
+      </div>
+    </section>
+
+    <section>
+      <div class="row spread"><p class="eyebrow">Pack</p><span class="cs-gold"><i></i>${c.gold} gold</span></div>
+      ${packHTML(c, own)}
+      ${own ? "" : `<div class="muted small">You are reading ${esc(c.name.split(" ")[0])}'s sheet. Only they can use these things.</div>`}
+    </section>
+    </div></div>
+  </article>`;
 }
 
 function journalHTML() {
@@ -818,12 +965,14 @@ function sideKey() { return wide() ? S.panel : (S.tab === "story" ? S.panel : S.
 
 let lastWide = wide();
 addEventListener("resize", () => { if (wide() !== lastWide) { lastWide = wide(); if ($("#hud")) renderPlay(); } });
+addEventListener("keydown", e => { if (e.key === "Escape" && S.sheetOpen) { S.sheetOpen = false; renderSheetOver(); } });
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-kit],[data-prof],[data-panel],[data-tab],[data-group],[data-opt],[data-step],[data-fill]");
+  const t = e.target.closest("[data-act],[data-sheet],[data-open],[data-premise],[data-kit],[data-prof],[data-panel],[data-tab],[data-group],[data-opt],[data-step],[data-fill]");
   if (!t) return;
   const act = t.dataset.act;
   if (t.dataset.open) return go(`#/c/${t.dataset.open}`);
+  if (t.dataset.sheet !== undefined) return showSheet(t.dataset.sheet, !!t.dataset.expand);
   if (t.dataset.premise) { $("#premise").value = t.dataset.premise; return; }
   if (t.dataset.kit) { readEditor().kit = t.dataset.kit; return renderSetup(); }
   if (t.dataset.step) { readEditor(); S.step = +t.dataset.step; return renderSetup(); }
@@ -854,6 +1003,7 @@ document.addEventListener("click", async e => {
     switch (act) {
       case "signout": await fetch("/auth/logout", { method: "POST" }); S.me = null; leaveCampaign(); S.route = ""; location.hash = ""; return renderSignin();
       case "home": return go("#/");
+      case "sheet-close": S.sheetOpen = false; return renderSheetOver();
       case "compose": S.composing = true; return renderHome();
       case "compose-close": S.composing = false; return renderHome();
       case "create": return createCampaign();
