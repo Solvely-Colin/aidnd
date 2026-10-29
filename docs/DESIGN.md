@@ -54,7 +54,8 @@ internal/web      single-file /dev/ testing table
   intimidate/calm/persuade reach 1 zone.
 - Free: look, say, equip, drop, accept_quest, and (outside combat) reposition.
   Move: go through an exit, travel, reposition in combat. Action: everything else,
-  including fleeing through an exit in combat and talk_to. turn_in_quest is free (it pairs
+  including fleeing through an exit in combat. Talking and trading are free outside
+  combat and cost the action in a fight. turn_in_quest is free (it pairs
   with handing over the item, which costs the action).
 - Rest: a long rest (full HP, next dawn) only at danger-0 places; elsewhere a short rest
   (half max HP, down allies to 1, one time segment, random-encounter roll).

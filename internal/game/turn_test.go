@@ -152,3 +152,32 @@ func TestBudgetPay(t *testing.T) {
 		t.Fatal(b.Left())
 	}
 }
+
+func TestTalkAndTradeFreeOutsideCombat(t *testing.T) {
+	f := newFixture(t)
+	f.goTo(f.hub, 1)
+	f.bram.Gold = 100
+	r := Resolve(f.ctx(), f.bram, []Action{
+		{Kind: ActTalkTo, Target: "Dunna"},
+		{Kind: ActBuy, Target: "Dunna", Item: "Potion of Healing"},
+		{Kind: ActSell, Target: "Dunna", Item: "longbow"},
+	})
+	for i := range r.Steps {
+		if stepErr(r, i) != "" || r.Steps[i].Slot != SlotFree {
+			t.Fatalf("step %d: %q slot %v", i, stepErr(r, i), r.Steps[i].Slot)
+		}
+	}
+	if r.TurnEnded {
+		t.Fatal("talk/trade outside combat ended the turn")
+	}
+	if r.AllFree {
+		t.Fatal("talk/trade marked minor; it should get full narration")
+	}
+	f.fight(t, 1, 1, wolf)
+	if s := SlotFor(f.w, Action{Kind: ActTalkTo, Target: "Dunna"}); s != SlotAction {
+		t.Fatalf("talk in combat slot %v", s)
+	}
+	if s := SlotFor(f.w, Action{Kind: ActBuy, Target: "Dunna"}); s != SlotAction {
+		t.Fatalf("buy in combat slot %v", s)
+	}
+}

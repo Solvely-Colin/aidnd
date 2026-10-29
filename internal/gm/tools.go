@@ -77,13 +77,13 @@ func interpreterTools() []llm.Tool {
 		tool(game.ActUseItem, "ACTION. Use an item: drink a potion, apply a healer's kit (can revive a downed ally), use a key or tools on a locked exit.", obj(map[string]any{
 			"item":   str("item id from INVENTORY"),
 			"target": str("optional party member id or exit id")}, "item")),
-		tool(game.ActTalkTo, "ACTION. Have a conversation with an NPC (ask, persuade, haggle, ask for work).", obj(map[string]any{
+		tool(game.ActTalkTo, "ACTION in combat, FREE otherwise. Have a conversation with an NPC (ask, persuade, haggle, ask for work).", obj(map[string]any{
 			"npc":  str("NPC id from NPCS"),
 			"text": str("what the character says or asks")}, "npc")),
-		tool(game.ActBuy, "ACTION. Buy an item from a merchant here.", obj(map[string]any{"npc": str("merchant NPC id"), "item": str("item id from the merchant's STOCK")}, "npc", "item")),
-		tool(game.ActSell, "ACTION. Sell a carried item to a merchant here.", obj(map[string]any{"npc": str("merchant NPC id"), "item": str("item id from INVENTORY")}, "npc", "item")),
+		tool(game.ActBuy, "ACTION in combat, FREE otherwise. Buy an item from a merchant here.", obj(map[string]any{"npc": str("merchant NPC id"), "item": str("item id from the merchant's STOCK")}, "npc", "item")),
+		tool(game.ActSell, "ACTION in combat, FREE otherwise. Sell a carried item to a merchant here.", obj(map[string]any{"npc": str("merchant NPC id"), "item": str("item id from INVENTORY")}, "npc", "item")),
 		tool(game.ActAcceptQuest, "FREE. Accept a quest an NPC here has offered.", obj(map[string]any{"quest": str("quest id from QUESTS ON OFFER")}, "quest")),
-		tool(game.ActTurnInQuest, "ACTION. Turn in a completed quest to its giver (must be at the giver's location).", obj(map[string]any{"quest": str("quest id")}, "quest")),
+		tool(game.ActTurnInQuest, "FREE. Turn in a completed quest to its giver (must be at the giver's location).", obj(map[string]any{"quest": str("quest id")}, "quest")),
 		tool(game.ActPickUp, "ACTION. Pick up an item from the ground.", obj(map[string]any{"item": str("item id from GROUND")}, "item")),
 		tool(game.ActGiveItem, "ACTION. Hand a carried item to a party member or an NPC here.", obj(map[string]any{
 			"item": str("item id from INVENTORY"), "to": str("party member id or NPC id")}, "item", "to")),

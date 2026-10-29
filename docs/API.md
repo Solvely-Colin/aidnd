@@ -161,10 +161,10 @@ from the turn budget:
 
 | Slot | Actions |
 |---|---|
-| free | look, say, equip, drop, accept or turn in a quest, reposition outside combat |
+| free | look, say, equip, drop, accept or turn in a quest; outside combat also reposition, talk and trade |
 | move | move to a zone, travel, reposition in combat (a second move spends the action as a dash) |
 | none | end turn ("I wait", "done") |
-| action | attack, subdue, ability checks (search, unlock, force), use item, talk, trade, rest, flee through an exit in combat |
+| action | attack, subdue, ability checks (search, unlock, force), use item, rest, flee through an exit in combat; in combat also talk and trade |
 
 In combat a turn has 1 action, 1 move and 3 free actions. Outside combat
 free actions are unlimited. Spending the action ends the turn; steps the
