@@ -16,7 +16,7 @@ const ICON = {
   menu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M14 4v16"/></svg>`,
   heart: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z"/></svg>`,
   chev: `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
-  logo: `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent-2)"/></linearGradient></defs><path d="M16 2 29 9.5v13L16 30 3 22.5v-13z" fill="url(#lg)"/><path d="M16 8 23 20H9z" fill="var(--bg)"/></svg>`,
+  logo: `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13z" fill="var(--accent)"/><path d="M16 8 23 20H9z" fill="var(--bg)"/></svg>`,
   quill: `<svg class="quill" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M40 6C26 8 16 18 12 34l-2 8 6-5c14-3 22-14 24-31z"/><path d="M12 34l12-12M18 30h8"/></svg>`,
 };
 
@@ -615,7 +615,7 @@ function zoneMap() {
   zones.forEach(z => z.adjacent.forEach(a => { if (a > z.id && pos[a]) s += `<line class="link" x1="${pos[z.id].x + W / 2}" y1="${pos[z.id].y + H / 2}" x2="${pos[a].x + W / 2}" y2="${pos[a].y + H / 2}"/>`; }));
   const tokens = {};
   const add = (zid, t) => (tokens[zid] ||= []).push(t);
-  v.party.forEach(c => add(c.zone_id, { fill: c.id === me?.id ? "var(--accent)" : "var(--info)", name: c.name, faded: c.down }));
+  v.party.forEach(c => add(c.zone_id, { fill: c.id === me?.id ? "var(--good)" : "var(--info)", name: c.name, faded: c.down }));
   (loc.npcs || []).forEach(n => add(n.zone_id, { fill: "var(--text-3)", name: n.name }));
   (v.encounter?.enemies || []).filter(e => e.hp > 0).forEach(e => add(e.zone_id, { fill: "var(--bad)", name: e.display }));
   zones.forEach(z => {
@@ -628,7 +628,7 @@ function zoneMap() {
     });
     s += `</g>`;
   });
-  return s + `</svg><div class="muted" style="font-size:12px">Purple is you, blue are allies, red are enemies. Tap a zone to move.</div>`;
+  return s + `</svg><div class="muted" style="font-size:12px">Green is you, blue are allies, red are enemies. Tap a zone to move.</div>`;
 }
 
 function youHTML() {
