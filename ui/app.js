@@ -636,7 +636,11 @@ function actionGroups() {
   const g = { look: [], talk: [], go: [], fight: [], use: [] };
   if (!enc) g.look.push({ label: "Look around", text: "I look around carefully" });
   for (const n of loc.npcs || []) if (n.alive !== false && !enc) g.talk.push({ label: n.name, sub: n.role, text: `I talk to ${n.name}: `, hint: { target_id: n.id } });
-  for (const x of loc.exits || []) if (x.state === "open") g.go.push({ label: x.to_name, sub: x.explored ? "explored" : "unexplored", text: enc ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}` });
+  // "known" and "open" exits can both be walked; a locked one is worth trying.
+  for (const x of loc.exits || []) {
+    if (x.state === "known" || x.state === "open") g.go.push({ label: x.to_name, sub: x.explored ? "explored" : "unexplored", text: enc ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}` });
+    else if (x.state === "locked" && !enc) g.go.push({ label: x.to_name, sub: "locked", text: `I try to get through ${x.label || "the way to " + x.to_name}` });
+  }
   for (const z of loc.zones || []) if (me && z.id !== me.zone_id) g.go.push({ label: z.name, sub: "move within", text: `I move to ${z.name}`, hint: { zone_id: z.id } });
   for (const e of v.encounter?.enemies || []) if (e.hp > 0) g.fight.push({ label: e.display, sub: `${e.hp}/${e.max_hp} HP`, text: `I attack ${e.display}`, hint: { target_id: e.id } });
   for (const i of loc.items || []) g.use.push({ label: `Take ${i.name}`, sub: i.effect, text: `I pick up the ${i.name}` });
@@ -722,7 +726,7 @@ function sceneHTML() {
     ${v.encounter ? `<section><p class="eyebrow">Enemies · round ${v.encounter.round}</p><div class="tiles">${v.encounter.enemies.filter(e => e.hp > 0).map(e => tile(`data-fill="I attack ${esc(e.display)}" data-target="${esc(e.id)}"`, e.display, `${e.hp}/${e.max_hp} HP${e.ranged ? " · ranged" : ""} · ${zname(e.zone_id)}`, "foe")).join("")}</div></section>` : ""}
     ${l.npcs?.length ? `<section><p class="eyebrow">People</p><div class="tiles">${l.npcs.map(n => tile(`data-fill="I talk to ${esc(n.name)}: " data-target="${esc(n.id)}"`, n.name, `${n.role}${n.merchant ? " · sells goods" : ""}`, "person")).join("")}</div></section>` : ""}
     ${l.items?.length ? `<section><p class="eyebrow">Things</p><div class="tiles">${l.items.map(i => tile(`data-fill="I pick up the ${esc(i.name)}"`, i.name, i.effect, "item")).join("")}</div></section>` : ""}
-    ${l.exits?.length ? `<section><p class="eyebrow">Ways out</p><div class="tiles">${l.exits.map(x => tile(`data-fill="${x.state === "open" ? `I travel to ${esc(x.to_name)}` : `I try the ${esc(x.label)}`}"`, x.to_name, `${x.label}${x.state === "locked" ? " · locked" : ""}${x.explored ? "" : " · unexplored"}`, "exit")).join("")}</div></section>` : ""}`;
+    ${l.exits?.length ? `<section><p class="eyebrow">Ways out</p><div class="tiles">${l.exits.map(x => tile(`data-fill="${x.state !== "locked" ? `I travel to ${esc(x.to_name)}` : `I try the ${esc(x.label)}`}"`, x.to_name, `${x.label}${x.state === "locked" ? " · locked" : ""}${x.explored ? "" : " · unexplored"}`, "exit")).join("")}</div></section>` : ""}`;
 }
 
 function zoneMap() {
