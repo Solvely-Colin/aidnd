@@ -245,9 +245,8 @@ img.gen.on { opacity: 1; }
 
 /* ---- play */
 .play { position: absolute; inset: 0; overflow: hidden; display: flex; flex-direction: column; }
-.play.stage { display: grid; grid-template-columns: minmax(0, 1fr) 480px; grid-template-rows: minmax(0, 1fr); }
+.play.stage { display: grid; grid-template-columns: minmax(0, 1fr) clamp(480px, 26vw, 600px); grid-template-rows: minmax(0, 1fr); }
 .storycol { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--bg); }
-.play.stage .storycol { box-shadow: -1px 0 0 var(--line); }
 
 /* banner (column layout) */
 .banner { position: relative; flex: none; height: 190px; transition: height .32s var(--ease); overflow: hidden; }
@@ -287,17 +286,19 @@ img.gen.on { opacity: 1; }
 .stage-foot .where { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 260px; }
 .stage-foot .where .mono-k { font-size: 11.5px; color: var(--ink2); }
 .stage-foot .where b { font: 800 clamp(40px, 5vw, 72px)/.9 var(--display); letter-spacing: -.05em; overflow-wrap: anywhere; }
+/* 5vw passes 64px at 1280px wide; tighter spacing makes big letters touch. */
+@media (min-width: 1280px) { .stage-foot .where b { letter-spacing: -.035em; } }
 .portraits { display: flex; gap: 14px; flex: none; }
-.ptile { display: flex; flex-direction: column; align-items: center; gap: 6px; transition: transform .25s; }
-.ptile.acting { transform: translateY(-4px); }
-.ptile .face { width: 68px; height: 84px; border-radius: 12px; font: 800 26px/1 var(--display); box-shadow: 0 0 0 2px transparent, 0 10px 24px rgba(0, 0, 0, .5); opacity: .7; }
-.ptile.acting .face { opacity: 1; box-shadow: 0 0 0 2px var(--ink2), 0 10px 24px rgba(0, 0, 0, .5); }
+.ptile { display: flex; flex-direction: column; align-items: center; gap: 6px; transition: transform .25s, opacity .25s; opacity: .7; }
+.ptile.acting { transform: translateY(-4px); opacity: 1; }
+.ptile .face { width: 68px; height: 84px; border-radius: 12px; font: 800 26px/1 var(--display); box-shadow: 0 0 0 2px transparent, 0 10px 24px rgba(0, 0, 0, .5); }
+.ptile.acting .face { box-shadow: 0 0 0 2px var(--ink2), 0 10px 24px rgba(0, 0, 0, .5); }
 .ptile.acting.you .face { box-shadow: 0 0 0 2px var(--acc), 0 10px 24px rgba(0, 0, 0, .5); }
 .ptile.down .face { filter: grayscale(1); }
 .ptile > span { font-size: 12.5px; font-weight: 700; color: var(--ink3); text-shadow: 0 1px 6px rgba(0, 0, 0, .8); }
 .ptile.acting > span { color: var(--ink); }
-.hpline { width: 56px; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, .5); overflow: hidden; }
-.hpline i { display: block; height: 100%; background: var(--ink2); }
+.hpline { width: 56px; height: 3px; border-radius: 2px; background: var(--bg3); box-shadow: 0 0 0 1px rgba(0, 0, 0, .5); overflow: hidden; }
+.hpline i { display: block; height: 100%; background: #56646d; }
 .hpline i.low { background: var(--bad); }
 .stage-board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -56%); width: min(620px, 78%); aspect-ratio: 4 / 3; z-index: 2; }
 
@@ -330,6 +331,7 @@ img.gen.on { opacity: 1; }
 /* feed */
 .feedwrap { position: relative; flex: 1; min-height: 0; }
 .feed-scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; }
+.feed-scroll.scrolled { -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 70px); mask-image: linear-gradient(180deg, transparent 0, #000 70px); }
 .feed { max-width: 680px; margin: 0 auto; padding: 18px 18px 20px; display: flex; flex-direction: column; gap: 22px; }
 .ev-sys { text-align: center; font-size: 13px; color: var(--ink3); line-height: 1.45; }
 .ev-sys.bad { color: var(--bad); }
@@ -347,6 +349,8 @@ img.gen.on { opacity: 1; }
 .ev-narr { display: flex; flex-direction: column; gap: 14px; color: var(--ink2); }
 .ev-narr.latest { color: var(--ink); }
 .ev-narr p { margin: 0; font-size: 18.5px; line-height: 1.75; text-wrap: pretty; }
+/* the story column passes 480px from about 1850px wide */
+@media (min-width: 1850px) { .play.stage .ev-narr p { font-size: 19.5px; } }
 .ev-narr p.lead { font: 600 23px/1.35 var(--display); letter-spacing: -.02em; }
 .ev-narr .say { display: flex; flex-direction: column; gap: 4px; padding-left: 20px; }
 .ev-narr .say .mono-k { font-weight: 600; }

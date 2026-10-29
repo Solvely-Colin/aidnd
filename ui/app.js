@@ -602,6 +602,7 @@ let stick = true;
 function onFeedScroll(e) {
   const el = e.target, top = el.scrollTop;
   stick = el.scrollHeight - top - el.clientHeight < 80;
+  el.classList.toggle("scrolled", top > 0);
   const b = $(".banner");
   if (!b) return;
   if (top > 24 && !S.collapsed) { S.collapsed = true; b.classList.add("collapsed"); }
@@ -618,8 +619,11 @@ function renderFeed(force) {
   const s = $("#scroll");
   if (!force && s) stick = s.scrollHeight - s.scrollTop - s.clientHeight < 80;
   const items = feedItems(currentEvents(S.events));
+  // The dock already says "Your turn", so a marker that nothing follows yet is noise.
+  const pend = pendingHTML();
+  if (!pend && items.at(-1)?.k === "turn" && items.at(-1).you) items.pop();
   const lastNarr = items.map(it => it.k === "narr").lastIndexOf(true);
-  feed.innerHTML = items.map((it, i) => itemHTML(it, i === lastNarr)).join("") + pendingHTML() + suggestHTML();
+  feed.innerHTML = items.map((it, i) => itemHTML(it, i === lastNarr)).join("") + pend + suggestHTML();
   if (force || stick) requestAnimationFrame(toBottom);
 }
 
