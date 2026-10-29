@@ -72,6 +72,12 @@ func writeSSE(w http.ResponseWriter, e store.Event) error {
 	if err != nil {
 		return err
 	}
+	if e.ID == 0 {
+		// Unsaved progress events carry no id, so they never move the
+		// browser's Last-Event-ID.
+		_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Type, b)
+		return err
+	}
 	_, err = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", e.ID, e.Type, b)
 	return err
 }
@@ -132,13 +138,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return // dropped as too slow; client reconnects with Last-Event-ID
 			}
-			if e.ID <= last {
+			if e.ID != 0 && e.ID <= last {
 				continue
 			}
 			if writeSSE(w, e) != nil {
 				return
 			}
-			last = e.ID
+			if e.ID != 0 {
+				last = e.ID
+			}
 			fl.Flush()
 		case <-tick.C:
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
