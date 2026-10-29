@@ -442,7 +442,7 @@ func createBuild(w *World, playerID string, spec CharacterSpec, scores Scores) *
 		class = ClassName(cd, setting)
 	}
 	c.Class = trimTo(class, 40)
-	c.Spells = spec.Spells
+	c.Spells, c.Boost = spec.Spells, spec.Boost
 	if len(c.Spells) == 0 {
 		c.Spells = DefaultSpells(c)
 	}
@@ -792,4 +792,24 @@ func levelUp(c *Character) string {
 		line += fmt.Sprintf(" with %d choice(s) to make", n)
 	}
 	return line
+}
+
+// SpecOf is the builder spec that made c, for editing a sheet before the
+// story starts. Only first-level class sheets have one.
+func SpecOf(c *Character) *CharacterSpec {
+	if c.ClassKey == "" || c.Level > 1 {
+		return nil
+	}
+	spec := &CharacterSpec{Name: c.Name, Concept: c.Concept, Class: c.Class, Backstory: c.Backstory, Pronouns: c.Pronouns,
+		ClassKey: c.ClassKey, Species: c.Species, Background: c.Background, Boost: c.Boost, Picks: c.Picks, Spells: c.Spells, Scores: map[string]int{}}
+	for _, a := range Abilities {
+		spec.Scores[string(a)] = c.Scores[a] - c.Boost[string(a)]
+	}
+	fixed := buildSkills(CharacterSpec{Background: c.Background, Species: c.Species})
+	for _, s := range c.Skills {
+		if !containsStr(fixed, s) {
+			spec.Skills = append(spec.Skills, s)
+		}
+	}
+	return spec
 }

@@ -301,3 +301,50 @@ func TestOldSheetsPlayAsTheirClass(t *testing.T) {
 		t.Fatal("old sheets keep their proficient saves")
 	}
 }
+
+func TestSpecOfRoundTrips(t *testing.T) {
+	f := newFixture(t)
+	for _, k := range ClassKeys() {
+		c := f.build(t, "u1", k, 1)
+		spec := SpecOf(c)
+		if spec == nil {
+			t.Fatalf("%s: no spec", k)
+		}
+		scores, p := ValidateBuild(*spec)
+		if len(p) > 0 {
+			t.Fatalf("%s: spec from sheet is invalid: %v", k, p)
+		}
+		for _, a := range Abilities {
+			if scores[a] != c.Scores[a] {
+				t.Fatalf("%s: %s %d, sheet has %d", k, a, scores[a], c.Scores[a])
+			}
+		}
+	}
+}
+
+// Within one era no two classes, species, backgrounds or spells may share a
+// name, or the builder and the DM can't tell them apart.
+func TestEraNamesAreDistinct(t *testing.T) {
+	for _, set := range []string{SettingFantasy, SettingGaslight, SettingPulp, SettingModern, SettingFuture} {
+		seen := map[string]string{}
+		check := func(kind, key, name string) {
+			k := kind + ":" + strings.ToLower(name)
+			if o, ok := seen[k]; ok {
+				t.Errorf("%s: %s %q is used by %s and %s", set, kind, name, o, key)
+			}
+			seen[k] = key
+		}
+		for _, k := range ClassKeys() {
+			check("class", k, ClassName(Classes[k], set))
+		}
+		for _, k := range SpeciesKeys() {
+			check("species", k, SpeciesName(Species[k], set))
+		}
+		for _, k := range BackgroundKeys() {
+			check("background", k, BackgroundName(Backgrounds[k], set))
+		}
+		for _, k := range SpellKeys() {
+			check("spell", k, SpellName(Spells[k], set))
+		}
+	}
+}

@@ -659,3 +659,77 @@ img.gen.on { opacity: 1; }
 .skills div b { font: 600 13px/1.3 var(--mono); color: var(--ink2); }
 .skills .prof, .skills .prof b { color: var(--ink); }
 .skills .prof span { color: var(--acc); }
+
+/* 5e builder: a roster of classes beside a dossier of the one picked */
+.builder.wide .builder-body > div, .builder.wide .builder-head > div, .builder.wide .builder-foot > div { max-width: 860px; }
+@media (max-width: 640px) { .builder .tabs { gap: 14px; } }
+.roster { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: start; }
+.roster-list { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.roster-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 11px 10px 11px 12px; border-bottom: 1px solid var(--line); text-align: left; border-left: 2px solid transparent; }
+.roster-row b { font: 700 16px/1.2 var(--display); letter-spacing: -.01em; }
+.roster-row span { font: 10.5px/1 var(--mono); color: var(--ink3); text-transform: uppercase; letter-spacing: .08em; }
+.roster-row.on { border-left-color: var(--acc); background: var(--bg2); }
+.roster-row.on b { color: var(--acc); }
+.dossier { position: sticky; top: 0; display: flex; flex-direction: column; gap: 12px; }
+.dossier h3 { margin: 0; font: 800 30px/1 var(--display); letter-spacing: -.03em; }
+.dossier p { margin: 0; color: var(--ink2); line-height: 1.55; }
+.dossier.empty p { color: var(--ink3); padding: 20px 0; }
+.dossier dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 16px; margin: 4px 0 0; font-size: 14px; }
+.dossier dt { font: 10.5px/1.8 var(--mono); color: var(--ink3); text-transform: uppercase; letter-spacing: .08em; }
+.dossier dd { margin: 0; }
+.dossier dd small { color: var(--ink3); }
+.ladder { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line2); }
+.ladder li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 6px; align-items: baseline; padding: 6px 0; }
+.ladder li > span { font: 600 12px/1 var(--mono); color: var(--ink3); margin-left: -6px; background: var(--bg); padding: 2px 0; text-align: center; }
+.ladder li div { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; }
+.ladder b { font-weight: 600; cursor: help; }
+.ladder em { color: var(--ink3); font-style: normal; }
+@media (max-width: 640px) {
+  .roster { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .roster-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 0; gap: 0 12px; }
+  .roster-row span { display: none; }
+  .dossier { position: static; }
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { padding: 8px 12px; border-radius: 4px; background: var(--bg2); font-size: 14px; font-weight: 600; color: var(--ink2); box-shadow: inset 0 0 0 1px var(--line); }
+.chip.on { color: var(--accInk); background: var(--acc); box-shadow: none; }
+.builder section { display: flex; flex-direction: column; gap: 4px; }
+.traits { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font-size: 14px; }
+.traits p { margin: 0 0 4px; color: var(--ink2); }
+.traits div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.traits div span { color: var(--ink2); }
+@media (max-width: 480px) { .traits div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.boost { display: flex; flex-direction: column; margin-top: 6px; }
+.boost > div { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.boost > div span { flex: 1; font-weight: 600; }
+.boost button { font: 600 13px/1 var(--mono); padding: 8px 10px; border-radius: 4px; color: var(--ink3); box-shadow: inset 0 0 0 1px var(--line2); }
+.boost button.on { background: var(--acc); color: var(--accInk); box-shadow: none; }
+.boost .spread { align-self: flex-start; margin-top: 10px; font-family: var(--sans); }
+.spell-list { display: flex; flex-direction: column; }
+.spell-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.spell-row .dot { width: 16px; height: 16px; border-radius: 3px; margin-top: 3px; border: 2px solid var(--line2); }
+.spell-row.on .dot { border-color: var(--acc); background: var(--acc); }
+.spell-row .nm { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.spell-row b { font-size: 16px; }
+.spell-row small { font: 11px/1.4 var(--mono); color: var(--ink3); text-transform: lowercase; }
+.spell-row .nm > span { font-size: 14px; color: var(--ink2); line-height: 1.45; }
+.problems { margin: 0; padding: 12px 16px 12px 28px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--bad); color: var(--ink2); font-size: 14px; line-height: 1.6; }
+/* sheet: slots, features, level-up */
+.slots { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 6px 0 10px; }
+.slots div { display: flex; align-items: center; gap: 8px; font: 11px/1 var(--mono); color: var(--ink3); }
+.row-line .pips { gap: 5px; }
+details.feat { border-bottom: 1px solid var(--line); }
+details.feat summary { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 10px 0; cursor: pointer; list-style: none; font-size: 15px; }
+details.feat summary::-webkit-details-marker { display: none; }
+details.feat summary small { font: 11px/1 var(--mono); color: var(--ink3); }
+details.feat p { margin: 0 0 12px; font-size: 14px; color: var(--ink2); line-height: 1.5; }
+.levelup { padding: 14px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--acc); display: flex; flex-direction: column; gap: 10px; }
+.levelup .btn { align-self: flex-start; }
+.levelup section { display: flex; flex-direction: column; }
+.tray-item.off b, .tray-item.off span { color: var(--ink3); }
+/* with spells and abilities the action row can outgrow a phone: it scrolls */
+.turnrow .who { flex: 0 1 auto; white-space: nowrap; }
+.turnrow .acts { flex: 1 1 auto; min-width: 0; overflow-x: auto; justify-content: flex-end; scrollbar-width: none; }
+.turnrow .acts::-webkit-scrollbar { display: none; }
+.turnrow .acts button { flex: none; }
+@media (max-width: 560px) { .turnrow:has(.acts button:nth-child(6)) .who { display: none; } .turnrow .acts { justify-content: flex-start; } }

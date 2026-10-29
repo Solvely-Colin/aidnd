@@ -38,7 +38,7 @@ var Species = map[string]*SpeciesDef{
 			{"elven_lineage", "Elven Lineage", 1, "A wizard cantrip of your choice, cast with Charisma.", false},
 		}},
 	"gnome": {Key: "gnome", Name: "Gnome", Desc: "Small, clever and hard to fool.",
-		Era:    &EraNames{"Tinker-Kin", "Small Folk", "Gnomish", "Synth"},
+		Era:    &EraNames{"Tinker-Kin", "Hill Folk", "Gnomish", "Synth"},
 		EraDsc: &EraNames{"A tinkering little people.", "Small, clever folk who keep to the margins.", "Small, sharp, and impossible to con.", "A synthetic mind in a small chassis."},
 		Traits: []Feature{
 			{"darkvision", "Darkvision", 1, "Sees in the dark.", false},
@@ -52,8 +52,8 @@ var Species = map[string]*SpeciesDef{
 			{"powerful_build", "Powerful Build", 1, "Advantage on checks to break free of grapples.", false},
 		}},
 	"halfling": {Key: "halfling", Name: "Halfling", Desc: "Small, brave and absurdly lucky.",
-		Era:    &EraNames{"Smallfolk", "Smallfolk", "Pocket-Sized", "Lowgrav-Born"},
-		EraDsc: &EraNames{"Small, cheerful and lucky.", "Small, cheerful and lucky.", "Short, brave and unreasonably lucky.", "Slight-framed and born under thin gravity."},
+		Era:    &EraNames{"Smallfolk", "Half-Pint", "Pocket-Sized", "Lowgrav-Born"},
+		EraDsc: &EraNames{"Small, cheerful and lucky.", "Short, scrappy and born under a lucky star.", "Short, brave and unreasonably lucky.", "Slight-framed and born under thin gravity."},
 		Traits: []Feature{
 			{"brave", "Brave", 1, "Advantage on saves against being frightened.", false},
 			{"luck", "Luck", 1, "Reroll a 1 on a d20 attack, check or save.", false},

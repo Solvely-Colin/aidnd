@@ -118,6 +118,8 @@ type CharExtra struct {
 	ClassKey   string `json:"class_key,omitempty"`
 	Species    string `json:"species,omitempty"`
 	Background string `json:"background,omitempty"`
+	// Boost is the background ability increase chosen at creation.
+	Boost map[string]int `json:"boost,omitempty"`
 	// Picks are build choices by key: fighting_style, expertise,
 	// invocation, feat4, asi, versatile, skillful, mi_cantrips...
 	Picks map[string][]string `json:"picks,omitempty"`

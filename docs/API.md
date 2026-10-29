@@ -71,8 +71,28 @@ Character spec (validated; 422 lists every problem):
  "proficient": ["INT", "WIS"]}
 ```
 
-Scores must be a permutation of the standard array 15/14/13/12/10/8, exactly
-two proficiencies, and a kit from `GET /meta`. `pronouns` is free text the
+A 5e build sets `class_key` and then ignores `kit` and `proficient`:
+
+```json
+{"name": "Maren Voss", "class": "", "pronouns": "she/her", "class_key": "wizard",
+ "species": "human", "background": "sage", "boost": {"INT": 2, "CON": 1},
+ "scores": {"STR": 8, "DEX": 14, "CON": 13, "INT": 15, "WIS": 12, "CHA": 10},
+ "skills": ["investigation", "insight"],
+ "picks": {"skillful": ["athletics"], "versatile": ["tough"], "mi_cantrips": ["fire_bolt", "mage_hand"], "mi_spell": ["magic_missile"]},
+ "spells": ["fire_bolt", "mage_hand", "ray_of_frost", "magic_missile", "shield", "sleep"]}
+```
+
+`scores` is the standard array before the background `boost` (+2/+1 or
++1/+1/+1 among the background's three abilities). `skills` are the class
+picks only (background and species skills are added). `picks` answers every
+choice in `POST characters/preview`'s `choices`; `spells` are the class
+cantrips and prepared spells (species and feat spells are added). `class` is
+an optional title; empty means the class's name in the campaign's era.
+Drafts return a complete build.
+
+Legacy sheets: scores must be a permutation of the standard array 15/14/13/12/10/8, exactly
+two proficiencies, and a kit from `GET /meta`. They play as the class their
+kit maps to. `pronouns` is free text the
 narrator uses (normalised, e.g. "She / Her" → "she/her"); it defaults to
 they/them, and drafts fill it from the concept.
 
@@ -81,7 +101,7 @@ they/them, and drafts fill it from the concept.
 | Method & path | Who | Notes |
 |---|---|---|
 | `GET /healthz` | anyone | `{"ok": true}` |
-| `GET /meta` | anyone | Abilities, standard array, kits with items (fantasy), `settings` (each with its own kits), item catalog, XP table, DCs, `service_mode`. |
+| `GET /meta?setting=` | anyone | Abilities, standard array, kits with items (fantasy), `settings` (each with its own kits), item catalog, XP table, DCs, `service_mode`, and `ruleset`: every class, species, background, feat, invocation and spell named for `setting` (`rules_name` is the SRD name). |
 | `GET /campaigns` | any caller | All campaigns: `{campaigns: [{id, title, pitch, status, players, max_players, updated_at}]}` |
 | `GET /me/campaigns` | player | Campaigns this player has joined. |
 | `POST /campaigns` | any caller | `{premise, lethality?}` → 201 campaign view. `lethality` is `standard` (three failed death saves kill) or `story` (they leave you stable). |
@@ -89,6 +109,9 @@ they/them, and drafts fill it from the concept.
 | `POST /campaigns/{id}/players` | player | `{name}` → `{player, created, token?}` (201 when new). |
 | `POST /campaigns/{id}/characters/draft` | joined player | `{concept}` → `{character: spec}` |
 | `POST /campaigns/{id}/characters` | joined player | `{character}` or `{concept}` → character view. |
+| `POST /campaigns/{id}/characters/preview` | joined player | `{character, fill?}` → `{character, problems, choices, skills, max_hp, scores, cantrips, prepared, spell_options, default_spells}`. `fill` completes the build with defaults (a new class, species or background). |
+| `POST /campaigns/{id}/me/choose` | joined player | `{key, picks}` answers a level-up choice from `build.pending_choices` → character view. Earlier picks are kept; a growing choice (invocations) adds to them. |
+| `POST /campaigns/{id}/me/spells` | joined player | `{spells}` replaces prepared spells (409 in a fight) → character view. |
 | `GET /campaigns/{id}/characters/{cid}` | any caller | Character view. |
 | `POST /campaigns/{id}/start` | joined player / service | Starts the game. |
 | `POST /campaigns/{id}/actions` | active player | `{text, target_id?, zone_id?, check?, act?}` → turn result, or a pending turn when the player rolls their own dice. |
@@ -387,3 +410,25 @@ async function act(text, hints = {}) {
 
 The dev table (`internal/web/index.html`) is a complete working example of
 this loop with four seats.
+
+## The 5e ruleset
+
+Classes, species, backgrounds, feats and spells follow the SRD 5.2.1
+(CC-BY-4.0), levels 1 to 5, one subclass per class. Each era renames them
+with the same rules: in `pulp` a wizard is an Occultist and fire bolt is
+Hellfire Sigil. A character view's `build` has `class_name`, `subclass`
+(from level 3), `species_name`, `background_name`, `saves`, `features`,
+`abilities` (usable features: `slot`, `left`/`max`, `ready`, `why`),
+`resources`, `feats`, `pending_choices`, `slots`, `spell_dc`,
+`spell_attack`, `spells`, `prepare` (counts and options), `temp_hp`,
+`concentration`, `made_before_classes`, and `spec` (the build, to edit
+before the story starts).
+
+The dock sends spells and abilities as `act` hints, resolved without the
+interpreter: `{"kind": "cast_spell", "spell": "fire_bolt", "target": "<enemy
+or party id>", "zone": "<zone id>", "level": 0}` and `{"kind":
+"use_feature", "feature": "rage", "target": "..."}`. An attack hint can
+carry `"option": "smite"` or `"stun"`.
+
+Turns have a bonus action: `budget.bonus` is 1 at the start of a turn.
+Spending the action ends the turn, so bonus actions go in the same message.

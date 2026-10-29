@@ -59,13 +59,14 @@ type SpellView struct {
 	Kind    string    `json:"kind"`
 	Area    bool      `json:"area,omitempty"`
 	Conc    bool      `json:"conc,omitempty"`
+	Targets int       `json:"targets,omitempty"`
 	Peace   bool      `json:"peace,omitempty"`
 	Desc    string    `json:"desc"`
 }
 
 func spellView(s *game.SpellDef, setting string) SpellView {
 	return SpellView{Key: s.Key, Name: game.SpellName(s, setting), Rules: s.Name, Level: s.Level, School: s.School, Classes: s.Classes,
-		Cast: s.Cast, Range: s.Range, Kind: s.Kind, Area: s.Area, Conc: s.Conc, Peace: s.Peace, Desc: s.Desc}
+		Cast: s.Cast, Range: s.Range, Kind: s.Kind, Area: s.Area, Conc: s.Conc, Targets: s.Targets, Peace: s.Peace, Desc: s.Desc}
 }
 
 // rulesetView is every class, species, background, feat and spell, named
@@ -111,30 +112,31 @@ func rulesetView(setting string) map[string]any {
 
 // BuildView is the class part of a character sheet.
 type BuildView struct {
-	ClassKey    string               `json:"class_key"`
-	ClassName   string               `json:"class_name"`
-	Subclass    string               `json:"subclass,omitempty"`
-	Species     string               `json:"species"`
-	SpeciesName string               `json:"species_name"`
-	Background  string               `json:"background,omitempty"`
-	BgName      string               `json:"background_name,omitempty"`
-	Saves       map[string]SaveView  `json:"saves"`
-	Features    []game.Feature       `json:"features"`
-	Abilities   []game.FeatureUse    `json:"abilities"`
-	Resources   []game.Resource      `json:"resources"`
-	Feats       []string             `json:"feats"`
-	Picks       map[string][]string  `json:"picks,omitempty"`
-	Choices     []game.Choice        `json:"pending_choices"`
-	Caster      bool                 `json:"caster"`
-	Slots       []SlotView           `json:"slots,omitempty"`
-	SpellDC     int                  `json:"spell_dc,omitempty"`
-	SpellAttack int                  `json:"spell_attack,omitempty"`
-	Spells      []SpellView          `json:"spells,omitempty"`
-	Prepare     *PrepareView         `json:"prepare,omitempty"`
-	TempHP      int                  `json:"temp_hp,omitempty"`
-	Conc        *game.Concentration  `json:"concentration,omitempty"`
-	ConcName    string               `json:"concentration_name,omitempty"`
-	Rebuild     bool                 `json:"made_before_classes,omitempty"`
+	ClassKey    string              `json:"class_key"`
+	ClassName   string              `json:"class_name"`
+	Subclass    string              `json:"subclass,omitempty"`
+	Species     string              `json:"species"`
+	SpeciesName string              `json:"species_name"`
+	Background  string              `json:"background,omitempty"`
+	BgName      string              `json:"background_name,omitempty"`
+	Saves       map[string]SaveView `json:"saves"`
+	Features    []game.Feature      `json:"features"`
+	Abilities   []game.FeatureUse   `json:"abilities"`
+	Resources   []game.Resource     `json:"resources"`
+	Feats       []string            `json:"feats"`
+	Picks       map[string][]string `json:"picks,omitempty"`
+	Choices     []game.Choice       `json:"pending_choices"`
+	Caster      bool                `json:"caster"`
+	Slots       []SlotView          `json:"slots,omitempty"`
+	SpellDC     int                 `json:"spell_dc,omitempty"`
+	SpellAttack int                 `json:"spell_attack,omitempty"`
+	Spells      []SpellView         `json:"spells,omitempty"`
+	Prepare     *PrepareView        `json:"prepare,omitempty"`
+	TempHP      int                 `json:"temp_hp,omitempty"`
+	Conc        *game.Concentration `json:"concentration,omitempty"`
+	ConcName    string              `json:"concentration_name,omitempty"`
+	Rebuild     bool                `json:"made_before_classes,omitempty"`
+	Spec        *game.CharacterSpec `json:"spec,omitempty"` // to edit before the story starts
 }
 
 type SaveView struct {
@@ -162,7 +164,7 @@ func buildView(w *game.World, c *game.Character) BuildView {
 	v := BuildView{ClassKey: cd.Key, ClassName: game.ClassName(cd, setting), Species: sp.Key, SpeciesName: game.SpeciesName(sp, setting),
 		Saves: map[string]SaveView{}, Features: game.FeaturesOf(c), Abilities: game.FeatureUses(w, c), Resources: game.Resources(c),
 		Feats: c.FeatList(), Picks: c.Picks, Choices: game.PendingChoices(c), Caster: c.IsCaster(), TempHP: c.TempHP, Conc: c.Conc,
-		Rebuild: c.ClassKey == ""}
+		Rebuild: c.ClassKey == "", Spec: game.SpecOf(c)}
 	if v.Abilities == nil {
 		v.Abilities = []game.FeatureUse{}
 	}
@@ -217,7 +219,7 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := body.Character
-	if game.Classes[spec.ClassKey] == nil {
+	if game.Classes[spec.ClassKey] == nil && !body.Fill {
 		writeError(w, http.StatusBadRequest, "class_key is required")
 		return
 	}
