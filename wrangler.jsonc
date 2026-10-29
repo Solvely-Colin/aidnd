@@ -17,10 +17,9 @@
 	"containers": [
 		{
 			"class_name": "GameServer",
-			"image": "./Dockerfile",
-			"instance_type": "lite",
 			"scheduling_policy": "durable_object",
-			"max_instances": 2
+			// Started as "lite" from GameServer's constructor.
+			"images": { "gameserver": { "dockerfile": "./Dockerfile" } }
 		}
 	],
 	"durable_objects": {

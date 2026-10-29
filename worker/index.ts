@@ -79,6 +79,19 @@ export class GameServer extends Container<Env> {
 
 	constructor(ctx: DurableObjectState<{}>, env: Env) {
 		super(ctx, env);
+		// The durable_object scheduling policy picks the image and size at
+		// start time; @cloudflare/containers doesn't pass them, so add them.
+		const container = ctx.container as any;
+		(this as any).container = new Proxy(container, {
+			get(target, prop) {
+				if (prop === "start") {
+					return (opts: object) =>
+						target.start({ ...opts, image: target.images.gameserver, instance: "lite" });
+				}
+				const value = target[prop];
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
 		this.envVars = {
 			ADDR: ":8080",
 			API_KEY: env.APP_SECRET,
