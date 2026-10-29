@@ -416,6 +416,12 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	if n == nil || !n.Alive || n.LocationID != w.Campaign.LocationID {
 		return fmt.Errorf("nobody called %q is here", a.Target)
 	}
+	// outside a fight, talking to someone across the location means
+	// walking over to them, so the actor ends up in the NPC's zone
+	if l := w.Here(); !w.InCombat() && l.Zone(n.ZoneID) != nil && n.ZoneID != c.ZoneID {
+		c.ZoneID = n.ZoneID
+		st.Changes = append(st.Changes, fmt.Sprintf("%s moves to %s", c.Name, ZoneName(l, n.ZoneID)))
+	}
 	n.LastTalked = w.Campaign.Turn
 	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.Disposition))
 	if a.Text != "" {

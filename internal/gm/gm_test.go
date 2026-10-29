@@ -856,3 +856,130 @@ func TestAmbushBeatWaitsOutsideTheSafeHub(t *testing.T) {
 		t.Fatal("ambush beat should fire away from the hub")
 	}
 }
+
+// putApart moves the actor and an NPC into different zones of the hub.
+func putApart(t *testing.T, w *game.World, n *game.NPC) (actor *game.Character, near, far string) {
+	t.Helper()
+	l := w.Here()
+	if len(l.Zones) < 2 {
+		t.Fatal("hub needs zones")
+	}
+	actor = w.ActiveCharacter()
+	near, far = l.Zones[0].ID, l.Zones[len(l.Zones)-1].ID
+	actor.ZoneID, n.ZoneID = near, far
+	return actor, near, far
+}
+
+func TestBeatWaitsUntilActorIsWithItsNPC(t *testing.T) {
+	r := newRig(t, 1, 1)
+	w := r.start(t)
+	corbin := w.NPC("Elder Corbin")
+	actor, _, far := putApart(t, w, corbin)
+	w.Here().IsHub = false
+	w.Beats = []*game.Beat{{ID: "b1", Title: "The sheet", Text: "At the well, Corbin pulls back the sheet over the drowned man.", Trigger: game.TriggerTurn, Value: 0}}
+	res := &game.Resolution{ActorID: actor.ID}
+	if b := pickBeat(w, res); b != nil {
+		t.Fatal("beat with Corbin fired while the actor was in another zone")
+	}
+	actor.ZoneID = far
+	if b := pickBeat(w, res); b == nil {
+		t.Fatal("beat should fire once the actor is with Corbin")
+	}
+	// an NPC the beat brings in does not need to be here yet
+	corbin.LocationID = "elsewhere"
+	w.Beats[0].Effects, w.Beats[0].EffectTarget = []string{game.EffectBringNPC}, corbin.ID
+	if b := pickBeat(w, res); b == nil {
+		t.Fatal("bring_npc beat should fire")
+	}
+}
+
+func TestBeatNames(t *testing.T) {
+	cases := []struct {
+		text, name string
+		want       bool
+	}{
+		{"Doc Halloway pulls back the sheet.", "Doc Halloway", true},
+		{"The bell rings and Sister Ione is found unconscious.", "Sister Ione Marsh", true},
+		{"Pale hands break the surface of the shallows.", "Morwen the Pale", false},
+		{"The fog rolls in over the marsh.", "Sister Ione Marsh", false},
+		{"The doc says nothing.", "Doc Halloway", false},
+	}
+	for _, c := range cases {
+		if got := beatNames(c.text, c.name); got != c.want {
+			t.Errorf("beatNames(%q, %q) = %v", c.text, c.name, got)
+		}
+	}
+}
+
+func TestSnapshotKeepsTheSceneInTheActorsZone(t *testing.T) {
+	r := newRig(t, 1, 1)
+	w := r.start(t)
+	corbin, tamsin := w.NPC("Elder Corbin"), w.NPC("Tamsin Hale")
+	actor, near, _ := putApart(t, w, corbin)
+	tamsin.ZoneID = near
+	s := snapshot(w, actor, true)
+	if !strings.Contains(s, "SCENE: "+actor.Name+" stands in "+game.ZoneName(w.Here(), near)+" with: Tamsin Hale.") {
+		t.Fatalf("scene line missing or wrong:\n%s", s)
+	}
+	if !strings.Contains(s, "Elder Corbin ["+corbin.ID+"] elder, attitude +1, in "+game.ZoneName(w.Here(), corbin.ZoneID)+" (elsewhere, not in the scene)") {
+		t.Fatalf("absent NPC not marked:\n%s", s)
+	}
+	if strings.Contains(s, "Tamsin Hale ["+tamsin.ID+"] blacksmith, attitude +1, in "+game.ZoneName(w.Here(), near)+" (elsewhere") {
+		t.Fatal("present NPC marked absent")
+	}
+}
+
+func TestTalkToWalksOverToTheNPC(t *testing.T) {
+	r := newRig(t, 1, 1)
+	w := r.start(t)
+	corbin := w.NPC("Elder Corbin")
+	_, _, far := putApart(t, w, corbin)
+	_, err := r.g.Store.Save(bg, w)
+	must(t, err)
+	res := r.act(t, "u1", "I ask Corbin about the bell", llm.Call("talk_to", map[string]any{"npc": corbin.ID}))
+	if res.Resolution.Steps[0].Error != "" || r.world(t).Character(res.Resolution.ActorID).ZoneID != far {
+		t.Fatalf("talk_to did not walk the actor to %s: %+v", far, res.Resolution.Steps)
+	}
+}
+
+func TestInterpretKeepsTheTalkAfterAStrayReposition(t *testing.T) {
+	r := newRig(t, 1, 1)
+	w := r.start(t)
+	corbin := w.NPC("Elder Corbin")
+	_, _, far := putApart(t, w, corbin)
+	_, err := r.g.Store.Save(bg, w)
+	must(t, err)
+	// the model only walks over, and adds nothing when asked for more
+	r.f.On("interpret", llm.Calls(llm.Call("reposition", map[string]any{"zone": far})))
+	r.f.On("interpret_more", llm.Text("done"))
+	res, err := r.g.TakeAction(bg, r.id, "u1", "I talk to Elder Corbin: do you have any jobs?", Hints{TargetID: corbin.ID})
+	must(t, err)
+	steps := res.Resolution.Steps
+	if len(steps) != 2 || steps[1].Action.Kind != game.ActTalkTo || steps[1].Action.Target != corbin.ID {
+		t.Fatalf("talk step lost: %+v", steps)
+	}
+	if len(r.f.Tagged("interpret_more")) == 0 {
+		t.Fatal("interpreter was not asked for the missing step")
+	}
+	// plain movement stays a plain move
+	if strayReposition([]game.Action{{Kind: game.ActReposition}}, "I move to the green") {
+		t.Fatal("explicit move treated as stray")
+	}
+}
+
+func TestCharacterNamesStayUnique(t *testing.T) {
+	r := newRig(t, 1, 1)
+	_, _, err := r.g.Join(bg, r.id, "u2", "Pu2")
+	must(t, err)
+	if _, err := r.g.SaveCharacter(bg, r.id, "u2", specs[0]); err == nil || !strings.Contains(err.Error(), "already in the party") {
+		t.Fatalf("duplicate name accepted: %v", err)
+	}
+	// a player can re-save their own sheet under the same name
+	_, err = r.g.SaveCharacter(bg, r.id, "u1", specs[0])
+	must(t, err)
+	r.f.On("author_character", llm.Calls(llm.Call("draft_character", map[string]any{"name": "Aria", "class": "Caravan Guard", "kit": "warrior"})))
+	d := r.g.DraftCharacter(bg, r.world(t), "caravan guard")
+	if strings.EqualFold(d.Name, "Aria") {
+		t.Fatalf("draft reused a party name: %q", d.Name)
+	}
+}

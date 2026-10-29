@@ -249,7 +249,7 @@ data: {"id":42,"campaign_id":"c_...","type":"narration","data":{...},"created_at
 |---|---|
 | `campaign_created` | `{id, title, pitch}` |
 | `player_joined` | `{player_id, name, seat}` |
-| `character_created` | `{player_id, character_id, name, class, kit, concept}` |
+| `character_created` | `{player_id, character_id, name, class, kit, concept, replaces}` (`replaces` is the id of the sheet this one replaced in the lobby, or empty) |
 | `location_changed` | `{location_id, name}` |
 | `turn_started` | `{character_id, player_id, name, budget}` |
 | `player_action` | `{character_id, character, text, hints}` |

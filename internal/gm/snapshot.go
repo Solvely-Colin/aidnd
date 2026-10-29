@@ -99,6 +99,9 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 			zs = append(zs, fmt.Sprintf("%s [%s]%s%s: %s", z.Name, z.ID, dist, cover, orNone(who)))
 		}
 		line("ZONES:\n  %s", strings.Join(zs, "\n  "))
+		if actor != nil {
+			line("SCENE: %s", sceneLine(w, l, actor))
+		}
 	}
 	var exits []string
 	for _, x := range w.Exits(l.ID, false) {
@@ -115,6 +118,9 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 	var npcs []string
 	for _, n := range w.NPCsAt(l.ID) {
 		s := fmt.Sprintf("%s [%s] %s, attitude %+d, in %s", n.Name, n.ID, n.Role, n.Disposition, game.ZoneName(l, n.ZoneID))
+		if actor != nil && !withActor(l, actor, n) {
+			s += " (elsewhere, not in the scene)"
+		}
 		if n.Merchant {
 			var stock []string
 			for _, it := range w.ItemsOf(game.OwnerNPC, n.ID) {
@@ -213,6 +219,30 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 		line("SECRETS (GM only): hidden exits: %s", orNone(hidden))
 	}
 	return b.String()
+}
+
+// withActor reports whether an NPC shares the actor's zone. NPCs with no
+// zone, or locations without zones, count as present.
+func withActor(l *game.Location, actor *game.Character, n *game.NPC) bool {
+	return len(l.Zones) == 0 || n.ZoneID == "" || l.Zone(n.ZoneID) == nil || n.ZoneID == actor.ZoneID
+}
+
+// sceneLine names who is with the actor, so the narrator keeps the scene
+// in the actor's zone instead of wherever the story wants to go.
+func sceneLine(w *game.World, l *game.Location, actor *game.Character) string {
+	var with []string
+	for _, c := range w.Party() {
+		if c.ID != actor.ID && c.ZoneID == actor.ZoneID {
+			with = append(with, c.Name)
+		}
+	}
+	for _, n := range w.NPCsAt(l.ID) {
+		if withActor(l, actor, n) {
+			with = append(with, n.Name)
+		}
+	}
+	return fmt.Sprintf("%s stands in %s with: %s. Anyone in another zone is out of the scene: they can be seen from a distance or mentioned, but they do not speak, act or show anything to %s.",
+		actor.Name, game.ZoneName(l, actor.ZoneID), orNone(with), actor.Name)
 }
 
 func orNone(s []string) string {

@@ -434,20 +434,57 @@ func (g *GM) DraftCharacter(ctx context.Context, w *game.World, concept string) 
 	for _, k := range game.KitKeys() {
 		kits = append(kits, fmt.Sprintf("%s (%s)", k, game.Kits[k].Desc))
 	}
-	title := ""
+	title, taken := "", ""
 	if w != nil {
 		title = w.Campaign.Title + ": " + w.Campaign.Pitch
+		var names []string
+		for _, c := range w.Characters {
+			names = append(names, c.Name)
+		}
+		if len(names) > 0 {
+			taken = "\nAlready in the party (use a clearly different name): " + strings.Join(names, ", ") + "."
+		}
 	}
 	req := llm.Request{Tag: "author_character", Temperature: 0.8, ForceTool: "draft_character", Tools: []llm.Tool{t},
 		Messages: []llm.Message{llm.System(authorSystem), llm.User(fmt.Sprintf(
-			"Campaign: %s\nPlayer's concept: %s\n\nKits: %s.\nAssign the standard array 15, 14, 13, 12, 10, 8 to the six abilities, each value exactly once, and pick 2 proficient abilities. Classes are flavor only.",
-			title, firstOf(concept, "a capable adventurer"), strings.Join(kits, "; ")))}}
+			"Campaign: %s\nPlayer's concept: %s%s\n\nKits: %s.\nAssign the standard array 15, 14, 13, 12, 10, 8 to the six abilities, each value exactly once, and pick 2 proficient abilities. Classes are flavor only.",
+			title, firstOf(concept, "a capable adventurer"), taken, strings.Join(kits, "; ")))}}
 	var spec game.CharacterSpec
 	calls, err := g.forced(ctx, req, nil)
 	if err == nil && len(calls) > 0 {
 		_ = calls[0].Decode(&spec)
 	}
-	return RepairCharacter(spec, concept)
+	spec = RepairCharacter(spec, concept)
+	if w != nil {
+		spec.Name = uniqueName(w, spec)
+	}
+	return spec
+}
+
+// uniqueName keeps a drafted name from clashing with someone already in
+// the party (models like to reuse a name they were just shown).
+func uniqueName(w *game.World, s game.CharacterSpec) string {
+	taken := func(n string) bool {
+		for _, c := range w.Characters {
+			if strings.EqualFold(strings.TrimSpace(c.Name), strings.TrimSpace(n)) {
+				return true
+			}
+		}
+		return false
+	}
+	if !taken(s.Name) {
+		return s.Name
+	}
+	for _, n := range []string{trim(s.Name+" the "+firstOf(s.Class, game.Kits[s.Kit].Name), 40), fallbackName(s.Concept + " " + s.Name)} {
+		if n != "" && !taken(n) {
+			return n
+		}
+	}
+	for i := 2; ; i++ {
+		if n := trim(fmt.Sprintf("%s %d", s.Name, i), 40); !taken(n) {
+			return n
+		}
+	}
 }
 
 // RepairCharacter makes any draft valid: kit by keyword, standard array by
