@@ -43,6 +43,9 @@ internal/web      single-file /dev/ testing table
 
 ## Rule decisions (where the brief left room)
 
+Colin reviewed and confirmed these on 2026-10-29, including the play-test balance
+changes below (enemies act once per round, softer early fights).
+
 - The party moves as one: one `Campaign.LocationID`; characters only have a zone. Fleeing
   through an exit moves the whole party (down allies carried) and ends the encounter, no XP.
 - A second move in a turn is a dash paid with the action, in and out of combat.
