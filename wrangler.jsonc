@@ -5,6 +5,8 @@
 	"compatibility_date": "2026-10-13",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
+	// Keep APP_SECRET/PLAY_CODE if they were set as dashboard variables.
+	"keep_vars": true,
 	// The player UI. The Worker runs first only for the API and login.
 	"assets": {
 		"directory": "./ui",
