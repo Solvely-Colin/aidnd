@@ -56,6 +56,9 @@ func itemLine(it *game.Item, c *game.Character) string {
 	if it.Effect != "" {
 		tags = append(tags, it.Effect)
 	}
+	if m := game.MagicSummary(it); m != "" {
+		tags = append(tags, game.RarityName(it.Rarity)+" magic: "+m)
+	}
 	return s + " (" + strings.Join(tags, ", ") + ")"
 }
 
@@ -308,6 +311,12 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 			}
 			if cs := e.Conditions.String(); cs != "" {
 				kind += ", currently " + cs
+			}
+			if b := e.Boss; b != nil {
+				kind += fmt.Sprintf(", BOSS in its %s phase, %d legendary resistances left", b.Current().Name, b.Resist)
+				if b.Charging != nil {
+					kind += fmt.Sprintf(", about to unleash %s on %s", b.Move.Name, game.ZoneName(l, b.Charging.Zone))
+				}
 			}
 			es = append(es, fmt.Sprintf("%s [%s] HP %d/%d, AC %d, %s, in %s%s", e.Display(), e.ID, e.HP, e.MaxHP, e.AC, kind, game.ZoneName(l, e.ZoneID), d))
 		}

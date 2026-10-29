@@ -589,3 +589,70 @@ func TestRulesetBuilderAndLevelUp(t *testing.T) {
 		t.Fatalf("early feat %d %s", r.code, r.body)
 	}
 }
+
+func TestDMConsoleRewindAndActions(t *testing.T) {
+	e := newEnv(t, "")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "a lake town"}, "", "").json(t)["id"].(string)
+	tok := e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "", "").json(t)["token"].(string)
+	if r := e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet}, tok, ""); r.code != 201 {
+		t.Fatalf("sheet %d %s", r.code, r.body)
+	}
+	e.do("POST", "/campaigns/"+id+"/start", nil, tok, "")
+	gold := func() float64 {
+		return e.do("GET", "/campaigns/"+id, nil, tok, "").json(t)["party"].([]any)[0].(map[string]any)["gold"].(float64)
+	}
+	e.fake.On("interpret", llm.Calls(llm.Call("look", map[string]any{})))
+	e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "I look around"}, tok, "")
+	before := gold()
+	lg := e.do("GET", "/campaigns/"+id+"/log?after=0", nil, tok, "").json(t)
+	nEvents := len(lg["events"].([]any))
+	// a console action: give gold-worth XP and an item
+	r := e.do("POST", "/campaigns/"+id+"/dm", map[string]any{"kind": "award_xp", "amount": 50}, tok, "")
+	if r.code != 200 {
+		t.Fatalf("award %d %s", r.code, r.body)
+	}
+	pc := r.json(t)["campaign"].(map[string]any)["party"].([]any)[0].(map[string]any)
+	r = e.do("POST", "/campaigns/"+id+"/dm", map[string]any{"kind": "give_item", "target": pc["id"], "item": "ring_of_protection"}, tok, "")
+	if r.code != 200 || !strings.Contains(string(r.body), "receives") {
+		t.Fatalf("give %d %s", r.code, r.body)
+	}
+	if r := e.do("POST", "/campaigns/"+id+"/dm", map[string]any{"kind": "end_fight"}, tok, ""); r.code != 409 {
+		t.Fatalf("no fight to end: %d", r.code)
+	}
+	// a second turn, then rewind to before it
+	e.fake.On("interpret", llm.Calls(llm.Call("look", map[string]any{})))
+	e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "I look again"}, tok, "")
+	h := e.do("GET", "/campaigns/"+id+"/dm/history", nil, tok, "").json(t)["snapshots"].([]any)
+	if len(h) != 2 || !strings.Contains(h[0].(map[string]any)["label"].(string), "look again") {
+		t.Fatalf("history %v", h)
+	}
+	seq := h[1].(map[string]any)["seq"]
+	r = e.do("POST", "/campaigns/"+id+"/dm/rewind", map[string]any{"seq": seq}, tok, "")
+	if r.code != 200 {
+		t.Fatalf("rewind %d %s", r.code, r.body)
+	}
+	v := r.json(t)
+	pc = v["party"].([]any)[0].(map[string]any)
+	if pc["xp"].(float64) != 0 || len(pc["inventory"].([]any)) == 0 || gold() != before {
+		t.Fatalf("rewound sheet %v", pc)
+	}
+	for _, it := range pc["inventory"].([]any) {
+		if it.(map[string]any)["rarity"] != nil {
+			t.Fatal("the ring given after the snapshot should be gone")
+		}
+	}
+	lg = e.do("GET", "/campaigns/"+id+"/log?after=0", nil, tok, "").json(t)
+	evs := lg["events"].([]any)
+	last := evs[len(evs)-1].(map[string]any)
+	if last["type"] != "rewound" || len(evs) > nEvents {
+		t.Fatalf("log after rewind: %d events (had %d before the first turn), last %v", len(evs), nEvents, last["type"])
+	}
+	// the player can still act: the token survived
+	e.fake.On("interpret", llm.Calls(llm.Call("look", map[string]any{})))
+	if r := e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "I look once more"}, tok, ""); r.code != 200 {
+		t.Fatalf("act after rewind %d %s", r.code, r.body)
+	}
+	if r := e.do("POST", "/campaigns/"+id+"/dm/rewind", map[string]any{"seq": 99}, tok, ""); r.code != 400 && r.code != 422 {
+		t.Fatalf("unknown snapshot %d", r.code)
+	}
+}

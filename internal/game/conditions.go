@@ -268,6 +268,9 @@ func CharacterSave(r *dice.Roller, c *Character, a Ability, dc int, why string) 
 	if c.SaveProficient(a) {
 		parts = append(parts, RollPart{Label: "Proficiency", Value: ProficiencyBonus(c.Level)})
 	}
+	if c.boons.Saves > 0 {
+		parts = append(parts, RollPart{Label: "Protection", Value: c.boons.Saves})
+	}
 	if why != "concentration" || !c.Conditions.Has(CondInspired) {
 		parts = append(parts, rollBonusDice(r, c, "save")...)
 	}
@@ -293,6 +296,16 @@ func checkDis(cs Conditions) []string {
 
 // EnemySave rolls an enemy's save: d20 + half its attack bonus.
 func EnemySave(r *dice.Roller, e *Enemy, a Ability, dc int, why string) Roll {
+	roll := enemySave(r, e, a, dc, why)
+	if !strings.HasPrefix(why, "being shoved") && !strings.HasPrefix(why, "a grapple") {
+		legendaryResist(e, &roll)
+	}
+	return roll
+}
+
+// enemySave is the bare roll, without legendary resistance (a boss doesn't
+// spend one to shake off an ongoing condition).
+func enemySave(r *dice.Roller, e *Enemy, a Ability, dc int, why string) Roll {
 	ch := r.D20(e.AttackBonus/2, dc)
 	label := fmt.Sprintf("%s %s save", e.Display(), a)
 	if why != "" {
@@ -573,7 +586,7 @@ func endEnemyTurn(r *dice.Roller, e *Enemy) ConditionTick {
 			continue
 		}
 		if condRules[cond.Kind].SaveEnds && cond.SaveDC > 0 {
-			roll := EnemySave(r, e, cond.Save, cond.SaveDC, cond.Kind)
+			roll := enemySave(r, e, cond.Save, cond.SaveDC, cond.Kind)
 			t.Rolls = append(t.Rolls, roll)
 			if roll.Tier.Succeeded() {
 				t.Changes = append(t.Changes, fmt.Sprintf("%s shakes off being %s", e.Display(), cond.Kind))

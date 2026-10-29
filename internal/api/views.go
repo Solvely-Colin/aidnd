@@ -58,6 +58,11 @@ type ItemView struct {
 	Effect   string `json:"effect,omitempty"`
 	Equipped bool   `json:"equipped,omitempty"`
 	ToHit    *int   `json:"to_hit,omitempty"` // weapons on a character sheet
+	Rarity   string `json:"rarity,omitempty"`
+	Magic    string `json:"magic,omitempty"` // what the magic does
+	// Attuned is set on a carried wondrous item: false when three others
+	// already work.
+	Attuned *bool `json:"attuned,omitempty"`
 }
 
 type LocationView struct {
@@ -88,6 +93,39 @@ type EnemyView struct {
 	// Inflicts is the condition its hits can cause; Conditions are on it now.
 	Inflicts   string          `json:"inflicts,omitempty"`
 	Conditions []ConditionView `json:"conditions"`
+	Boss       *BossView       `json:"boss,omitempty"`
+}
+
+// BossView is what the party can see of a boss: its phase, the resistances
+// it has left, and the signature move it is about to unleash.
+type BossView struct {
+	Phase     int    `json:"phase"` // 1-based
+	Phases    int    `json:"phases"`
+	PhaseName string `json:"phase_name"`
+	NextAt    int    `json:"next_at,omitempty"` // HP percent of the next phase
+	Resist    int    `json:"resist"`
+	Attacks   int    `json:"attacks"`
+	Move      string `json:"move"`
+	MoveDice  string `json:"move_dice"`
+	MoveSave  string `json:"move_save"`
+	MoveDC    int    `json:"move_dc"`
+	Charging  string `json:"charging_zone,omitempty"`
+}
+
+func bossView(e *game.Enemy) *BossView {
+	b := e.Boss
+	if b == nil {
+		return nil
+	}
+	v := &BossView{Phase: b.Phase + 1, Phases: len(b.Phases), PhaseName: b.Current().Name, Resist: b.Resist, Attacks: b.Attacks,
+		Move: b.Move.Name, MoveDice: b.Move.Dice, MoveSave: string(b.Move.Save), MoveDC: b.Move.DC}
+	if b.Phase+1 < len(b.Phases) {
+		v.NextAt = b.Phases[b.Phase+1].At
+	}
+	if b.Charging != nil {
+		v.Charging = b.Charging.Zone
+	}
+	return v
 }
 
 type EncounterView struct {
@@ -249,7 +287,12 @@ type CampaignView struct {
 }
 
 func itemView(w *game.World, it *game.Item, c *game.Character, n *game.NPC) ItemView {
-	v := ItemView{ID: it.ID, Key: it.Key, Name: it.Name, Kind: it.Kind, Desc: it.Desc, Value: it.Value, Damage: it.Damage, AC: it.AC, Effect: it.Effect}
+	v := ItemView{ID: it.ID, Key: it.Key, Name: it.Name, Kind: it.Kind, Desc: it.Desc, Value: it.Value, Damage: it.Damage, AC: it.AC, Effect: it.Effect,
+		Rarity: it.Rarity, Magic: game.MagicSummary(it)}
+	if c != nil && it.Kind == game.ItemWondrous && it.Owner.ID == c.ID {
+		on := c.Attuned(it.ID)
+		v.Attuned = &on
+	}
 	if it.Kind == game.ItemWeapon {
 		v.Reach = game.ReachName(game.InferReach(it))
 	}
@@ -471,7 +514,7 @@ func encounterView(w *game.World) *EncounterView {
 	v := &EncounterView{Round: w.Encounter.Round}
 	for _, e := range w.Encounter.Living() {
 		v.Enemies = append(v.Enemies, EnemyView{ID: e.ID, Name: e.Name, Tag: e.Tag, Display: e.Display(), HP: e.HP, MaxHP: e.MaxHP, ZoneID: e.ZoneID, Ranged: e.Ranged,
-			Inflicts: e.Inflicts, Conditions: statusViews(e.Conditions)})
+			Inflicts: e.Inflicts, Conditions: statusViews(e.Conditions), Boss: bossView(e)})
 	}
 	return v
 }

@@ -210,6 +210,7 @@ var enemySchema = obj(map[string]any{
 	"ranged":       boolean("attacks from range"),
 	"inflicts":     enum("optional: a condition its hits force a save against (venom poisons, a charge knocks prone, webs or nets restrain, a dread wail frightens, a flash or spray blinds, a crushing blow stuns; stunned only where danger is 3+). Leave empty for ordinary foes", game.ConditionKinds...),
 	"npc_id":       str("optional: id of an NPC present who turns hostile"),
+	"boss":         obj(map[string]any{"move": str("signature attack, 2-4 words")}, "move"),
 }, "name", "hp", "ac", "attack_bonus", "damage")
 
 var objectiveSchema = obj(map[string]any{
@@ -231,7 +232,7 @@ var questSchema = map[string]any{
 
 func directiveTools() []llm.Tool {
 	return []llm.Tool{
-		tool(DirSpawnEncounter, "Start a fight here (not if one is under way). Enemies are capped by the engine.", obj(map[string]any{
+		tool(DirSpawnEncounter, "Start a fight here (not if one is under way). Enemies are capped by the engine. Give at most one enemy a boss block, only for a named, dangerous leader where danger is 3+: it gets phases and a signature move announced a turn ahead.", obj(map[string]any{
 			"enemies": arr(enemySchema, "1-3 enemy types")}, "enemies")),
 		tool(DirOfferQuest, "An NPC present offers a side quest.", obj(questSchema, "title", "giver_id", "objectives")),
 		tool(DirRevealExit, "Reveal a hidden exit listed in SECRETS.", obj(map[string]any{"exit_id": str("hidden exit id")}, "exit_id")),

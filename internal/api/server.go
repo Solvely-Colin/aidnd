@@ -87,6 +87,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/characters/preview", s.auth(s.handlePreview))
 	mux.HandleFunc("POST /campaigns/{id}/me/choose", s.auth(s.handleChoose))
 	mux.HandleFunc("POST /campaigns/{id}/me/spells", s.auth(s.handleSpells))
+	mux.HandleFunc("GET /campaigns/{id}/dm/history", s.auth(s.handleHistory))
+	mux.HandleFunc("POST /campaigns/{id}/dm/rewind", s.auth(s.handleRewind))
+	mux.HandleFunc("POST /campaigns/{id}/dm", s.auth(s.handleDM))
 	mux.HandleFunc("GET /campaigns/{id}/map", s.auth(s.handleMap))
 	mux.HandleFunc("GET /campaigns/{id}/locations/{lid}", s.auth(s.handleLocation))
 	mux.HandleFunc("GET /campaigns/{id}/npcs/{nid}", s.auth(s.handleNPC))
@@ -347,6 +350,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"abilities": game.Abilities, "standard_array": game.StandardArray, "proficiencies": 2, "kits": kits, "settings": settings,
 		"xp_table": game.XPTable, "max_level": game.MaxLevel, "dcs": []int{5, 10, 15, 20, 25}, "catalog": catalog,
 		"service_mode": s.ServiceMode(), "ruleset": rulesetView(firstNonEmpty(game.NormSetting(r.URL.Query().Get("setting")), game.SettingFantasy)),
+		"magic": magicView(firstNonEmpty(game.NormSetting(r.URL.Query().Get("setting")), game.SettingFantasy)),
 	})
 }
 

@@ -102,7 +102,7 @@ func KitKeys() []string {
 func NewItem(w *World, key string, owner Owner) *Item {
 	def, ok := ItemFor(w.Setting(), key)
 	if !ok {
-		return nil
+		return NewWondrous(w, key, owner) // nil unless a wondrous item or potion
 	}
 	it := &Item{
 		ID: w.NewID("item"), Key: def.Key, Name: def.Name, Kind: def.Kind, Desc: def.Desc,

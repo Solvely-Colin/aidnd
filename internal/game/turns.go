@@ -233,6 +233,8 @@ type EnemySpec struct {
 	// Inflicts is a condition each hit forces a save against: poisoned,
 	// prone, restrained, frightened, blinded, or stunned (danger 3+).
 	Inflicts string `json:"inflicts,omitempty"`
+	// Boss asks for one boss (dangerous places only, one per fight).
+	Boss *BossSpec `json:"boss,omitempty"`
 }
 
 // StartEncounter creates a fight here from specs, capping stat blocks by
@@ -251,8 +253,16 @@ func StartEncounter(w *World, specs []EnemySpec) (*Encounter, []string, error) {
 	caps := CapsFor(danger, w.PartyLevel())
 	var blocks []StatBlock
 	var meta []EnemySpec
+	bossAt := -1
 	for _, s := range specs {
 		n := clamp(s.Count, 1, 4)
+		if s.Boss != nil {
+			if bossAt >= 0 || (danger < 3 && (s.NPCID == "" || s.NPCID != w.Campaign.AntagonistID)) {
+				s.Boss = nil
+			} else {
+				n, bossAt = 1, len(blocks)
+			}
+		}
 		for i := 0; i < n; i++ {
 			blocks = append(blocks, StatBlock{MaxHP: s.HP, AC: s.AC, AttackBonus: s.AttackBonus, Damage: s.Damage, Ranged: s.Ranged, Inflicts: s.Inflicts})
 			meta = append(meta, s)
@@ -269,7 +279,15 @@ func StartEncounter(w *World, specs []EnemySpec) (*Encounter, []string, error) {
 			notes = append(notes, note)
 		}
 	}
-	blocks = BudgetEnemies(blocks, EnemyHPBudget(danger, w.PartyLevel(), len(w.Characters)))
+	budget := EnemyHPBudget(danger, w.PartyLevel(), len(w.Characters))
+	if bossAt >= 0 {
+		// the boss brings its own HP; its followers share a third
+		rest := append(append([]StatBlock{}, blocks[:bossAt]...), blocks[bossAt+1:]...)
+		rest = BudgetEnemies(rest, max(len(rest), budget/3))
+		blocks = append(append(append([]StatBlock{}, rest[:bossAt]...), blocks[bossAt]), rest[bossAt:]...)
+	} else {
+		blocks = BudgetEnemies(blocks, budget)
+	}
 	enc := &Encounter{ID: w.NewID("enc"), LocationID: l.ID, Round: 1}
 	partyZone := partyZone(w)
 	for i, b := range blocks {
@@ -287,6 +305,9 @@ func StartEncounter(w *World, specs []EnemySpec) (*Encounter, []string, error) {
 			want = 2
 		}
 		e.ZoneID = zoneAtDistance(l, partyZone, want)
+		if i == bossAt {
+			makeBoss(w, e, *s.Boss)
+		}
 		enc.Enemies = append(enc.Enemies, e)
 	}
 	TagEnemies(enc.Enemies)
@@ -378,6 +399,8 @@ type EnemyTurn struct {
 	// Reactions are characters' automatic attacks during this enemy's turn
 	// (opportunity attacks as it leaves, readied attacks as it comes close).
 	Reactions []Reaction `json:"reactions,omitempty"`
+	// Saves are characters' saves against a boss's signature move.
+	Saves []Roll `json:"saves,omitempty"`
 }
 
 // enemiesActingNow spreads the enemies over the round: each acts once per
@@ -417,6 +440,7 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 	l := w.Here()
 	var out []EnemyTurn
 	var changes []string
+	w.RefreshMagic()
 	for _, e := range enemiesActingNow(w) {
 		var targets, hidden []*Character
 		for _, c := range w.Party() {
@@ -432,24 +456,33 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 			break
 		}
 		start, canMove := startEnemyTurn(e)
-		var et EnemyTurn
-		if len(targets) == 0 {
-			et = EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "hold", Text: e.Display() + " searches for its hidden foes"}
-		} else {
-			et = enemyAct(w, r, l, e, targets, start, canMove)
+		var ets []EnemyTurn
+		switch {
+		case len(targets) == 0:
+			ets = []EnemyTurn{{EnemyID: e.ID, Enemy: e.Display(), Kind: "hold", Text: e.Display() + " searches for its hidden foes"}}
+		case e.Boss != nil:
+			ets = bossTurn(w, r, l, e, targets, start, canMove)
+		default:
+			ets = []EnemyTurn{enemyAct(w, r, l, e, targets, start, canMove)}
 		}
-		for _, re := range et.Reactions {
-			changes = append(changes, re.Text)
+		if len(ets) == 0 {
+			ets = []EnemyTurn{{EnemyID: e.ID, Enemy: e.Display(), Kind: "hold", Text: e.Display() + " holds position"}}
 		}
 		end := endEnemyTurn(r, e)
-		et.Before, et.After = start.Changes, end.Changes
-		et.Rolls = end.Rolls
+		ets[0].Before = start.Changes
+		ets[len(ets)-1].After, ets[len(ets)-1].Rolls = end.Changes, end.Rolls
 		changes = append(changes, start.Changes...)
-		if et.Kind == "attack" || et.Kind == "move" {
-			changes = append(changes, et.Text)
+		for _, et := range ets {
+			for _, re := range et.Reactions {
+				changes = append(changes, re.Text)
+			}
+			switch et.Kind {
+			case "attack", "move", "telegraph", "signature":
+				changes = append(changes, et.Text)
+			}
 		}
 		changes = append(changes, end.Changes...)
-		out = append(out, et)
+		out = append(out, ets...)
 	}
 	if w.Encounter != nil && len(w.Encounter.Living()) == 0 {
 		changes = append(changes, endEncounter(w)...) // reactions finished them

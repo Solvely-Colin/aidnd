@@ -74,6 +74,8 @@ type Player struct {
 
 // Character is a player character sheet.
 type Character struct {
+	// boons are what carried magic items give (see RefreshMagic).
+	boons      Boons
 	ID         string    `json:"id"`
 	PlayerID   string    `json:"player_id"`
 	Name       string    `json:"name"`
@@ -147,7 +149,7 @@ type Concentration struct {
 func (c *Character) Down() bool { return c.HP <= 0 || c.Dead }
 
 // Mod returns the ability modifier for a.
-func (c *Character) Mod(a Ability) int { return Mod(c.Scores[a]) }
+func (c *Character) Mod(a Ability) int { return Mod(c.Score(a)) }
 
 // IsProficient reports proficiency in a.
 func (c *Character) IsProficient(a Ability) bool {
@@ -334,6 +336,8 @@ type StatBlock struct {
 	// Inflicts is a condition a hit forces a save against (see
 	// NormalizeInflict); "" for none.
 	Inflicts string `json:"inflicts,omitempty"`
+	// Boss makes an NPC fight as a boss (the antagonist always does).
+	AsBoss *BossSpec `json:"as_boss,omitempty"`
 }
 
 // Enemy is a combatant in the current encounter.
@@ -357,6 +361,8 @@ type Enemy struct {
 type EnemyExtra struct {
 	// ReactedRound is the round of its last opportunity attack.
 	ReactedRound int `json:"reacted_round,omitempty"`
+	// Boss is set for a boss: phases, signature move, legendary resistance.
+	Boss *Boss `json:"boss,omitempty"`
 }
 
 // Defeated reports whether the enemy is out of the fight.
@@ -441,6 +447,7 @@ type Item struct {
 	DexCap  int     `json:"dex_cap,omitempty"` // -1 no cap, 0 no dex
 	Effect  string  `json:"effect,omitempty"`  // "heal:2d4+2"
 	Owner   Owner   `json:"owner"`
+	ItemExtra
 }
 
 // Quest statuses.

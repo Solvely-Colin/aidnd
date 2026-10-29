@@ -334,10 +334,16 @@ async function openCampaign(id) {
   render();
 }
 
+function restartFeed() {
+  S.es?.close(); S.es = null;
+  S.events = []; S.lastId = 0; S.open = {}; S.dmHist = null;
+  connect(S.route);
+  refreshView();
+}
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
@@ -352,6 +358,8 @@ function connect(id) {
 let refreshTimer, feedTimer;
 function onEvent(e) {
   if (e.id <= S.lastId) return;
+  // A rewind hides the events since; start the feed again from the top.
+  if (e.type === "rewound" && fresh(e)) { toast(e.data?.text || "The story was rewound."); return restartFeed(); }
   S.lastId = e.id;
   S.events.push(e);
   if (e.type !== "character_created" && e.type !== "player_joined") S.progress = null;
@@ -500,7 +508,7 @@ function rules() {
   if (S.rules?.setting === set) return S.rules;
   if (S._rulesFor !== set) {
     S._rulesFor = set;
-    api("GET", `/meta?setting=${encodeURIComponent(set)}`).then(m => { S.rules = m.ruleset; if (S.draft) renderBuilder(); else if (S.view) render(); }).catch(() => { S._rulesFor = ""; });
+    api("GET", `/meta?setting=${encodeURIComponent(set)}`).then(m => { S.rules = m.ruleset; S.magic = m.magic; if (S.draft) renderBuilder(); else if (S.view) render(); }).catch(() => { S._rulesFor = ""; });
   }
   return null;
 }
@@ -955,6 +963,12 @@ function feedItems(evs) {
             out.push(rollItem(`${e.id}.r${i}.${j}`, isMe(re.character_id) ? "You" : re.character, g, false, [re.text], re.character));
           });
           if (t.kind === "stunned") return;
+          if (t.kind === "telegraph") return out.push({ k: "warn", text: t.text });
+          if (t.kind === "signature") {
+            out.push({ k: "warn", hit: true, text: t.text });
+            (t.saves || []).forEach((s, j) => out.push(rollItem(`${e.id}.g${i}.${j}`, s.by, { d20: s }, false, [], s.by)));
+            return (t.after || []).forEach(c => out.push({ k: "sys", cond: true, text: c }));
+          }
           if (!t.attack?.roll) return (t.after || []).forEach(c => out.push({ k: "sys", cond: true, text: c }));
           const g = { d20: { ...t.attack.roll, kind: "attack", label: t.attack.roll.label || `vs ${t.target || "the party"}` }, dmg: t.attack.damage ? { ...t.attack.damage, kind: "damage" } : null };
           out.push(rollItem(`${e.id}.e${i}`, t.enemy, g, true, t.text ? [t.text] : []));
@@ -964,6 +978,8 @@ function feedItems(evs) {
         if (d.narration) out.push({ k: "narr", text: d.narration });
         break;
       case "conditions": (d.changes || []).forEach(t => out.push({ k: "sys", cond: true, text: t })); break;
+      case "rewound": out.push({ k: "place", name: "Rewound" }); out.push({ k: "sys", text: d.text }); break;
+      case "dm_action": out.push({ k: "dm", text: d.text }); break;
       case "death_save": {
         const name = rollerName(d.roll?.label), c = party.find(p => p.name === name);
         out.push(rollItem(`${e.id}`, c && isMe(c.id) ? "You" : name, { d20: { ...d.roll, label: "Death save" } }, false, [d.line], name));
@@ -1012,6 +1028,8 @@ function itemHTML(it, latest) {
     case "narr": return narrHTML(it, latest);
     case "roll": return rollHTML(it);
     case "quest": return `<div class="ev-quest"><b>${esc(it.label)}</b><span>${esc(it.text)}</span></div>`;
+    case "warn": return `<div class="ev-warn ${it.hit ? "hit" : ""}"><b>${it.hit ? "Signature move" : "Incoming"}</b><span>${esc(it.text)}</span></div>`;
+    case "dm": return `<div class="ev-dm"><b>Table</b><span>${esc(it.text)}</span></div>`;
   }
   return "";
 }
@@ -1179,6 +1197,15 @@ function renderDie() {
 
 // ---- dock
 
+// chargeHTML warns of a boss's signature move: where it lands, and whether
+// you're standing in it.
+function chargeHTML(enc, me) {
+  return enc.enemies.filter(e => e.hp > 0 && e.boss?.charging_zone).map(e => {
+    const here = me && me.zone_id === e.boss.charging_zone;
+    return `<div class="charge ${here ? "here" : ""}"><b>${esc(e.boss.move)}</b><span>${esc(e.display)} hits ${esc(zoneName(e.boss.charging_zone) || "your position")} on its next turn: ${esc(e.boss.move_dice)}, ${esc(e.boss.move_save)} save DC ${e.boss.move_dc} for half.${here ? " You're in it: move out, or Dodge for advantage on the save." : ""}</span></div>`;
+  }).join("");
+}
+
 function renderDock() {
   const v = S.view, el = $("#dock");
   if (!el) return;
@@ -1202,9 +1229,10 @@ function renderDock() {
   const talkN = S.talkTo && (v.location?.npcs || []).find(n => n.id === S.talkTo);
   const kept = $("#say")?.value ?? S.composer;
   el.innerHTML = `<div class="dock-in">
-    ${enc ? `<div class="foes">${enc.enemies.map(e => `<button class="foe-card ${e.hp > 0 ? "" : "dead"}" ${e.hp > 0 ? `data-attack="${esc(e.id)}"` : "disabled"}>
+    ${enc ? `${chargeHTML(enc, me)}<div class="foes">${enc.enemies.map(e => `<button class="foe-card ${e.hp > 0 ? "" : "dead"} ${e.boss ? "boss" : ""}" ${e.hp > 0 ? `data-attack="${esc(e.id)}"` : "disabled"}>
       <span class="top"><b>${esc(e.display)}</b><span class="hp">${Math.max(0, e.hp)}/${e.max_hp}</span></span>
-      <span class="bar3"><i style="width:${Math.max(0, Math.round(100 * e.hp / e.max_hp))}%"></i></span>
+      <span class="bar3">${e.boss?.next_at ? `<em style="left:${e.boss.next_at}%"></em>` : ""}<i style="width:${Math.max(0, Math.round(100 * e.hp / e.max_hp))}%"></i></span>
+      ${e.boss && e.hp > 0 ? `<span class="boss-line"><span>Phase ${e.boss.phase}/${e.boss.phases} · ${esc(e.boss.phase_name)}</span><span title="Legendary resistance: it can turn a failed save into a success">${"◆".repeat(e.boss.resist)}${"◇".repeat(Math.max(0, 3 - e.boss.resist))}</span></span>` : ""}
       ${e.hp > 0 && e.conditions?.length ? `<span class="conds">${e.conditions.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note)}">${esc(k.label)}</span>`).join("")}</span>` : ""}
       <span class="cta">${e.hp <= 0 ? "down" : yours && v.budget?.action !== 0 ? "Tap to attack" : e.ranged ? "ranged" : zoneName(e.zone_id)}</span></button>`).join("")}</div>` : ""}
     ${yours && S.tray ? trayHTML(groups[S.tray]) : ""}
@@ -1253,7 +1281,8 @@ function trays() {
   if (!me) return g;
   for (const n of loc.npcs || []) if (n.alive !== false) g.talk.items.push({ name: n.name, sub: [n.role, zoneName(n.zone_id)].filter(Boolean).join(" · "), talk: n.id });
   for (const z of loc.zones || []) if (z.id !== me.zone_id) {
-    const it = { name: z.name, sub: enc ? (b.move === 0 ? "no move left" : "uses your move") : "nearby", send: `I move to ${z.name}`, hint: { zone_id: z.id } };
+    const danger = enc && v.encounter.enemies.some(e => e.hp > 0 && e.boss?.charging_zone === z.id);
+    const it = { name: z.name, sub: danger ? "the boss's next attack lands here" : enc ? (b.move === 0 ? "no move left" : "uses your move") : "nearby", send: `I move to ${z.name}`, hint: { zone_id: z.id } };
     (enc ? g.move : g.go).items.push(it);
   }
   // "known" and "open" exits can both be walked; a locked one is worth trying.
@@ -1290,7 +1319,7 @@ function trays() {
     g.roll.items.push({ name: `Force the way to ${x.to_name}`, bonus: `Athletics ${signed(skillMod(me, "athletics"))}`, send: `I force the way to ${x.to_name}`, hint: { check: { ability: "STR", skill: "athletics", purpose: "force", exit: x.id } } });
   }
   g.roll.abil = true;
-  for (const i of loc.items || []) if (!enc || b.free !== 0) g.use.items.push({ name: `Take the ${i.name}`, sub: "on the ground", send: `I pick up ${the(i.name)}` });
+  for (const i of loc.items || []) if (!enc || b.free !== 0) g.use.items.push({ name: `Take the ${i.name}`, sub: i.rarity ? `${i.rarity.replace("_", " ")} magic · ${i.magic}` : "on the ground", send: `I pick up ${the(i.name)}` });
   for (const i of me.inventory || []) if (i.kind === "consumable") g.use.items.push({ name: i.name, sub: effectText(i.effect), send: `I use the ${i.name}` });
   if (me.hp < me.max_hp && !enc) g.use.items.push({ name: "Rest a while", sub: "recover", send: "I rest for a while" });
   magicTrays(g, me);
@@ -1435,9 +1464,9 @@ function submit() {
 
 // ---- panels
 
-const ALL_TABS = [["scene", "Scene"], ["journal", "Journal"], ["map", "Map"], ["sheet", "Character"]];
+const ALL_TABS = [["scene", "Scene"], ["journal", "Journal"], ["map", "Map"], ["sheet", "Character"], ["dm", "Table"]];
 // On wide screens the journal and sheets live in the rails.
-const panelTabs = () => stageMode() ? ALL_TABS.filter(([k]) => k === "scene" || k === "map") : ALL_TABS;
+const panelTabs = () => stageMode() ? ALL_TABS.filter(([k]) => k === "scene" || k === "map" || k === "dm") : ALL_TABS;
 
 function openPanel(k) {
   S.panel = k;
@@ -1467,9 +1496,11 @@ function renderPanel() {
   el.innerHTML = `<div class="panel-head">
       ${k === "talk" ? `<h3>Talking</h3>` : `<div class="ptabs" role="tablist">${panelTabs().map(([t, l]) => `<button role="tab" class="${t === k ? "on" : ""}" data-act="panel" data-k="${t}">${l}</button>`).join("")}</div>`}
       <button class="close" data-act="close-panel" aria-label="Close">${ICON.close}</button></div>
-    <div class="panel-body">${({ scene: sceneHTML, talk: () => talkHTML(n), sheet: sheetHTML, journal: journalHTML, map: mapHTML })[k]()}</div>`;
+    <div class="panel-body">${({ scene: sceneHTML, talk: () => talkHTML(n), sheet: sheetHTML, journal: journalHTML, map: mapHTML, dm: dmHTML })[k]()}</div>`;
   el.classList.add("open");
   el.scrollTop = scroll;
+  const on = el.querySelector(".ptabs .on");
+  if (on) { const t = on.parentNode, r = on.getBoundingClientRect(), b = t.getBoundingClientRect(); if (r.right > b.right) t.scrollLeft += r.right - b.right + 4; }
   $("#dimmer").innerHTML = `<div class="scrim-dim" data-act="close-panel"></div>`;
 }
 
@@ -1659,8 +1690,8 @@ function sheetHTML(inRail) {
       ${items.map(i => {
         const on = i.equipped || worn.has(i.id);
         const verb = !own ? "" : i.kind === "consumable" ? "Use" : !on && ["weapon", "armor", "shield"].includes(i.kind) ? "Equip" : "";
-        const note = [on ? (i.kind === "weapon" ? "in hand" : "worn") : "", itemFacts(i)].filter(Boolean).join(" · ");
-        const body = `<span class="nm">${esc(i.name)}${note ? `<small>${esc(note)}</small>` : ""}</span>`;
+        const note = [on ? (i.kind === "weapon" ? "in hand" : "worn") : "", i.attuned === false ? "not attuned: three others already work" : "", itemFacts(i)].filter(Boolean).join(" · ");
+        const body = `<span class="nm">${esc(i.name)}${i.rarity ? ` <em class="rar ${esc(i.rarity)}">${esc(i.rarity.replace("_", " "))}</em>` : ""}${note ? `<small>${esc(note)}</small>` : ""}${i.magic ? `<small class="magic">${esc(i.magic)}</small>` : ""}</span>`;
         return verb ? `<button class="row-line" data-send="I ${verb.toLowerCase()} the ${esc(i.name)}">${body}<span class="verb">${verb}</span></button>` : `<div class="row-line">${body}</div>`;
       }).join("") || `<span class="empty-line">Nothing.</span>`}
     </section>
@@ -1717,6 +1748,69 @@ function sheetPick(ds) {
     else { if (same.length >= (s.level === 0 ? b.prepare.cantrips : b.prepare.prepared)) sp.splice(sp.indexOf(same[0]), 1); sp.push(s.key); }
   }
   stageMode() ? renderRails() : renderPanel();
+}
+
+// ---- DM console
+//
+// Table-side controls any seated player can use. Pages are listed in
+// DM_PAGES so more can be added; each change goes through the engine and
+// shows in everyone's feed.
+
+const DM_PAGES = [["history", "Rewind"], ["fight", "Fight"], ["party", "Party"], ["items", "Give item"], ["rules", "Rules"]];
+
+function loadHistory() {
+  api("GET", `/campaigns/${S.route}/dm/history`).then(r => { S.dmHist = r.snapshots; refreshJournal(); }).catch(er => toast(er.message));
+}
+
+function dmHTML() {
+  const v = S.view, page = S.dmPage || "history";
+  if (!v.you?.joined) return `<p class="empty-line">Take a seat to use the table controls.</p>`;
+  let body = "";
+  if (page === "history") {
+    if (!S.dmHist) { loadHistory(); body = `<p class="empty-line"><span class="spinner"></span></p>`; }
+    else body = `<p class="small-note" style="margin:0 0 6px">Put the story back to just before a turn. Everything after it is undone for everyone: rolls, damage, loot and narration. The last 30 turns are kept.</p>
+      ${S.dmHist.map(h => `<div class="row-line"><span class="nm">${esc(h.label)}<small>turn ${h.turn} · ${ago(h.created_at)}</small></span>
+        ${S.dmConfirm === h.seq ? `<span class="dm-confirm"><button class="link" data-act="dm-cancel">Keep</button><button class="btn danger" data-act="dm-rewind" data-seq="${h.seq}">Rewind</button></span>`
+          : `<button class="verb" data-act="dm-ask" data-seq="${h.seq}">Rewind to here</button>`}</div>`).join("") || `<p class="empty-line">No turns played yet.</p>`}`;
+  } else if (page === "fight") {
+    const enc = v.encounter;
+    body = enc ? `<p class="small-note" style="margin:0 0 10px">${enc.enemies.filter(e => e.hp > 0).map(e => esc(e.display)).join(", ")} still stand${enc.enemies.filter(e => e.hp > 0).length === 1 ? "s" : ""}.</p>
+      <button class="btn" data-act="dm" data-kind="end_fight">End the fight as won</button><p class="small-note">The foes yield or flee; the party gets the XP and loot.</p>`
+      : `<p class="empty-line">No fight under way.</p>`;
+  } else if (page === "party") {
+    body = `<button class="btn" data-act="dm" data-kind="heal_party">Heal everyone to full</button><p class="small-note">Wakes the fallen and clears conditions outside a fight. The dead stay dead.</p>
+      <div class="dm-row"><label class="field"><span>Award XP to everyone</span><input class="under" id="dm-xp" type="number" min="1" max="3000" value="100"></label><button class="btn" data-act="dm" data-kind="award_xp">Award</button></div>`;
+  } else if (page === "items") {
+    const M = S.magic;
+    if (!M) { rules(); body = `<p class="empty-line"><span class="spinner"></span></p>`; }
+    else {
+      const to = v.party.find(c => c.id === S.dmTo) || mine() || v.party[0];
+      S.dmTo = to?.id;
+      const gear = (to?.inventory || []).filter(i => (i.kind === "weapon" || i.kind === "armor" || i.kind === "shield") && !i.rarity && i.key);
+      const row = (attrs, name, rar, desc) => `<button class="row-line" ${attrs}><span class="nm">${esc(name)} <em class="rar ${esc(rar)}">${esc(rar.replace("_", " "))}</em>${desc ? `<small>${esc(desc)}</small>` : ""}</span><span class="verb">Give</span></button>`;
+      body = `<span class="mono-k">To</span>${chipsHTML(v.party, c => c.id === S.dmTo, c => `data-dmto="${esc(c.id)}"`, c => esc(firstName(c.name)))}
+        <section><span class="mono-k">Wondrous items and potions</span>${M.wondrous.map(w => row(`data-act="dm-give" data-item="${esc(w.key)}"`, w.name, w.rarity, w.desc)).join("")}</section>
+        ${gear.length ? `<section><span class="mono-k">Enchant what ${esc(firstName(to.name))} carries</span>${gear.flatMap(g => M.templates.filter(t => t.for === (g.kind === "weapon" ? "weapon" : "armor")).map(t =>
+          row(`data-act="dm-give" data-item="${esc(g.key)}" data-template="${esc(t.key)}"`, t.name.replace("%s", g.name), t.rarity, ""))).join("")}</section>` : ""}`;
+    }
+  } else if (page === "rules") {
+    const story = v.lethality === "story";
+    body = `<div class="row-line"><span class="nm">${story ? "Death is off" : "Death is on"}<small>${story ? "three failed death saves leave a character stable" : "three failed death saves kill"}</small></span>
+      <button class="verb" data-act="dm" data-kind="lethality" data-value="${story ? "standard" : "story"}">${story ? "Turn death on" : "Turn death off"}</button></div>`;
+  }
+  return `<div class="tabs dm-tabs">${DM_PAGES.map(([k, l]) => `<button class="${k === page ? "on" : ""}" data-act="dm-page" data-k="${k}">${l}</button>`).join("")}</div><div class="dm-body">${body}</div>`;
+}
+
+async function dmAct(ds, t) {
+  const body = { kind: ds.kind };
+  if (ds.kind === "award_xp") body.amount = +($("#dm-xp")?.value || 0);
+  if (ds.value) body.value = ds.value;
+  if (ds.item) { body.kind = "give_item"; body.target = S.dmTo; body.item = ds.item; if (ds.template) body.template = ds.template; }
+  t.disabled = true;
+  try {
+    const r = await api("POST", `/campaigns/${S.route}/dm`, body);
+    toast(r.text.replace(/^.*?\(DM console\): /, ""));
+  } finally { await refreshView(); refreshJournal(); }
 }
 
 // journal. Quests, people, places and clues come from the world record on
@@ -1892,13 +1986,14 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send]");
+  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto]");
   if (!t || t.disabled) return;
   const ds = t.dataset, act = ds.act;
   if (ds.open) return go(`#/c/${ds.open}`);
   if (ds.premise) { $("#premise").value = ds.premise[0].toUpperCase() + ds.premise.slice(1); return; }
   if (ds.era != null && !act) { S.era = ds.era; $("#eras").outerHTML = erasHTML(); return; }
   if (ds.lethal) { S.lethality = ds.lethal; $("#death").outerHTML = deathHTML(); return; }
+  if (ds.dmto) { S.dmTo = ds.dmto; return refreshJournal(); }
   if (builderClick(ds)) return;
   if (ds.spick || ds.sspell) return sheetPick(ds);
   if (ds.swap) {
@@ -2058,6 +2153,15 @@ document.addEventListener("click", async e => {
         await api("POST", `/campaigns/${S.route}/me/spells`, { spells: S._prep });
         S.prepFor = "";
         await refreshView(); return refreshJournal();
+      case "dm-page": S.dmPage = ds.k; S.dmConfirm = null; if (ds.k === "history") S.dmHist = null; return refreshJournal();
+      case "dm-ask": S.dmConfirm = +ds.seq; return refreshJournal();
+      case "dm-cancel": S.dmConfirm = null; return refreshJournal();
+      case "dm-rewind":
+        t.disabled = true;
+        await api("POST", `/campaigns/${S.route}/dm/rewind`, { seq: +ds.seq });
+        S.dmConfirm = null;
+        return restartFeed();
+      case "dm": case "dm-give": return dmAct(ds, t);
       case "jtab": J.tab = ds.k; J.q = ""; J.editing = ""; return refreshJournal();
       case "note-edit": J.editing = ds.id; refreshJournal(); return $("#n-edit")?.focus();
       case "note-cancel": J.editing = ""; return refreshJournal();

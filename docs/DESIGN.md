@@ -145,6 +145,41 @@ Engine state on characters and enemies (`Conditions`), never set by the model di
 - **Old sheets** (no `class_key`) play as the class their kit maps to with
   their old proficient abilities as saves and their old HP.
 
+## Wave 3: bosses, magic items, the DM console (2026-10-29)
+
+- **Bosses.** One per fight, when the GM asks for it at danger 3+ or the
+  enemy is the antagonist (or an NPC whose stats say `as_boss`). A boss
+  gets 1.5x the fight's HP budget, near-cap AC and attack, 2-3 attacks a
+  turn, and legendary resistance (1, or 2 in its lair) that turns a failed
+  save into a success; grapples, shoves and its ongoing condition saves never
+  spend one. The other enemies share a third of the budget.
+- **Phases** at 100%, 50% and 25% HP: Enraged adds an attack and +2 damage,
+  Desperate adds another and summons minions. Entering a phase shakes off
+  prone, frightened and restrained. `bossPhase` runs from `hurtEnemy`, so
+  every damage path triggers it.
+- **Telegraphed signature move.** The boss announces it on the most crowded
+  zone, then lands it on its next turn: (2+danger)d6, DEX save for half,
+  prone at danger 3+. The table gets a round to move out or Dodge (dodging
+  gives advantage on DEX saves). Two-turn cooldown after it lands.
+- **Magic items** have five rarities, common to legendary, named per era.
+  Weapon and armor templates (+1 to +3, flame, radiance) wrap any base
+  item; wondrous items (protection, ability-setting, spell focus,
+  regeneration) need attunement, three at most. `RefreshMagic` recomputes
+  each sheet's boons on load and at turn boundaries; nothing is stored twice.
+- **Loot** is rolled by the engine when a fight ends, seeded by campaign,
+  encounter and round so a dry run and the real turn agree. Gold is split;
+  a boss always drops a magic item scaled by lair, danger and party level;
+  other fights sometimes drop potions or an uncommon item. Drops go on the
+  ground for players to take.
+- **DM console ("Table" tab).** Any seated player can use it; every action
+  is an engine change plus a `dm_action` event, so the table sees who did
+  it. Pages come from `DM_PAGES` in the UI so more can be added.
+- **Rewind.** A snapshot of the world is saved before each turn (30 kept).
+  `GM.Rewind` is the only entry point, so it can later be scoped to one
+  group's scene. It restores the world, keeps the current seats and tokens,
+  marks later events `undone` (hidden from feed and model), and drops later
+  snapshots.
+
 ## Changes from the live play-test (deepseek-v4.1-flash)
 
 - Quests stay completable whatever the author names: an obtain/deliver item that exists

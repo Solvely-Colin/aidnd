@@ -131,6 +131,9 @@ they/them, and drafts fill it from the concept.
 | `POST /campaigns/{id}/stream-token` | any caller | `{token, expires_at}` for the event stream. |
 | `GET /campaigns/{id}/events` | see SSE | Server-sent events. |
 | `GET /campaigns/{id}/log?after=&limit=` | any caller | Same events as JSON pages: `{events, last_id}`. |
+| `GET /campaigns/{id}/dm/history` | joined player | DM console: `{snapshots: [{seq, event_id, turn, label, created_at}]}`, newest first. The last 30 turns are kept. `/meta` carries `magic`: the item templates, wondrous items and console actions. |
+| `POST /campaigns/{id}/dm/rewind` | joined player | `{seq}` puts the whole campaign back to just before that turn → campaign view. Events since are hidden from the log and the stream replay; a `rewound` event is sent so clients reload. 400 when the turn is no longer kept. |
+| `POST /campaigns/{id}/dm` | joined player | `{kind, amount?, target?, item?, template?, value?}` → `{text, campaign}`. `kind` is `end_fight`, `heal_party`, `award_xp` (`amount` 1-3000), `give_item` (`target` character, `item` a catalog or wondrous key, optional `template` to make it magic gear) or `lethality` (`value` standard or story). Each sends a `dm_action` event. |
 
 ### Journal
 
@@ -387,6 +390,8 @@ data: {"id":42,"campaign_id":"c_...","type":"narration","data":{...},"created_at
 | `conditions` | `{changes, rolls, lost_turn}`: conditions ticking at a turn boundary (saves, wearing off, standing up, a stunned turn passing) |
 | `quest_updated` | `{quest_id, title, objective_id?, text, status}` |
 | `campaign_ended` | `{status: "completed" \| "failed"}` |
+| `rewound` | `{by, seq, to_event, label, text}`: the story was put back; drop events after `to_event` and reload |
+| `dm_action` | `{by, kind, changes, text}` |
 
 A typical turn is `player_action`, `action_resolved`, `narration`, then
 either `turn_budget` (same player continues) or `enemy_turns` (in combat)
