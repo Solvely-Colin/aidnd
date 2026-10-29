@@ -23,6 +23,7 @@ const ICON = {
   fight: svg(`<path d="M14.5 4H20v5.5L9 20.5 3.5 15z"/><path d="M5 13l6 6M3 21l3-3"/>`),
   use: svg(`<path d="M6 8h12l-1 12H7z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>`),
   end: svg(`<path d="M6 6h12v12H6z"/>`),
+  d20: svg(`<path d="M12 2.5 20.5 7.5v9L12 21.5 3.5 16.5v-9z"/><path d="M12 2.5 17 15H7zM7 15l-3.5-7.5M17 15l3.5-7.5M7 15l5 6.5 5-6.5"/>`, 1.6),
   expand: svg(`<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>`),
   heart: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z"/></svg>`,
   logo: `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13z" fill="var(--accent)"/><path d="M16 8 23 20H9z" fill="var(--bg)"/></svg>`,
@@ -62,6 +63,7 @@ const S = {
   sheet: "",         // character whose sheet is shown ("" = yours)
   sheetOpen: false,  // wide: full sheet over the story
   hint: {},
+  landed: new Set(), // roll keys that have already tumbled
   composer: "",
 };
 
@@ -596,6 +598,7 @@ function renderFeed(force) {
   const lastNarr = items.map(it => it.narr ? 1 : 0).lastIndexOf(1);
   feed.innerHTML = items.map((it, i) => it.kind === "turn" ? turnHTML(it, i === lastNarr) : eventHTML(it.e, i === lastNarr)).join("") + pendingHTML();
   if (stick) requestAnimationFrame(toBottom);
+  requestAnimationFrame(tumble);
 }
 
 // currentEvents drops character sheets a player later replaced in the
@@ -629,7 +632,7 @@ function turnHTML(t, latest) {
   const a = t.act.data || {}, me = mine(), you = me && a.character_id === me.id;
   const r = t.resolved?.data || {}, n = t.narr?.data || {};
   const c = S.view?.party?.find(p => p.id === a.character_id);
-  const rolls = (r.steps || []).flatMap(s => s.rolls || []).map(rollHTML).join("");
+  const rolls = rollsHTML((r.steps || []).flatMap(s => s.rolls || []), a.character_id, t.resolved);
   const notes = [];
   (r.steps || []).forEach(s => { if (s.error) notes.push(`<div class="ev-note bad">${esc(s.error)}</div>`); });
   (r.skipped || []).forEach(s => notes.push(`<div class="ev-note">Not this turn: ${esc(s.error)}</div>`));
@@ -651,7 +654,7 @@ function pendingHTML() {
   const text = p?.text || S.pendingText || "";
   const who = p?.character_id ? S.view?.party?.find(c => c.id === p.character_id) : me;
   const you = who && me && who.id === me.id;
-  const rolls = (p?.rolls || []).map(rollHTML).join("");
+  const rolls = rollsHTML(p?.rolls || [], p?.character_id || "", null);
   const stage = p?.stage === "narrating" ? "Describing what happens…" : "Reading what you do…";
   return `<article class="turn-card pending ${you ? "you" : ""}">
     ${text ? `<header><span class="avatar sm">${esc((who?.name || "?")[0])}${portrait(who)}</span><div><span class="by">${esc(you ? "You" : who?.name || "")}</span><p>${esc(text)}</p></div></header>` : ""}
@@ -671,15 +674,108 @@ function isThinking() {
   return false;
 }
 
-function rollHTML(r) {
-  if (r.kind === "encounter") return "";
-  const tier = r.tier || "";
-  if (r.kind === "damage" || r.kind === "heal") {
-    return `<div class="die-card ${r.kind}" title="${esc(r.expr)} [${(r.dice || []).join(", ")}]"><span class="face">${r.total}</span><span class="what">${esc(r.label || r.kind)}<small>${esc(r.expr || "")}</small></span></div>`;
+// rolls
+//
+// Every roll is the engine's: the card only shows its working. A d20 roll
+// reads as a sum (die + each named part = total) against AC or DC, with a
+// track showing the margin, and the damage it caused folds into the same
+// card. Rolls that arrive live tumble once before they land.
+
+const FRESH_SECS = 30;
+const OUTCOME = {
+  attack: { critical_success: "Critical hit", success: "Hit", failure: "Miss", critical_failure: "Fumble" },
+  check: { critical_success: "Critical", success: "Pass", failure: "Fail", critical_failure: "Fumble" },
+};
+const SHORT = { Proficiency: "Prof", "Thieves' tools": "Tools", "Attack bonus": "Bonus" };
+
+// rollGroups pairs each attack with the damage roll that follows it.
+function rollGroups(rolls) {
+  const out = [];
+  for (const r of rolls) {
+    if (r.kind === "encounter") continue;
+    const last = out[out.length - 1];
+    if (r.kind === "damage" && last && last.d20.kind === "attack" && !last.dmg) { last.dmg = r; continue; }
+    out.push(r.kind === "damage" || r.kind === "heal" ? { d20: null, dmg: r } : { d20: r });
   }
-  const word = { critical_success: "Critical!", success: "Success", failure: "Miss", critical_failure: "Fumble" }[tier] || "";
-  return `<div class="die-card ${esc(tier)}" title="d20 ${r.natural} ${signed(r.mod)} = ${r.total} vs ${r.target}"><span class="face d20">${r.total}</span>
-    <span class="what">${esc(r.label)}<small>d20 ${r.natural} ${signed(r.mod)} vs ${r.target}${word ? ` · ${word}` : ""}</small></span></div>`;
+  return out;
+}
+
+function diceRow(r, verb) {
+  const faces = (r.dice || []).map(f => `<i>${f}</i>`).join("");
+  const mod = r.mod ? `<span class="op">${r.mod > 0 ? "+" : "−"}</span><span class="t">${Math.abs(r.mod)}</span>` : "";
+  return `<div class="dmg ${r.kind}"><span class="dmg-k">${esc(r.expr || "")}</span><span class="pips">${faces}</span>${mod}<span class="op">=</span><b>${r.total}</b><span class="dmg-w">${verb}${r.crit ? " · dice doubled" : ""}</span></div>`;
+}
+
+function rollHTML(g, opts = {}) {
+  const fresh = opts.fresh ? "fresh" : "", foe = opts.foe ? "foe" : "", ev = opts.fresh ? ` data-ev="${esc(opts.ev)}"` : "";
+  const r = g.d20;
+  if (!r) {
+    const d = g.dmg;
+    return `<div class="roll solo ${d.kind} ${fresh}"${ev}><div class="roll-body"><div class="roll-head"><span class="roll-label">${esc(d.label)}</span></div>${diceRow(d, d.kind === "heal" ? "healed" : "damage")}</div></div>`;
+  }
+  const tier = r.tier || "";
+  const words = OUTCOME[r.kind === "attack" ? "attack" : "check"];
+  const ok = tier === "success" || tier === "critical_success";
+  const margin = r.total - r.target;
+  const parts = r.parts?.length ? r.parts : (r.mod ? [{ label: "Mod", value: r.mod }] : []);
+  const sum = [`<span class="t nat" data-face>${r.natural}</span>`]
+    .concat(parts.map(p => `<span class="op">${p.value < 0 ? "−" : "+"}</span><span class="t"><small>${esc(SHORT[p.label] || p.label)}</small>${Math.abs(p.value)}</span>`))
+    .concat([`<span class="op">=</span><span class="t total">${r.total}</span>`]).join("");
+  const against = r.against || (r.kind === "attack" ? "AC" : "DC");
+  // track: 0..scale, the target as a notch, the total as the fill
+  const scale = Math.max(25, r.target + 5, r.total + 1);
+  const pct = n => Math.max(0, Math.min(100, n / scale * 100)).toFixed(1);
+  const crit = tier === "critical_success" ? "nat 20" : tier === "critical_failure" ? "nat 1" : "";
+  const by = crit || (ok ? (margin ? `by ${margin}` : "exactly") : `short ${-margin}`);
+  return `<div class="roll ${esc(r.kind)} ${esc(tier)} ${ok ? "ok" : "no"} ${foe} ${fresh}"${ev} title="d20 ${r.natural} ${signed(r.mod)} = ${r.total} vs ${against} ${r.target}">
+    <div class="die"><svg viewBox="0 0 40 44" aria-hidden="true"><path d="M20 1.5 38 11.5v21L20 42.5 2 32.5v-21z"/><path class="facet" d="M20 1.5 31 27H9zM9 27 2 11.5M31 27l7-15.5M9 27 20 42.5 31 27"/></svg><b data-face>${r.natural}</b></div>
+    <div class="roll-body">
+      <div class="roll-head"><span class="roll-label">${esc(r.label)}</span><span class="stamp">${words[tier] || ""}</span></div>
+      <div class="sum">${sum}<span class="vs">vs ${against} <b>${r.target}</b>${r.cover ? ` <small>+${r.cover} cover</small>` : ""}</span></div>
+      <div class="meter"><div class="track" aria-hidden="true"><i class="fill" style="--w:${pct(r.total)}%"></i><i class="need" style="left:${pct(r.target)}%"></i></div><span class="margin">${by}</span></div>
+      ${g.dmg ? diceRow(g.dmg, opts.foe ? `damage to ${esc(opts.target || "")}`.trim() : "damage") : ""}
+    </div></div>`;
+}
+
+// A roll set is keyed by who rolled and what came up, so the dice shown
+// while the game master is still writing and the same dice in the finished
+// turn tumble only once between them.
+function rollKey(rolls, who) { return who + ":" + rolls.map(r => `${r.kind}${r.natural ?? ""}/${r.total}`).join(","); }
+
+function isFresh(e, key) { return (!e || (e.created_at && Date.now() / 1000 - e.created_at < FRESH_SECS)) && !S.landed.has(key); }
+
+// rollsHTML renders one player's rolls; e is the event that carries them
+// (null for the action still in flight).
+function rollsHTML(rolls, who, e) {
+  const key = rollKey(rolls, who), fresh = isFresh(e, key);
+  return rollGroups(rolls).map(g => rollHTML(g, { fresh, ev: key })).join("");
+}
+
+// tumble spins the die faces of fresh rolls, then lands them. A roll counts
+// as landed only once its spin ends, so a re-render mid-spin spins again
+// rather than skipping straight to the result.
+function tumble() {
+  const cards = [...document.querySelectorAll(".roll.fresh:not(.rolling)")];
+  if (!cards.length) return;
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  cards.forEach((card, i) => {
+    card.classList.add("rolling");
+    const faces = [...card.querySelectorAll("[data-face]")], real = faces.map(f => f.textContent);
+    const land = () => {
+      faces.forEach((f, j) => f.textContent = real[j]);
+      card.classList.remove("fresh", "rolling"); card.classList.add("landed");
+      S.landed.add(card.dataset.ev);
+    };
+    if (still || !faces.length) return land();
+    const until = performance.now() + 650 + i * 280;
+    const spin = () => {
+      if (performance.now() >= until) return land();
+      const n = 1 + Math.floor(Math.random() * 20);
+      faces.forEach(f => f.textContent = n);
+      setTimeout(spin, 55);
+    };
+    spin();
+  });
 }
 
 function eventHTML(e, latest) {
@@ -691,7 +787,7 @@ function eventHTML(e, latest) {
     }
     case "action_resolved": {
       let h = "";
-      const rolls = (d.steps || []).flatMap(s => s.rolls || []).map(rollHTML).join("");
+      const rolls = rollsHTML((d.steps || []).flatMap(s => s.rolls || []), d.character_id, e);
       if (rolls) h += `<div class="rolls">${rolls}</div>`;
       const notes = [];
       (d.steps || []).forEach(s => { if (s.error) notes.push(`<div class="ev-note bad">${esc(s.error)}</div>`); });
@@ -704,7 +800,11 @@ function eventHTML(e, latest) {
       if (d.skip && !d.text) return "";
       return `<div class="narr-wrap"><p class="ev-narr ${d.quick ? "quick" : ""} ${d.opening ? "opening" : ""} ${latest ? "latest" : ""}">${esc(d.text)}</p>${S.view?.you?.joined ? `<button class="jot" data-act="jot" data-text="${esc(d.text)}" title="Copy to your notes" aria-label="Copy to your notes">${ICON.plus}</button>` : ""}</div>`;
     case "enemy_turns": {
-      const rolls = (d.turns || []).map(t => t.attack?.roll ? rollHTML({ ...t.attack.roll, label: t.attack.roll.label || t.enemy }) : "").join("");
+      const key = "foe:" + e.id, fresh = isFresh(e, key);
+      const rolls = (d.turns || []).filter(t => t.attack?.roll).map(t => rollHTML({
+        d20: { ...t.attack.roll, kind: "attack", label: t.attack.roll.label || t.enemy },
+        dmg: t.attack.damage ? { ...t.attack.damage, kind: "damage", crit: t.attack.crit } : null,
+      }, { fresh, ev: key, foe: true, target: t.target })).join("");
       return `${rolls ? `<div class="rolls foe">${rolls}</div>` : ""}${d.narration ? `<p class="ev-narr">${esc(d.narration)}</p>` : ""}`;
     }
     case "quest_updated": return `<div class="ev-quest"><span>Quest</span>${esc(d.text || d.title)}</div>`;
@@ -718,9 +818,50 @@ function eventHTML(e, latest) {
 
 // dock: grouped actions above the free-text box
 
+// checkMod mirrors the engine's CheckMod so the tray can show the bonus
+// before the roll; the engine still rolls and adds it.
+function checkMod(me, a) {
+  return (me.modifiers?.[a] ?? 0) + ((me.proficient || []).includes(a) ? me.proficiency_bonus || 0 : 0);
+}
+
+// rollOptions: checks a player can call for. Search and locks are rolled
+// exactly as picked; an ability check keeps the ability and lets the game
+// master set the DC from what the player writes.
+function rollOptions(me, loc) {
+  if (!me) return [];
+  const o = [], tools = (me.inventory || []).some(i => i.key === "thieves_tools");
+  const opt = (label, sub, ab, extra, text, check) => o.push({ label, sub, ab, mod: checkMod(me, ab) + extra, text, hint: { check } });
+  opt("Search for hidden ways", "", "WIS", 0, "I search the area for hidden ways", { ability: "WIS", purpose: "search" });
+  for (const x of loc.exits || []) {
+    if (x.state !== "locked" || x.sealed) continue;
+    opt(`Pick the lock`, `to ${x.to_name}${tools ? " · tools +2" : ""}`, "DEX", tools ? 2 : 0, `I pick the lock on the way to ${x.to_name}`, { ability: "DEX", purpose: "unlock", exit: x.id });
+    opt(`Force it open`, `to ${x.to_name}`, "STR", 0, `I force the way to ${x.to_name}`, { ability: "STR", purpose: "force", exit: x.id });
+  }
+  for (const a of ABIL) o.push({ ability: true, label: a, ab: a, mod: checkMod(me, a), text: "I try to ", hint: { check: { ability: a, purpose: "other" } } });
+  return o;
+}
+
+function rollTrayHTML(opts) {
+  const named = opts.map((o, i) => [o, i]).filter(([o]) => !o.ability), abil = opts.map((o, i) => [o, i]).filter(([o]) => o.ability);
+  return `<div class="tray roll-tray">
+    ${named.map(([o, i]) => `<button class="opt" data-opt="${i}"><b>${esc(o.label)}${o.sub ? ` <em>${esc(o.sub)}</em>` : ""}</b><span class="bonus"><small>${o.ab}</small>${signed(o.mod)}</span></button>`).join("")}
+    <p class="tray-k">Any other check · say what you try, the game master sets the DC</p>
+    <div class="abil-strip">${abil.map(([o, i]) => `<button class="abil" data-opt="${i}"><small>${o.label}</small><b>${signed(o.mod)}</b></button>`).join("")}</div>
+  </div>`;
+}
+
+function pendingCheckHTML() {
+  const c = S.hint?.check, me = mine();
+  if (!c || !me) return "";
+  const what = { search: "Search", unlock: "Lock pick", force: "Force", other: `${ABIL_NAME[c.ability] || c.ability} check` }[c.purpose] || "Check";
+  const tools = c.purpose === "unlock" && (me.inventory || []).some(i => i.key === "thieves_tools") ? 2 : 0;
+  return `<div class="pending-roll"><span class="d20-mini">d20</span><b>${esc(what)}</b><span class="bonus">${esc(c.ability)} ${signed(checkMod(me, c.ability) + tools)}</span>
+    <span class="grow muted">${c.purpose === "other" ? "say what you try" : "rolled when you send"}</span><button class="x" data-act="clear-check" aria-label="Drop the check">${ICON.close}</button></div>`;
+}
+
 function actionGroups() {
   const v = S.view, loc = v.location || {}, me = mine(), enc = !!v.encounter;
-  const g = { look: [], talk: [], go: [], fight: [], use: [] };
+  const g = { look: [], talk: [], go: [], fight: [], use: [], roll: rollOptions(me, loc) };
   if (!enc) g.look.push({ label: "Look around", text: "I look around carefully" });
   for (const n of loc.npcs || []) if (n.alive !== false && !enc) g.talk.push({ label: n.name, sub: n.role, text: `I talk to ${n.name}: `, hint: { target_id: n.id } });
   // "known" and "open" exits can both be walked; a locked one is worth trying.
@@ -759,8 +900,9 @@ function renderDock() {
     ${solo && yours ? (spent ? `<div class="turn"><span class="grow">Action used. You can still move, or go on.</span></div>` : "") : `<div class="turn">${yours
       ? `<span class="you">Your turn</span><span class="grow"></span>${pip("Action", b.action)}${pip("Move", b.move)}${b.free === -1 ? "" : pip("Free", b.free)}`
       : `<span class="grow">${v.active ? `Waiting for <b>${esc(v.active.name)}</b>` : ""}</span>${v.you?.joined && idle > 120 ? `<button class="btn small" data-act="skip">Skip their turn</button>` : ""}`}</div>`}
-    ${S.tray ? `<div class="tray">${groups[S.tray].map((o, i) => `<button class="opt" data-opt="${i}"><b>${esc(o.label)}</b>${o.sub ? `<span>${esc(o.sub)}</span>` : ""}</button>`).join("")}</div>` : ""}
-    <div class="acts">${btn("look", "Look", ICON.look)}${btn("talk", "Talk", ICON.talk)}${btn("go", "Go", ICON.go)}${btn("fight", "Fight", ICON.fight)}${btn("use", "Use", ICON.use)}
+    ${S.tray === "roll" ? rollTrayHTML(groups.roll) : S.tray ? `<div class="tray">${groups[S.tray].map((o, i) => `<button class="opt" data-opt="${i}"><b>${esc(o.label)}</b>${o.sub ? `<span>${esc(o.sub)}</span>` : ""}</button>`).join("")}</div>` : ""}
+    ${yours ? pendingCheckHTML() : ""}
+    <div class="acts">${btn("look", "Look", ICON.look)}${btn("talk", "Talk", ICON.talk)}${btn("go", "Go", ICON.go)}${btn("fight", "Fight", ICON.fight)}${btn("roll", "Roll", ICON.d20)}${btn("use", "Use", ICON.use)}
       ${yours && (!solo || spent) ? `<button class="act" data-act="end-turn">${ICON.end}<span>${solo ? "Go on" : "End"}</span></button>` : ""}</div>
     <form class="say" id="say-form">
       <textarea id="say" rows="1" placeholder="${yours ? "Or say exactly what you do…" : "Wait for your turn…"}" ${yours && !S.sending ? "" : "disabled"} enterkeyhint="send">${esc(kept)}</textarea>
@@ -780,8 +922,8 @@ function fill(text, hint = {}) {
   const ta = $("#say");
   if (!ta || ta.disabled) return toast("It is not your turn yet.");
   S.hint = hint;
-  ta.value = text; S.composer = text; autosize(ta);
-  if (S.tray) { S.tray = ""; renderDock(); }
+  ta.value = text; S.composer = text; S.tray = "";
+  renderDock();
   const t = $("#say"); t.focus(); t.setSelectionRange(t.value.length, t.value.length);
 }
 
@@ -1291,6 +1433,7 @@ document.addEventListener("click", async e => {
         t.disabled = true; t.innerHTML = `<span class="spinner"></span> Setting the scene…`;
         await api("POST", `/campaigns/${S.route}/start`);
         return refreshView();
+      case "clear-check": S.hint = {}; return renderDock();
       case "end-turn": return api("POST", `/campaigns/${S.route}/skip`, {});
       case "skip": return api("POST", `/campaigns/${S.route}/skip`, {});
     }

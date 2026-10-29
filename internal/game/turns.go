@@ -410,8 +410,9 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 				sort.SliceStable(inReach, func(i, j int) bool { return inReach[i].HP < inReach[j].HP })
 				t = inReach[0]
 			}
-			ac := ArmorClass(w, t) + CoverBonus(l, e.ZoneID, t.ZoneID)
-			out1 := Attack(r, fmt.Sprintf("%s attacks %s", e.Display(), t.Name), e.AttackBonus, ac, e.Damage)
+			cover := CoverBonus(l, e.ZoneID, t.ZoneID)
+			out1 := Attack(r, fmt.Sprintf("%s attacks %s", e.Display(), t.Name), e.AttackBonus, ArmorClass(w, t)+cover, e.Damage)
+			out1.Roll.Parts, out1.Roll.Cover = []RollPart{{Label: "Attack bonus", Value: e.AttackBonus}}, cover
 			et := EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "attack", TargetID: t.ID, Target: t.Name, Attack: &out1}
 			if out1.Hit {
 				dmg := out1.Damage.Total
