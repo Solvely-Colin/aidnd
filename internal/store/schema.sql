@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     budget_free   INTEGER NOT NULL DEFAULT -1,
     budget_move   INTEGER NOT NULL DEFAULT 1,
     budget_action INTEGER NOT NULL DEFAULT 1,
+    budget_bonus  INTEGER NOT NULL DEFAULT 1,
     summary       TEXT NOT NULL DEFAULT '',
     summary_turn  INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL DEFAULT 0,

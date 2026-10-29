@@ -550,3 +550,42 @@ func TestNotesArePrivate(t *testing.T) {
 		t.Fatal("a note leaked into the world")
 	}
 }
+
+func TestRulesetBuilderAndLevelUp(t *testing.T) {
+	e := newEnv(t, "")
+	m := e.do("GET", "/meta?setting=pulp", nil, "", "").json(t)
+	rs := m["ruleset"].(map[string]any)
+	found := false
+	for _, c := range rs["classes"].([]any) {
+		cv := c.(map[string]any)
+		found = found || (cv["key"] == "wizard" && cv["name"] == "Occultist")
+	}
+	if !found || len(rs["spells"].([]any)) < 60 || rs["setting"] != "pulp" {
+		t.Fatalf("pulp ruleset: wizard named %v, %d spells", found, len(rs["spells"].([]any)))
+	}
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "a lake town"}, "", "").json(t)["id"].(string)
+	tok := e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "", "").json(t)["token"].(string)
+	// a half-made sheet: the preview fills it and lists the choices
+	r := e.do("POST", "/campaigns/"+id+"/characters/preview", map[string]any{"character": map[string]any{"name": "Vex", "class_key": "rogue", "species": "human"}, "fill": true}, tok, "")
+	if r.code != 200 {
+		t.Fatalf("preview %d %s", r.code, r.body)
+	}
+	pv := r.json(t)
+	if len(pv["problems"].([]any)) != 0 || len(pv["choices"].([]any)) < 3 {
+		t.Fatalf("preview: %s", r.body)
+	}
+	spec := pv["character"]
+	r = e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": spec}, tok, "")
+	if r.code != 201 {
+		t.Fatalf("save %d %s", r.code, r.body)
+	}
+	cv := r.json(t)
+	b := cv["build"].(map[string]any)
+	if b["class_key"] != "rogue" || len(b["pending_choices"].([]any)) != 0 || cv["hp"].(float64) < 8+cv["modifiers"].(map[string]any)["CON"].(float64) {
+		t.Fatalf("saved build: %s", r.body)
+	}
+	// nothing to choose at level 1
+	if r := e.do("POST", "/campaigns/"+id+"/me/choose", map[string]any{"key": "feat4", "picks": []string{"tough"}}, tok, ""); r.code != 422 {
+		t.Fatalf("early feat %d %s", r.code, r.body)
+	}
+}

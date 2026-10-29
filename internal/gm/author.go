@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -481,23 +482,32 @@ func fallbackSpec(premise string) CampaignSpec {
 // repaired into a valid sheet (never rejected) so players can edit it.
 func (g *GM) DraftCharacter(ctx context.Context, w *game.World, concept string) game.CharacterSpec {
 	concept = trim(concept, 300)
-	t := tool("draft_character", "Draft a level 1 character sheet.", obj(map[string]any{
-		"name": str("character name"), "concept": str("one-line concept"), "class": str("flavor class name, e.g. Hedge Witch"),
-		"kit":       enum("starting kit", game.KitKeys()...),
-		"backstory": str("two sentences tied to the campaign"),
-		"pronouns":  str("he/him, she/her or they/them, as the concept implies; they/them if it does not say"),
+	t := tool("draft_character", "Draft a level 1 character sheet with the open 5e rules.", obj(map[string]any{
+		"name": str("character name"), "concept": str("one-line concept"), "class": str("flavor title, e.g. Hedge Witch or Private Eye"),
+		"class_key":  enum("the 5e class that plays like the concept", game.ClassKeys()...),
+		"species":    enum("species (human unless the concept says otherwise)", game.SpeciesKeys()...),
+		"background": enum("background that fits the concept's past", game.BackgroundKeys()...),
+		"backstory":  str("two sentences tied to the campaign"),
+		"pronouns":   str("he/him, she/her or they/them, as the concept implies; they/them if it does not say"),
 		"scores": obj(map[string]any{"STR": num("", 8, 15), "DEX": num("", 8, 15), "CON": num("", 8, 15), "INT": num("", 8, 15), "WIS": num("", 8, 15), "CHA": num("", 8, 15)},
 			"STR", "DEX", "CON", "INT", "WIS", "CHA"),
-		"proficient": arr(abilityEnum, "exactly 2 abilities"),
-	}, "name", "kit", "scores", "proficient"))
+		"skills": arr(skillEnum, "the class's skill picks that fit the concept"),
+	}, "name", "class_key", "scores"))
 	title, setting := "", game.SettingFantasy
 	if w != nil {
 		title, setting = w.Campaign.Title+": "+w.Campaign.Pitch, w.Setting()
 	}
-	var kits []string
-	for _, k := range game.KitKeys() {
-		kit := game.KitFor(setting, k)
-		kits = append(kits, fmt.Sprintf("%s (%s: %s)", k, kit.Name, kit.Desc))
+	var classes, species, bgs []string
+	for _, k := range game.ClassKeys() {
+		cd := game.Classes[k]
+		classes = append(classes, fmt.Sprintf("%s (%s: %s)", k, game.ClassName(cd, setting), cd.Desc))
+	}
+	for _, k := range game.SpeciesKeys() {
+		sp := game.Species[k]
+		species = append(species, fmt.Sprintf("%s (%s)", k, game.SpeciesName(sp, setting)))
+	}
+	for _, k := range game.BackgroundKeys() {
+		bgs = append(bgs, fmt.Sprintf("%s (%s)", k, game.BackgroundName(game.Backgrounds[k], setting)))
 	}
 	taken := ""
 	if w != nil {
@@ -519,8 +529,8 @@ func (g *GM) DraftCharacter(ctx context.Context, w *game.World, concept string) 
 	}
 	req := llm.Request{Tag: "author_character", Temperature: 0.8, ForceTool: "draft_character", Tools: []llm.Tool{t},
 		Messages: []llm.Message{llm.System(authorSystem), llm.User(fmt.Sprintf(
-			"Campaign: %s\nSetting: %s\nPlayer's concept: %s%s\n\nKits: %s.\nAssign the standard array 15, 14, 13, 12, 10, 8 to the six abilities, each value exactly once, and pick 2 proficient abilities. Classes are flavor only.",
-			title, settingLine(setting), firstOf(concept, "a capable adventurer"), taken, strings.Join(kits, "; ")))}}
+			"Campaign: %s\nSetting: %s\nPlayer's concept: %s%s\n\nClasses (named for this setting; the rules are the same in every era): %s.\nSpecies: %s.\nBackgrounds: %s.\nAssign the standard array 15, 14, 13, 12, 10, 8 to the six abilities, each value exactly once, highest in the class's main ability.",
+			title, settingLine(setting), firstOf(concept, "a capable adventurer"), taken, strings.Join(classes, "; "), strings.Join(species, ", "), strings.Join(bgs, ", ")))}}
 	var spec game.CharacterSpec
 	calls, err := g.forced(ctx, req, nil)
 	if err == nil && len(calls) > 0 {
@@ -569,52 +579,98 @@ func RepairCharacter(s game.CharacterSpec, concept string) game.CharacterSpec {
 		s.Name = fallbackName(concept)
 	}
 	s.Name = trim(s.Name, 40)
-	if _, ok := game.Kits[s.Kit]; !ok {
-		s.Kit = kitFor(s.Kit + " " + s.Class + " " + concept)
+	if game.Classes[s.ClassKey] == nil {
+		s.ClassKey = classFor(s.ClassKey + " " + s.Class + " " + s.Kit + " " + concept)
 	}
-	if _, _, p := game.ValidateCharacter(s); len(p) == 0 {
-		return s
+	cd := game.Classes[s.ClassKey]
+	s.Kit = cd.Kit
+	if _, p := game.ValidateBuild(game.CharacterSpec{Name: "x", ClassKey: s.ClassKey, Background: "soldier", Species: "human", Scores: s.Scores}); hasWord(p, "standard array") || hasWord(p, "score") || hasWord(p, "ability") {
+		s.Scores = rankScores(cd, s.Scores)
 	}
-	kit := game.Kits[s.Kit]
-	// rank abilities by drafted score, kit suggestions first on ties
-	order := append([]game.Ability{}, kit.Suggested...)
-	for _, a := range game.Abilities {
-		if a != kit.Suggested[0] && a != kit.Suggested[1] {
+	return game.FillBuild(s)
+}
+
+func hasWord(p game.Problems, w string) bool {
+	for _, s := range p {
+		if strings.Contains(s, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// rankScores lays the standard array over a draft's abilities: whatever
+// the model ranked highest gets 15, ties going to the class's main
+// abilities, then its suggested array.
+func rankScores(cd *game.ClassDef, drafted map[string]int) map[string]int {
+	order := append([]game.Ability{}, cd.Primary...)
+	rest := append([]game.Ability{}, game.Abilities...)
+	sort.SliceStable(rest, func(i, j int) bool { return cd.Scores[abIdx(rest[i])] > cd.Scores[abIdx(rest[j])] })
+	for _, a := range rest {
+		if !containsAb(order, a) {
 			order = append(order, a)
 		}
 	}
-	drafted := map[game.Ability]int{}
-	for k, v := range s.Scores {
+	got := map[game.Ability]int{}
+	for k, v := range drafted {
 		if a, ok := game.ParseAbility(k); ok {
-			drafted[a] = v
+			got[a] = v
 		}
 	}
-	ranked := append([]game.Ability{}, order...)
-	for i := 1; i < len(ranked); i++ {
-		for j := i; j > 0 && drafted[ranked[j]] > drafted[ranked[j-1]]; j-- {
-			ranked[j], ranked[j-1] = ranked[j-1], ranked[j]
+	sort.SliceStable(order, func(i, j int) bool { return got[order[i]] > got[order[j]] })
+	out := map[string]int{}
+	for i, a := range order {
+		out[string(a)] = game.StandardArray[i]
+	}
+	return out
+}
+
+func abIdx(a game.Ability) int {
+	for i, x := range game.Abilities {
+		if x == a {
+			return i
 		}
 	}
-	s.Scores = map[string]int{}
-	for i, a := range ranked {
-		s.Scores[string(a)] = game.StandardArray[i]
-	}
-	var prof []string
-	seen := map[game.Ability]bool{}
-	for _, p := range s.Proficient {
-		if a, ok := game.ParseAbility(p); ok && !seen[a] && len(prof) < 2 {
-			seen[a] = true
-			prof = append(prof, string(a))
+	return 0
+}
+
+func containsAb(xs []game.Ability, a game.Ability) bool {
+	for _, x := range xs {
+		if x == a {
+			return true
 		}
 	}
-	for _, a := range kit.Suggested {
-		if len(prof) < 2 && !seen[a] {
-			seen[a] = true
-			prof = append(prof, string(a))
+	return false
+}
+
+// classFor picks a class from words in a concept, then the old kit.
+func classFor(text string) string {
+	t := strings.ToLower(text)
+	pick := []struct {
+		class string
+		words []string
+	}{
+		{"warlock", []string{"warlock", "cultist", "pact", "hexer", "diabolist", "fiend"}},
+		{"sorcerer", []string{"sorcer", "psychic", "medium", "esper", "psion", "mutant", "wild magic"}},
+		{"druid", []string{"druid", "shaman", "hedge witch", "witch", "herbalist", "terraformer", "swamp mystic"}},
+		{"wizard", []string{"wizard", "mage", "occult", "scholar", "hacker", "scientist", "professor", "technomancer", "arcan", "philosopher"}},
+		{"paladin", []string{"paladin", "crusader", "templar", "holy warrior", "vigilante", "oath"}},
+		{"cleric", []string{"cleric", "priest", "chaplain", "preacher", "healer", "medic", "paramedic", "nun", "nurse", "doctor", "devout"}},
+		{"monk", []string{"monk", "martial artist", "kung fu", "pugilist", "boxer", "adept"}},
+		{"barbarian", []string{"barbarian", "berserk", "brute", "brawler", "bruiser", "savage", "enforcer"}},
+		{"bard", []string{"bard", "singer", "musician", "poet", "minstrel", "actor", "reporter", "journalist", "socialite", "con artist", "diplomat", "showman", "crooner"}},
+		{"ranger", []string{"ranger", "hunter", "archer", "scout", "bow", "tracker", "rifle", "frontier", "survival"}},
+		{"rogue", []string{"rogue", "thief", "assassin", "skirmish", "knife", "sneak", "burglar", "spy", "detective", "gumshoe", "investigator", "private eye", "gunslinger", "outlaw", "smuggler", "gangster", "operator"}},
+		{"fighter", []string{"fighter", "warrior", "knight", "soldier", "guard", "mercenary", "veteran", "marine", "cop", "police"}},
+	}
+	for _, p := range pick {
+		for _, w := range p.words {
+			if strings.Contains(t, w) {
+				return p.class
+			}
 		}
 	}
-	s.Proficient = prof
-	return s
+	return map[string]string{"warrior": "fighter", "skirmisher": "rogue", "arcanist": "wizard", "devout": "cleric", "ranger": "ranger", "bard": "bard"}[kitFor(t)]
 }
 
 func kitFor(text string) string {

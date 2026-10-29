@@ -62,6 +62,10 @@ func AwardXP(c *Character, xp int) []string {
 	changes := []string{fmt.Sprintf("%s gains %d XP", c.Name, xp)}
 	for c.Level < MaxLevel && LevelForXP(c.XP) > c.Level {
 		c.Level++
+		if c.ClassKey != "" {
+			changes = append(changes, levelUp(c))
+			continue
+		}
 		gain := HPPerLevel(c)
 		c.MaxHP += gain
 		if !c.Down() {
@@ -110,12 +114,15 @@ func ArmorClass(w *World, c *Character) int {
 	return ac
 }
 
-// ArmorClassParts breaks ArmorClass into its terms: the armor (or a base
-// of 10), the DEX modifier after any cap, and the first shield carried.
+// ArmorClassParts breaks ArmorClass into its terms: the armor (or the
+// best unarmored base), the DEX modifier after any cap, the first shield
+// carried, and fighting style and spell bonuses.
 func ArmorClassParts(w *World, c *Character) []ACPart {
-	parts := []ACPart{{Label: "Base", Value: 10}}
+	label, base := unarmoredBase(w, c)
+	parts := []ACPart{{Label: label, Value: base}}
 	dex := c.Mod(DEX)
-	if a := w.Item(c.Armor); a != nil && a.Owner.ID == c.ID && a.Kind == ItemArmor {
+	armor := wearsArmor(w, c)
+	if a := w.Item(c.Armor); a != nil && a.Owner.ID == c.ID && a.Kind == ItemArmor && (armor != nil || a.AC > base) {
 		switch {
 		case a.DexCap == 0:
 			dex = 0
@@ -127,11 +134,37 @@ func ArmorClassParts(w *World, c *Character) []ACPart {
 	if dex != 0 {
 		parts = append(parts, ACPart{Label: string(DEX), Value: dex})
 	}
+	switch label {
+	case "Unarmored Defense (CON)":
+		if armor == nil {
+			parts[0] = ACPart{Label: "Base", Value: 10}
+			parts = append(parts, ACPart{Label: "CON (Unarmored Defense)", Value: c.Mod(CON)})
+		}
+	case "Unarmored Defense (WIS)":
+		if armor == nil {
+			parts[0] = ACPart{Label: "Base", Value: 10}
+			parts = append(parts, ACPart{Label: "WIS (Unarmored Defense)", Value: c.Mod(WIS)})
+		}
+	case "Draconic Resilience (CHA)":
+		if armor == nil {
+			parts[0] = ACPart{Label: "Base", Value: 10}
+			parts = append(parts, ACPart{Label: "CHA (Draconic Resilience)", Value: c.Mod(CHA)})
+		}
+	}
 	for _, it := range w.ItemsOf(OwnerCharacter, c.ID) {
 		if it.Kind == ItemShield {
 			parts = append(parts, ACPart{Label: it.Name, Value: it.AC})
 			break
 		}
+	}
+	if armor != nil && c.HasPick("defense") {
+		parts = append(parts, ACPart{Label: "Defense style", Value: 1})
+	}
+	if c.Conditions.Has(CondShielded) {
+		parts = append(parts, ACPart{Label: "Shield of Faith", Value: 2})
+	}
+	if c.Conditions.Has(CondHasted) {
+		parts = append(parts, ACPart{Label: "Haste", Value: 2})
 	}
 	return parts
 }
@@ -166,21 +199,11 @@ func Weapon(w *World, c *Character) *Item {
 	return Unarmed
 }
 
-// AttackMod is the to-hit bonus with a weapon. Finesse uses the better of
-// STR/DEX. Proficiency applies if the weapon's ability is proficient, and
-// always for a kit's signature ranged focus.
+// AttackMod is the to-hit bonus with a weapon: the weapon's ability (the
+// better of STR/DEX for finesse, the casting ability for a focus, DEX for
+// a monk) plus proficiency, archery and a sacred weapon.
 func AttackMod(c *Character, wpn *Item) (int, Ability) {
-	ab := wpn.Ability
-	if ab == "" {
-		ab = STR
-		if InferReach(wpn) == ReachRanged {
-			ab = DEX
-		}
-	}
-	if wpn.Finesse && c.Mod(DEX) > c.Mod(ab) {
-		ab = DEX
-	}
-	return c.Mod(ab) + ProficiencyBonus(c.Level), ab
+	return sumParts(AttackParts(c, wpn)), weaponAbility(c, wpn)
 }
 
 // CheckRoll is a d20 check with its context, ready for the Resolution.
@@ -206,14 +229,23 @@ func CheckParts(c *Character, a Ability) []RollPart {
 	ps := []RollPart{{Label: string(a), Value: c.Mod(a)}}
 	if c.IsProficient(a) {
 		ps = append(ps, RollPart{Label: "Proficiency", Value: ProficiencyBonus(c.Level)})
+	} else if c.HasFeature("jack_of_all_trades") {
+		ps = append(ps, RollPart{Label: "Jack of All Trades", Value: ProficiencyBonus(c.Level) / 2})
 	}
 	return ps
 }
 
-// AttackParts splits AttackMod into the ability modifier and proficiency.
+// AttackParts splits AttackMod into its parts.
 func AttackParts(c *Character, wpn *Item) []RollPart {
-	_, ab := AttackMod(c, wpn)
-	return []RollPart{{Label: string(ab), Value: c.Mod(ab)}, {Label: "Proficiency", Value: ProficiencyBonus(c.Level)}}
+	ab := weaponAbility(c, wpn)
+	ps := []RollPart{{Label: string(ab), Value: c.Mod(ab)}, {Label: "Proficiency", Value: ProficiencyBonus(c.Level)}}
+	if c.HasPick("archery") && InferReach(wpn) == ReachRanged && !IsFocus(wpn) {
+		ps = append(ps, RollPart{Label: "Archery", Value: 2})
+	}
+	if c.Conditions.Has(CondSacred) {
+		ps = append(ps, RollPart{Label: "Sacred Weapon", Value: max(1, c.Mod(CHA))})
+	}
+	return ps
 }
 
 // AbilityCheck rolls d20 + modifier vs a snapped DC.

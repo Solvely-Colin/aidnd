@@ -18,6 +18,7 @@ const (
 	SlotAction Slot = "action"
 	SlotDash   Slot = "dash" // a move paid with the action
 	SlotNone   Slot = "none" // costs nothing at all (end_turn)
+	SlotBonus  Slot = "bonus"
 )
 
 // CombatFreeActions is the free-action allowance in combat.
@@ -26,9 +27,9 @@ const CombatFreeActions = 3
 // FullBudget is a fresh turn's budget.
 func FullBudget(inCombat bool) Budget {
 	if inCombat {
-		return Budget{Free: CombatFreeActions, Move: 1, Action: 1}
+		return Budget{Free: CombatFreeActions, Move: 1, Action: 1, Bonus: 1}
 	}
-	return Budget{Free: Unlimited, Move: 1, Action: 1}
+	return Budget{Free: Unlimited, Move: 1, Action: 1, Bonus: 1}
 }
 
 // Pay spends the slot from b, returning the slot actually used (a move
@@ -69,6 +70,12 @@ func (b *Budget) Pay(s Slot) (Slot, error) {
 			return s, nil
 		}
 		return "", fmt.Errorf("no action left this turn")
+	case SlotBonus:
+		if b.Bonus > 0 {
+			b.Bonus--
+			return s, nil
+		}
+		return "", fmt.Errorf("no bonus action left this turn")
 	}
 	return "", fmt.Errorf("unknown slot %q", s)
 }
@@ -79,7 +86,7 @@ func (b Budget) Left() string {
 	if b.Free != Unlimited {
 		free = fmt.Sprint(b.Free)
 	}
-	return fmt.Sprintf("action %d, move %d, free %s", b.Action, b.Move, free)
+	return fmt.Sprintf("action %d, bonus action %d, move %d, free %s", b.Action, b.Bonus, b.Move, free)
 }
 
 // Spent reports whether the action is gone (which ends the turn).
@@ -415,7 +422,7 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 		for _, c := range w.Party() {
 			switch {
 			case c.Down():
-			case c.Conditions.Has(CondHidden):
+			case c.Conditions.Has(CondHidden) || c.Conditions.Has(CondInvisible):
 				hidden = append(hidden, c)
 			default:
 				targets = append(targets, c)
@@ -489,14 +496,23 @@ func enemyAct(w *World, r *dice.Roller, l *Location, e *Enemy, targets []*Charac
 			et.Text = fmt.Sprintf("%s attacks %s and misses", e.Display(), t.Name)
 			return et
 		}
-		dmg := out1.Damage.Total
-		t.HP = max(0, t.HP-dmg)
+		if t.Conditions.Has(CondParalyzed) && ZoneDistance(l, e.ZoneID, t.ZoneID) == 0 && !out1.Crit {
+			out1.Crit = true // paralyzed: hits up close are critical
+			if ex, err := dice.Parse(e.Damage); err == nil {
+				more := r.Roll(dice.Expr{Count: ex.Count, Sides: ex.Sides}, false)
+				out1.Damage.Total += more.Total
+				out1.Damage.Dice = append(out1.Damage.Dice, more.Dice...)
+			}
+		}
+		dmg, lines := HurtCharacter(w, r, t, out1.Damage.Total, e, ZoneDistance(l, e.ZoneID, t.ZoneID) == 0)
 		et.Text = fmt.Sprintf("%s hits %s for %d damage (%d/%d HP)", e.Display(), t.Name, dmg, t.HP, t.MaxHP)
 		if out1.Crit {
 			et.Text = "Critical! " + et.Text
 		}
+		if len(lines) > 0 {
+			et.Text += "; " + strings.Join(lines, "; ")
+		}
 		if t.Down() {
-			KnockOut(w, t)
 			et.Text += fmt.Sprintf("; %s goes down", t.Name)
 			if lines := releaseGrapples(w, t); len(lines) > 0 {
 				et.Text += "; " + strings.Join(lines, "; ")

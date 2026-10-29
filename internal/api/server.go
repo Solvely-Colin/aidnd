@@ -84,6 +84,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/roll", s.auth(s.handleRoll))
 	mux.HandleFunc("POST /campaigns/{id}/roll/cancel", s.auth(s.handleCancelRoll))
 	mux.HandleFunc("POST /campaigns/{id}/me/dice", s.auth(s.handleDice))
+	mux.HandleFunc("POST /campaigns/{id}/characters/preview", s.auth(s.handlePreview))
+	mux.HandleFunc("POST /campaigns/{id}/me/choose", s.auth(s.handleChoose))
+	mux.HandleFunc("POST /campaigns/{id}/me/spells", s.auth(s.handleSpells))
 	mux.HandleFunc("GET /campaigns/{id}/map", s.auth(s.handleMap))
 	mux.HandleFunc("GET /campaigns/{id}/locations/{lid}", s.auth(s.handleLocation))
 	mux.HandleFunc("GET /campaigns/{id}/npcs/{nid}", s.auth(s.handleNPC))
@@ -343,7 +346,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"abilities": game.Abilities, "standard_array": game.StandardArray, "proficiencies": 2, "kits": kits, "settings": settings,
 		"xp_table": game.XPTable, "max_level": game.MaxLevel, "dcs": []int{5, 10, 15, 20, 25}, "catalog": catalog,
-		"service_mode": s.ServiceMode(),
+		"service_mode": s.ServiceMode(), "ruleset": rulesetView(firstNonEmpty(game.NormSetting(r.URL.Query().Get("setting")), game.SettingFantasy)),
 	})
 }
 
@@ -828,4 +831,13 @@ func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }

@@ -112,6 +112,35 @@ type CharExtra struct {
 	ReactedRound int `json:"reacted_round,omitempty"`
 	// Readied is an attack held for when an enemy comes within reach.
 	Readied *Readied `json:"readied,omitempty"`
+
+	// The 5e build. Sheets made before it have none of these and play as
+	// the class their kit maps to (see ClassOf).
+	ClassKey   string `json:"class_key,omitempty"`
+	Species    string `json:"species,omitempty"`
+	Background string `json:"background,omitempty"`
+	// Boost is the background ability increase chosen at creation.
+	Boost map[string]int `json:"boost,omitempty"`
+	// Picks are build choices by key: fighting_style, expertise,
+	// invocation, feat4, asi, versatile, skillful, mi_cantrips...
+	Picks map[string][]string `json:"picks,omitempty"`
+	// Spells are the chosen class cantrips and prepared spells.
+	Spells []string `json:"spells,omitempty"`
+	// SlotsUsed counts spent spell slots of each level (index 0 = 1st).
+	SlotsUsed []int `json:"slots_used,omitempty"`
+	// Used counts spent uses of limited features (rage, second_wind...).
+	Used   map[string]int `json:"used,omitempty"`
+	TempHP int            `json:"temp_hp,omitempty"`
+	// Conc is the spell the character is concentrating on.
+	Conc *Concentration `json:"conc,omitempty"`
+	// Once records the turn a once-per-turn feature was last used.
+	Once map[string]int `json:"once,omitempty"`
+}
+
+// Concentration is a spell being held.
+type Concentration struct {
+	Spell string `json:"spell"`
+	Level int    `json:"level"`
+	Zone  string `json:"zone,omitempty"` // for spells that stay on a zone
 }
 
 // Down reports whether the character is at 0 HP (dying, stable or dead).
@@ -547,6 +576,7 @@ type Budget struct {
 	Free   int `json:"free"` // Unlimited outside combat
 	Move   int `json:"move"`
 	Action int `json:"action"`
+	Bonus  int `json:"bonus"`
 }
 
 // TurnState tracks whose turn it is.

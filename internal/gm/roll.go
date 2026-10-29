@@ -137,6 +137,22 @@ func stepLabel(w *game.World, a game.Action) string {
 		}
 	case game.ActSay:
 		parts = append(parts, fmt.Sprintf("%q", trim(a.Text, 60)))
+	case game.ActCast:
+		if sp := game.SpellByRef(a.Spell); sp != nil {
+			verb = "Cast " + game.SpellName(sp, w.Setting())
+		}
+		if a.Target != "" {
+			parts = append(parts, "at "+name(a.Target))
+		} else if a.Zone != "" {
+			parts = append(parts, "on "+zone(a.Zone))
+		}
+	case game.ActFeature:
+		if f := game.FeatureActByRef(a.Feature); f != nil {
+			verb = f.Name
+		}
+		if a.Target != "" {
+			parts = append(parts, name(a.Target))
+		}
 	default:
 		if a.Target != "" {
 			parts = append(parts, name(a.Target))

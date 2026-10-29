@@ -417,6 +417,16 @@ const signed = n => (n >= 0 ? "+" : "−") + Math.abs(n);
 function kitList() { return S.meta?.settings?.find(s => s.key === S.view?.setting)?.kits || S.meta?.kits || []; }
 function kit(k) { return kitList().find(x => x.key === k); }
 const kitName = k => kit(k)?.name || k || "";
+// roleName is what a character does in this era: their class, or for old
+// sheets their kit.
+const roleName = c => c?.build?.class_name || kitName(c?.kit);
+// roleLine is "Occultist · Human · Professor", with a custom title first.
+function roleLine(c) {
+  const b = c.build;
+  if (!b) return [c.class, kitName(c.kit)].filter(Boolean).join(" · ");
+  const title = c.class && c.class.toLowerCase() !== b.class_name.toLowerCase() ? c.class : "";
+  return [title, b.class_name + (b.subclass ? ` (${b.subclass})` : ""), b.species_name, b.background_name].filter(Boolean).join(" · ");
+}
 const settingName = () => (SETTING_WORD[S.view?.setting] || S.view?.setting || "").toUpperCase();
 
 function renderLobby(soft) {
@@ -450,14 +460,14 @@ function seatsHTML() {
     if (!p) return `<div class="seat open"><span class="face">+</span><b>Open seat</b><span>share the play code</span></div>`;
     const c = v.party.find(x => x.id === p.character_id), you = p.id === S.me?.player_id;
     return `<div class="seat ${c ? "ready" : ""} ${you ? "you" : ""}">${c ? face(c) : `<span class="face">${initial(p.name)}</span>`}
-      <b>${esc(p.name)}</b><span>${c ? `${esc(firstName(c.name))}, ${esc(kitName(c.kit).toLowerCase())}` : "making a character…"}</span></div>`;
+      <b>${esc(p.name)}</b><span>${c ? `${esc(firstName(c.name))}, ${esc(roleName(c).toLowerCase())}` : "making a character…"}</span></div>`;
   }).join("");
 }
 
 function meCardHTML(c) {
   return `<div class="me-card">${face(c)}<div>
     <span class="name-l">${esc(c.name)}</span>
-    <span class="sub-line">${esc(c.class)} · ${esc(kitName(c.kit))} · ${esc(c.pronouns || "they/them")}</span>
+    <span class="sub-line">${esc(roleLine(c))} · ${esc(c.pronouns || "they/them")}</span>
     ${c.concept ? `<span class="concept">${esc(c.concept)}</span>` : ""}
     <button class="link ink" data-act="edit" style="margin-top:4px;align-self:flex-start">Change something</button></div></div>`;
 }
@@ -475,52 +485,206 @@ function conceptHTML() {
 }
 
 // ---- character builder
+//
+// The 5e build, named for the campaign's era: a pulp Wizard is an
+// Occultist with the same rules. The server checks every step through
+// /characters/preview; the builder only arranges the choices.
 
-const STEPS = ["Who", "Kit", "Abilities", "Story"];
-const STEP_TITLE = ["Who are they?", "What do they carry?", "What are they good at?", "Where do they come from?"];
+const ORD = ["Cantrip", "1st", "2nd", "3rd", "4th", "5th"];
+const SPELL_WORD = { fantasy: "Spells", gaslight: "Rites", pulp: "Rituals", modern: "Powers", future: "Psionics" };
+const spellWord = () => SPELL_WORD[S.view?.setting] || "Spells";
+
+// rules is the ruleset named for this campaign's setting, loaded once.
+function rules() {
+  const set = S.view?.setting || "fantasy";
+  if (S.rules?.setting === set) return S.rules;
+  if (S._rulesFor !== set) {
+    S._rulesFor = set;
+    api("GET", `/meta?setting=${encodeURIComponent(set)}`).then(m => { S.rules = m.ruleset; if (S.draft) renderBuilder(); else if (S.view) render(); }).catch(() => { S._rulesFor = ""; });
+  }
+  return null;
+}
+const rl = (list, k) => rules()?.[list]?.find(x => x.key === k);
+const skillName = k => rules()?.skills?.find(s => s.key === k)?.name || k;
+const spellOf = k => rl("spells", k);
+function optName(kind, k) {
+  if (kind === "skill") return skillName(k);
+  if (kind === "feat" || kind === "style") return rules()?.feats?.[k]?.name || k;
+  if (kind === "invocation") return rl("invocations", k)?.name || k;
+  if (kind === "spell") return spellOf(k)?.name || k;
+  if (kind === "list") return rl("classes", k)?.name || k;
+  return ABIL_NAME[k] || k;
+}
+function optDesc(kind, k) {
+  if (kind === "feat" || kind === "style") return rules()?.feats?.[k]?.desc || "";
+  if (kind === "invocation") return rl("invocations", k)?.desc || "";
+  if (kind === "spell") return spellOf(k)?.desc || "";
+  if (kind === "skill") return ABIL_NAME[rules()?.skills?.find(s => s.key === k)?.ability] || "";
+  return "";
+}
+
+function steps() {
+  const p = S.prev, caster = p && (p.cantrips > 0 || p.prepared > 0);
+  return ["Who", "Class", "Origin", "Abilities", "Skills", ...(caster ? [spellWord()] : []), "Story"];
+}
+const STEP_TITLE = { Who: "Who are they?", Class: "What do they do?", Origin: "Where are they from?", Abilities: "What are they good at?", Skills: "What have they learned?", Story: "Their story" };
 
 function blankDraft() {
-  const arr = S.meta?.standard_array || [15, 14, 13, 12, 10, 8];
-  return { name: "", class: "", kit: kitList()[0]?.key || "", pronouns: "they/them", concept: $("#concept")?.value.trim() || "", backstory: "",
-    scores: Object.fromEntries(ABIL.map((a, i) => [a, arr[i]])), proficient: [] };
+  return { name: "", class: "", pronouns: "they/them", concept: $("#concept")?.value.trim() || "", backstory: "",
+    class_key: "", species: "", background: "", boost: {}, scores: {}, skills: [], picks: {}, spells: [] };
+}
+
+// preview asks the server what the draft comes to. With fill it also
+// completes the draft with defaults (a new class, species or background).
+let previewSeq = 0;
+async function preview(fill) {
+  const d = S.draft, n = ++previewSeq;
+  if (!d || (!d.class_key && !fill)) { S.prev = null; return; }
+  try {
+    const r = await api("POST", `/campaigns/${S.route}/characters/preview`, { character: d, fill: !!fill });
+    if (n !== previewSeq || S.draft !== d) return;
+    if (fill) Object.assign(d, r.character, { name: d.name, pronouns: d.pronouns, concept: d.concept, backstory: d.backstory, class: d.class });
+    S.prev = r;
+  } catch (er) { toast(er.message); }
+  if (S.draft === d) renderBuilder();
+}
+
+function chipsHTML(opts, on, attr, extra = () => "") {
+  return `<div class="chips">${opts.map(o => `<button class="chip ${on(o) ? "on" : ""}" ${attr(o)}>${extra(o)}</button>`).join("")}</div>`;
+}
+
+function classStep(d) {
+  const R = rules(), cl = R.classes, cur = cl.find(c => c.key === d.class_key);
+  const list = cl.map(c => `<button class="roster-row ${c.key === d.class_key ? "on" : ""}" data-class="${esc(c.key)}">
+      <b>${esc(c.name)}</b><span>${c.name !== c.rules_name ? esc(c.rules_name) : ""}</span></button>`).join("");
+  const detail = cur ? `<div class="dossier">
+      <span class="mono-k">${cur.name !== cur.rules_name ? `${esc(cur.rules_name)} rules · ` : ""}d${cur.hit_die} hit die${cur.caster ? ` · ${esc(cur.cast_ability)} ${cur.caster === "pact" ? "pact magic" : cur.caster === "half" ? "half caster" : "caster"}` : ""}</span>
+      <h3>${esc(cur.name)}</h3><p>${esc(cur.desc)}</p>
+      <dl><dt>Leans on</dt><dd>${cur.primary.map(a => ABIL_NAME[a]).join(" or ")}</dd>
+        <dt>Saves</dt><dd>${cur.saves.map(a => ABIL_NAME[a]).join(", ")}</dd>
+        <dt>Starts with</dt><dd>${esc(cur.gear.join(", "))}</dd>
+        <dt>At 3rd level</dt><dd>${esc(cur.subclass)}${cur.subclass !== cur.subclass_rules_name ? ` <small>(${esc(cur.subclass_rules_name)})</small>` : ""}</dd></dl>
+      <ol class="ladder">${[1, 2, 3, 4, 5].map(l => `<li><span>${l}</span><div>${cur.features.filter(f => f.level === l).map(f => `<b title="${esc(f.desc)}">${esc(f.name)}</b>`).join("") || "<em>—</em>"}</div></li>`).join("")}</ol>
+    </div>` : `<div class="dossier empty"><p>Pick a class to see what it does at each level. Every era plays the same rules under its own names.</p></div>`;
+  return `<div class="roster"><div class="roster-list">${list}</div>${detail}</div>`;
+}
+
+function originStep(d) {
+  const R = rules(), sp = R.species.find(s => s.key === d.species), bg = R.backgrounds.find(b => b.key === d.background);
+  const b = d.boost || {}, two = Object.keys(b).find(k => b[k] === 2), three = bg && bg.abilities.every(a => b[a] === 1);
+  return `<section><span class="mono-k">People</span>
+      ${chipsHTML(R.species, s => s.key === d.species, s => `data-species="${esc(s.key)}"`, s => esc(s.name))}
+      ${sp ? `<div class="traits"><p>${esc(sp.desc)}</p>${sp.traits.map(t => `<div><b>${esc(t.name)}</b><span>${esc(t.desc)}</span></div>`).join("")}</div>` : ""}</section>
+    <section><span class="mono-k">Background</span>
+      ${chipsHTML(R.backgrounds, x => x.key === d.background, x => `data-bg="${esc(x.key)}"`, x => esc(x.name))}
+      ${bg ? `<div class="traits"><p>${esc(bg.desc)}</p>
+        <div><b>Skills</b><span>${bg.skills.map(skillName).join(", ")}</span></div>
+        <div><b>${esc(R.feats[bg.feat]?.name || bg.feat)}</b><span>${esc(R.feats[bg.feat]?.desc || "")}${bg.feat_list ? ` (${esc(rl("classes", bg.feat_list)?.name || bg.feat_list)} list)` : ""}</span></div></div>
+      <span class="mono-k">Ability boost · ${three ? "+1 to all three" : "+2 to one, +1 to another"}</span>
+      <div class="boost">${bg.abilities.map(a => `<div><span>${ABIL_NAME[a]}</span>
+        <button class="${b[a] === 2 ? "on" : ""}" data-boost="${a}:2">+2</button><button class="${b[a] === 1 && !three ? "on" : ""}" data-boost="${a}:1">+1</button></div>`).join("")}
+        <button class="spread ${three ? "on" : ""}" data-boost="all:1">+1 to each</button></div>` : ""}</section>`;
+}
+
+function abilityStep(d) {
+  const cur = rl("classes", d.class_key), b = d.boost || {};
+  return `<p class="intro">Tap two numbers to swap them. ${cur ? `A ${esc(cur.name.toLowerCase())} leans on ${cur.primary.map(a => ABIL_NAME[a]).join(" or ")}.` : ""}</p>
+    <div class="abil-grid">${ABIL.map(a => {
+      const base = d.scores?.[a] ?? 10, fin = base + (b[a] || 0), key = cur?.primary.includes(a), save = cur?.saves.includes(a);
+      return `<div class="abil ${key ? "prof" : ""} ${S.swap === a ? "sel" : ""}">
+        <button class="swap" data-swap="${a}" aria-label="${ABIL_NAME[a]} ${fin}"><span class="k">${a}${save ? " · save" : ""}</span><span class="v">${fin}</span>
+        <span class="m">${signed(mod(fin))}${b[a] ? ` · ${base}+${b[a]}` : ""}</span></button></div>`;
+    }).join("")}</div>`;
+}
+
+function skillStep(d) {
+  const cur = rl("classes", d.class_key), bg = rl("backgrounds", d.background), p = S.prev;
+  if (!cur || !p) return `<p class="intro">Pick a class first.</p>`;
+  const fixed = new Set([...(bg?.skills || [])]);
+  for (const s of p.skills || []) if (!d.skills.includes(s) && !Object.values(d.picks || {}).flat().includes(s)) fixed.add(s);
+  const opts = cur.skill_choice.filter(s => !fixed.has(s));
+  let out = `<section><span class="mono-k">${esc(cur.name)} skills · ${d.skills.length} of ${cur.skill_count}</span>
+    ${chipsHTML(opts, s => d.skills.includes(s), s => `data-cskill="${esc(s)}"`, s => esc(skillName(s)))}
+    ${fixed.size ? `<p class="small-note">Already trained: ${[...fixed].map(skillName).join(", ")}.</p>` : ""}</section>`;
+  out += choicesHTML(p.choices || [], d.picks || {}, "dpick");
+  return out;
+}
+
+// choicesHTML lays out build choices (a fighting style, expertise, a feat)
+// as chip groups. attr is the data attribute the clicks use.
+function choicesHTML(choices, picks, attr) {
+  return choices.map(ch => {
+    const got = picks[ch.key] || [];
+    const tally = o => got.filter(x => x === o).length;
+    return `<section><span class="mono-k">${esc(ch.label)} · ${got.length} of ${ch.count}</span>
+      <div class="chips">${ch.options.map(o => `<button class="chip ${tally(o) ? "on" : ""}" data-${attr}="${esc(ch.key)}|${esc(o)}" title="${esc(optDesc(ch.kind, o))}">${esc(optName(ch.kind, o))}${tally(o) > 1 ? ` ×${tally(o)}` : ""}</button>`).join("")}</div>
+      ${got.filter((o, i) => got.indexOf(o) === i).map(o => optDesc(ch.kind, o) && ch.kind !== "skill" ? `<p class="small-note"><b>${esc(optName(ch.kind, o))}.</b> ${esc(optDesc(ch.kind, o))}</p>` : "").join("")}</section>`;
+  }).join("");
+}
+
+// spellRows lists spells to prepare, cantrips and leveled apart.
+function spellRows(options, chosen, max, attr) {
+  const groups = [[0, max.cantrips], [1, max.prepared]];
+  return groups.filter(([, n]) => n > 0).map(([lv, n]) => {
+    const list = options.map(spellOf).filter(s => s && (lv === 0 ? s.level === 0 : s.level > 0));
+    const have = chosen.filter(k => list.some(s => s.key === k)).length;
+    return `<section><span class="mono-k">${lv === 0 ? "Cantrips · at will" : "Prepared · uses a slot"} · ${have} of ${n}</span>
+      <div class="spell-list">${list.map(s => `<button class="spell-row ${chosen.includes(s.key) ? "on" : ""}" data-${attr}="${esc(s.key)}">
+        <span class="dot"></span><span class="nm"><b>${esc(s.name)}</b><small>${s.level ? ORD[s.level] + " · " : ""}${esc(s.school)} · ${esc(s.range)}${s.conc ? " · concentration" : ""}${s.name !== s.rules_name ? ` · ${esc(s.rules_name)}` : ""}</small><span>${esc(s.desc)}</span></span></button>`).join("")}</div></section>`;
+  }).join("");
+}
+
+function spellStep(d) {
+  const p = S.prev;
+  return `<div class="row"><p class="intro" style="flex:1">Cantrips are free to cast. Prepared ${spellWord().toLowerCase()} spend a slot; you can change them after a long rest.</p><button class="btn" data-act="spells-default">Pick for me</button></div>
+    ${spellRows(p.spell_options || [], d.spells || [], p, "dspell")}`;
+}
+
+function storyStep(d) {
+  const p = S.prev, cur = rl("classes", d.class_key), sp = rl("species", d.species), bg = rl("backgrounds", d.background);
+  const sc = p?.scores || {};
+  return `<label class="field"><span>In a sentence</span><textarea class="under text" id="d-concept" rows="2">${esc(d.concept)}</textarea></label>
+    <label class="field"><span>Backstory · optional</span><textarea class="under text" id="d-back" rows="3" placeholder="Where they come from, what they want, who they owe.">${esc(d.backstory)}</textarea></label>
+    <div class="summary"><span class="face">${initial(d.name)}</span><div>
+      <span class="nm">${esc(d.name || "Unnamed")}</span>
+      <span class="sub-line">${esc(d.class || cur?.name || "No class yet")} · ${esc(sp?.name || "")} ${esc(bg?.name ? "· " + bg.name : "")} · ${esc(d.pronouns || "they/them")}</span>
+      ${p ? `<span class="stats">${p.max_hp} HP · ${ABIL.map(a => `${a} ${sc[a] ?? "–"}`).join("  ")}</span>
+      <span class="stats">${(p.skills || []).map(skillName).join(" · ")}</span>
+      ${(d.spells || []).length ? `<span class="stats">${d.spells.map(k => spellOf(k)?.name || k).join(" · ")}</span>` : ""}
+      ${cur ? `<span class="stats">${esc(cur.gear.join(" · "))}</span>` : ""}` : ""}
+    </div></div>
+    ${p?.problems?.length ? `<ul class="problems">${p.problems.map(x => `<li>${esc(x.message || x)}</li>`).join("")}</ul>` : ""}`;
 }
 
 function renderBuilder() {
-  const d = S.draft, i = S.step, v = S.view;
-  const body = [
-    () => `<div class="grid-who">
-        <label class="field"><span>Name</span><input class="under" id="d-name" value="${esc(d.name)}" maxlength="40"></label>
-        <label class="field"><span>Pronouns</span><input class="under" id="d-pron" value="${esc(d.pronouns || "they/them")}" maxlength="20"></label>
-      </div>
-      <label class="field"><span>Calling</span><input class="under" id="d-class" value="${esc(d.class)}" placeholder="Private eye, occultist, boxer…"><span class="help">What the story calls them. Your kit decides the gear.</span></label>`,
-    () => `<div class="kits">${kitList().map(k => `<button class="kit ${k.key === d.kit ? "on" : ""}" data-kit="${esc(k.key)}"><span class="dot"></span><span class="txt">
-        <span class="nm"><b>${esc(k.name)}</b><span>${esc(k.desc)}</span></span>
-        <span class="items">${esc((k.items || []).map(it => it.name + (it.damage ? ` · ${it.damage}` : "")).join(" · "))}</span></span></button>`).join("")}</div>`,
-    () => `<p class="intro">Tap two numbers to swap them. Star two strengths: those rolls add your proficiency.</p>
-      <div class="abil-grid">${ABIL.map(a => {
-        const val = d.scores?.[a] ?? 10, prof = (d.proficient || []).includes(a);
-        return `<div class="abil ${prof ? "prof" : ""} ${S.swap === a ? "sel" : ""}">
-          <button class="swap" data-swap="${a}" aria-label="${ABIL_NAME[a]} ${val}"><span class="k">${a}</span><span class="v">${val}</span><span class="m">${signed(mod(val))}${prof ? " +2" : ""}</span></button>
-          <button class="star" data-prof="${a}" aria-label="Proficient in ${ABIL_NAME[a]}">${prof ? "★" : "☆"}</button></div>`;
-      }).join("")}</div>`,
-    () => `<label class="field"><span>In a sentence</span><textarea class="under text" id="d-concept" rows="2">${esc(d.concept)}</textarea></label>
-      <label class="field"><span>Backstory · optional</span><textarea class="under text" id="d-back" rows="3" placeholder="Where they come from, what they want, who they owe.">${esc(d.backstory)}</textarea></label>
-      <div class="summary"><span class="face">${initial(d.name)}</span><div>
-        <span class="nm">${esc(d.name || "Unnamed")}</span>
-        <span class="sub-line">${esc(d.class || "No calling yet")} · ${esc(kitName(d.kit))} · ${esc(d.pronouns || "they/them")}</span>
-        <span class="stats">${ABIL.map(a => `${a} ${d.scores[a]}${(d.proficient || []).includes(a) ? "★" : ""}`).join("  ")}</span>
-        <span class="stats">${esc((kit(d.kit)?.items || []).map(it => it.name).join(" · "))}</span></div></div>`,
-  ][i]();
+  const d = S.draft, v = S.view, R = rules(), st = steps();
+  S.step = Math.min(S.step, st.length - 1);
+  const i = S.step, name = st[i];
+  let body;
+  if (!R) body = `<p class="intro"><span class="spinner"></span> Opening the rulebook…</p>`;
+  else if (name === "Who") body = `<div class="grid-who">
+      <label class="field"><span>Name</span><input class="under" id="d-name" value="${esc(d.name)}" maxlength="40"></label>
+      <label class="field"><span>Pronouns</span><input class="under" id="d-pron" value="${esc(d.pronouns || "they/them")}" maxlength="20"></label></div>
+    <label class="field"><span>What the story calls them · optional</span><input class="under" id="d-class" value="${esc(d.class)}" placeholder="${esc(rl("classes", d.class_key)?.name || "Private eye, hedge witch, medic…")}" maxlength="40">
+      <span class="help">Your class sets the rules; this is just the title on the sheet.</span></label>`;
+  else if (name === "Class") body = classStep(d);
+  else if (!d.class_key) body = `<p class="intro">Pick a class first.</p>`;
+  else if (name === "Origin") body = originStep(d);
+  else if (name === "Abilities") body = abilityStep(d);
+  else if (name === "Skills") body = skillStep(d);
+  else if (name === "Story") body = storyStep(d);
+  else body = S.prev ? spellStep(d) : "";
+  const last = i === st.length - 1;
   app.innerHTML = `
-  <div class="builder">
+  <div class="builder ${name === "Class" ? "wide" : ""}">
     <div class="builder-head"><div>
-      <div class="top"><button class="x" data-act="cancel-draft" aria-label="Stop making a character">${ICON.close}</button><span class="mono-k">Your character · ${esc(v.title)}</span></div>
-      <div class="tabs">${STEPS.map((s, n) => `<button class="${n === i ? "on" : ""}" data-step="${n}">${s}</button>`).join("")}</div>
+      <div class="top"><button class="x" data-act="cancel-draft" aria-label="Stop making a character">${ICON.close}</button><span class="mono-k">Your character · ${esc(v.title)}${settingName() ? " · " + esc(settingName()) : ""}</span></div>
+      <div class="tabs">${st.map((s, n) => `<button class="${n === i ? "on" : ""}" data-step="${n}">${esc(s)}</button>`).join("")}</div>
     </div></div>
-    <div class="builder-body"><div><h2>${STEP_TITLE[i]}</h2>${body}<div class="error" id="d-err"></div></div></div>
+    <div class="builder-body"><div><h2>${esc(STEP_TITLE[name] || `Their ${name.toLowerCase()}`)}</h2>${body}<div class="error" id="d-err"></div></div></div>
     <div class="builder-foot"><div>
       <button class="back" data-act="${i === 0 ? "cancel-draft" : "step-back"}">${i === 0 ? "Cancel" : "Back"}</button>
-      <button class="btn primary" data-act="${i < STEPS.length - 1 ? "step-next" : "save-char"}">${i < STEPS.length - 1 ? "Next" : "Save character"}</button>
+      <button class="btn primary" data-act="${last ? "save-char" : "step-next"}">${last ? "Save character" : "Next"}</button>
     </div></div>
   </div>`;
 }
@@ -529,9 +693,62 @@ function readEditor() {
   const d = S.draft;
   if (!d) return d;
   const val = id => $(id)?.value;
-  if ($("#d-name")) { d.name = val("#d-name"); d.pronouns = val("#d-pron"); d.class = val("#d-class"); }
+  if ($("#d-name")) { d.name = val("#d-name"); d.pronouns = val("#d-pron"); d.class = val("#d-class").trim(); }
   if ($("#d-back")) { d.backstory = val("#d-back"); d.concept = val("#d-concept"); }
   return d;
+}
+
+// toggle adds or removes o from list, keeping at most n (the oldest goes).
+function toggle(list, o, n) {
+  const i = list.indexOf(o);
+  if (i >= 0) list.splice(i, 1);
+  else { list.push(o); while (list.length > n) list.shift(); }
+  return list;
+}
+
+// builderClick handles the builder's own buttons; true when it did.
+function builderClick(ds) {
+  const d = S.draft;
+  if (!d) return false;
+  if (ds.class) {
+    readEditor();
+    if (d.class_key === ds.class) return true;
+    const c = rl("classes", ds.class);
+    Object.assign(d, { class_key: ds.class, scores: { ...c.suggested_scores }, skills: [], picks: {}, spells: [] });
+    preview(true); renderBuilder(); return true;
+  }
+  if (ds.species) { d.species = ds.species; d.picks = {}; preview(true); return true; }
+  if (ds.bg) { d.background = ds.bg; d.boost = {}; d.picks = {}; preview(true); return true; }
+  if (ds.boost) {
+    const bg = rl("backgrounds", d.background), [a, n] = ds.boost.split(":"), b = d.boost || {};
+    const two = Object.keys(b).find(k => b[k] === 2), one = Object.keys(b).find(k => b[k] === 1);
+    const other = not => bg.abilities.find(x => x !== not && x !== a) || bg.abilities.find(x => x !== a);
+    if (a === "all") d.boost = Object.fromEntries(bg.abilities.map(x => [x, 1]));
+    else if (n === "2") { const o = one && one !== a ? one : other(two); d.boost = { [a]: 2, [o]: 1 }; }
+    else { const t = two && two !== a ? two : other(one); d.boost = { [t]: 2, [a]: 1 }; }
+    preview(); renderBuilder(); return true;
+  }
+  if (ds.cskill) {
+    const c = rl("classes", d.class_key);
+    toggle(d.skills, ds.cskill, c.skill_count);
+    preview(); renderBuilder(); return true;
+  }
+  if (ds.dpick) {
+    const [key, o] = ds.dpick.split("|"), ch = S.prev?.choices?.find(x => x.key === key);
+    if (!ch) return true;
+    d.picks = d.picks || {};
+    const got = d.picks[key] || (d.picks[key] = []);
+    if (ch.repeat && got.length < ch.count) got.push(o); else toggle(got, o, ch.count);
+    preview(); renderBuilder(); return true;
+  }
+  if (ds.dspell) {
+    const s = spellOf(ds.dspell), p = S.prev, sp = d.spells || (d.spells = []);
+    const same = sp.filter(k => (spellOf(k)?.level === 0) === (s.level === 0));
+    if (sp.includes(s.key)) sp.splice(sp.indexOf(s.key), 1);
+    else { if (same.length >= (s.level === 0 ? p.cantrips : p.prepared)) sp.splice(sp.indexOf(same[0]), 1); sp.push(s.key); }
+    preview(); renderBuilder(); return true;
+  }
+  return false;
 }
 
 // ---- play
@@ -975,10 +1192,10 @@ function renderDock() {
   const groups = trays();
   if (S.tray && !groups[S.tray]?.items.length) S.tray = "";
   if (!yours) S.tray = "";
-  const defs = enc ? [["attack", "Attack"], ["move", "Move"], ["tactics", "Tactics"], ["roll", "Roll"], ["use", "Use"], ["end", "End turn"]]
-    : [["look", "Look"], ["talk", "Talk"], ["go", "Go"], ["roll", "Roll"], ["use", "Use"]];
+  const defs = enc ? [["attack", "Attack"], ["spells", spellWord()], ["abilities", "Abilities"], ["move", "Move"], ["tactics", "Tactics"], ["roll", "Roll"], ["use", "Use"], ["end", "End turn"]]
+    : [["look", "Look"], ["talk", "Talk"], ["go", "Go"], ["spells", spellWord()], ["abilities", "Abilities"], ["roll", "Roll"], ["use", "Use"]];
   const acts = defs.filter(([k]) => k === "look" || k === "end" || groups[k]?.items.length)
-    .map(([k, l]) => `<button class="${S.tray === k ? "on" : ""}" data-dock="${k}" ${thinking ? "disabled" : ""}>${l}</button>`).join("");
+    .map(([k, l]) => `<button class="${S.tray === k || (S.tray === "next" && S._next?.from === k) ? "on" : ""}" data-dock="${k}" ${thinking ? "disabled" : ""}>${l}</button>`).join("");
   const active = v.active, ap = active && v.players.find(p => p.id === active.player_id);
   const others = (v.pending || []).filter(p => !isMe(p.character_id));
   const idle = v.turn_started ? Date.now() / 1000 - v.turn_started : 0;
@@ -1076,14 +1293,75 @@ function trays() {
   for (const i of loc.items || []) if (!enc || b.free !== 0) g.use.items.push({ name: `Take the ${i.name}`, sub: "on the ground", send: `I pick up ${the(i.name)}` });
   for (const i of me.inventory || []) if (i.kind === "consumable") g.use.items.push({ name: i.name, sub: effectText(i.effect), send: `I use the ${i.name}` });
   if (me.hp < me.max_hp && !enc) g.use.items.push({ name: "Rest a while", sub: "recover", send: "I rest for a while" });
+  magicTrays(g, me);
+  if (S.tray === "next" && S._next) g.next = S._next;
   return g;
+}
+
+// magicTrays adds the Spells and Abilities trays. A pick that needs a
+// target opens a second tray of targets; the engine resolves the choice
+// exactly as picked (a cast_spell or use_feature hint).
+function magicTrays(g, me) {
+  const v = S.view, b = me.build, enc = !!v.encounter, bud = v.budget || {};
+  if (!b) return;
+  const loc = v.location || {}, foes = enc ? v.encounter.enemies.filter(e => e.hp > 0) : [];
+  const allies = v.party.filter(c => !c.dead || false);
+  const slotLeft = lv => (b.slots || []).filter(s => s.level >= lv).reduce((n, s) => n + s.left, 0);
+  const cost = s => ({ action: "action", bonus: "bonus action", free: "free", none: "" })[s] ?? s;
+  g.spells = { title: `${spellWord()}${b.spell_dc ? ` · DC ${b.spell_dc} · attack ${signed(b.spell_attack)}` : ""}`, items: [] };
+  for (const s of b.spells || []) {
+    const foeSpell = ["attack", "save"].includes(s.kind) || ["hunters_mark", "hex", "magic_missile", "scorching_ray", "spiritual_weapon"].includes(s.key);
+    if (!enc && (foeSpell || (s.area && s.kind !== "utility")) && !s.peace) continue;
+    if (s.key === "divine_smite") continue; // rides on an attack
+    const left = s.level ? slotLeft(s.level) : Infinity;
+    const sub = [s.level ? `${ORD[s.level]} · ${left ? `${left} slot${left > 1 ? "s" : ""} left` : "no slots left"}` : "cantrip", enc ? cost(s.cast) : "", s.range !== "self" ? s.range : ""].filter(Boolean).join(" · ");
+    const act = extra => ({ act: { kind: "cast_spell", spell: s.key, ...extra } });
+    const it = { name: s.name, sub, off: !left, send: `I cast ${s.name}`, hint: act() };
+    let targets = null;
+    if (s.key === "knock") targets = (loc.exits || []).filter(x => x.state === "locked").map(x => ({ name: x.to_name, sub: x.label, send: `I cast ${s.name} on the way to ${x.to_name}`, hint: act({ target: x.id }) }));
+    else if (s.key === "misty_step") targets = (loc.zones || []).filter(z => z.id !== me.zone_id).map(z => ({ name: z.name, sub: "step there", send: `I cast ${s.name} to ${z.name}`, hint: act({ zone: z.id }) }));
+    else if (s.kind === "utility" || (s.area && s.range === "self") || s.key === "spirit_guardians") targets = null;
+    else if (s.area) targets = [...new Set(foes.map(e => e.zone_id))].map(z => ({ name: zoneName(z) || "their position", sub: foes.filter(e => e.zone_id === z).map(e => e.display).join(", "), send: `I cast ${s.name} at ${zoneName(z) || "them"}`, hint: act({ zone: z }) }));
+    else if (foeSpell) targets = foes.map(e => ({ name: e.display, sub: `${e.hp}/${e.max_hp} HP · ${zoneName(e.zone_id)}`, send: `I cast ${s.name} at ${the(e.display)}`, hint: act({ target: e.id }) }));
+    else if (s.range !== "self" && !(s.targets > 1)) targets = [...allies, ...(s.key === "dispel_magic" ? foes.map(e => ({ id: e.id, name: e.display, hp: e.hp, max_hp: e.max_hp })) : [])]
+      .filter(t => s.key === "revivify" ? t.dead : true)
+      .map(t => ({ name: isMe(t.id) ? "Yourself" : t.name, sub: `${t.hp}/${t.max_hp} HP`, send: `I cast ${s.name} on ${isMe(t.id) ? "myself" : t.name}`, hint: act({ target: t.id }) }));
+    if (targets) {
+      if (!targets.length) continue;
+      it.next = { title: `${s.name} · on whom?`, items: targets };
+    }
+    g.spells.items.push(it);
+  }
+  g.abilities = { title: "Abilities", items: [] };
+  for (const f of b.abilities || []) {
+    if (f.combat && !enc) continue;
+    const uses = f.max ? `${f.left}/${f.max}` : "";
+    const sub = f.ready ? [enc ? cost(f.slot) : "", uses].filter(Boolean).join(" · ") : f.why || "not ready";
+    const act = extra => ({ act: { kind: "use_feature", feature: f.key, ...extra } });
+    const it = { name: f.name, sub, off: !f.ready, title: f.desc, send: `I use ${f.name}`, hint: act() };
+    if (f.target === "foe" && f.ready) it.next = { title: `${f.name} · on whom?`, items: foes.map(e => ({ name: e.display, sub: `${e.hp}/${e.max_hp} HP`, send: `I use ${f.name} on ${the(e.display)}`, hint: act({ target: e.id }) })) };
+    if ((f.target === "ally" || f.target === "any") && f.ready) it.next = { title: `${f.name} · on whom?`, items: [...allies.map(t => ({ name: isMe(t.id) ? "Yourself" : t.name, sub: `${t.hp}/${t.max_hp} HP`, send: `I use ${f.name} on ${isMe(t.id) ? "myself" : t.name}`, hint: act({ target: t.id }) })), ...(f.target === "any" ? foes.map(e => ({ name: e.display, sub: `${e.hp}/${e.max_hp} HP`, send: `I use ${f.name} on ${the(e.display)}`, hint: act({ target: e.id }) })) : [])] };
+    if (f.target === "zone" && f.ready) it.next = { title: `${f.name} · where?`, items: (loc.zones || []).map(z => ({ name: z.name, sub: foes.filter(e => e.zone_id === z.id).map(e => e.display).join(", ") || "", send: `I use ${f.name} toward ${z.name}`, hint: act({ zone: z.id }) })) };
+    if (it.next && !it.next.items.length) continue;
+    g.abilities.items.push(it);
+  }
+  // Riders on a weapon hit: a paladin's smite, a monk's stunning strike.
+  if (enc && bud.action !== 0) {
+    const has = k => (b.features || []).some(f => f.key === k);
+    const smite = has("divine_smite") && slotLeft(1) > 0;
+    const stun = has("stunning_strike") && (b.resources || []).some(r => r.key === "focus" && r.used < r.max);
+    for (const e of foes) {
+      if (smite) g.attack.items.push({ name: `${e.display} · with Divine Smite`, sub: "spends a slot on a hit", send: `I attack ${the(e.display)} and smite`, hint: { target_id: e.id, act: { kind: "attack", target: e.id, option: "smite" } } });
+      if (stun) g.attack.items.push({ name: `${e.display} · Stunning Strike`, sub: "focus point on a hit", send: `I attack ${the(e.display)} with a stunning strike`, hint: { target_id: e.id, act: { kind: "attack", target: e.id, option: "stun" } } });
+    }
+  }
 }
 
 function trayHTML(t) {
   const me = mine();
   S._tray = t.items;
   return `<div class="tray"><span class="mono-k">${esc(t.title)}</span>
-    ${t.items.map((o, i) => `<button class="tray-item" data-pick="${i}"><b>${esc(o.name)}</b>${o.bonus ? `<span class="bonus">${esc(o.bonus)}</span>` : o.sub ? `<span>${esc(o.sub)}</span>` : ""}</button>`).join("")}
+    ${t.items.map((o, i) => `<button class="tray-item ${o.off ? "off" : ""}" data-pick="${i}" ${o.title ? `title="${esc(o.title)}"` : ""}><b>${esc(o.name)}${o.next ? " ›" : ""}</b>${o.bonus ? `<span class="bonus">${esc(o.bonus)}</span>` : o.sub ? `<span>${esc(o.sub)}</span>` : ""}</button>`).join("")}
     ${t.abil && me ? `<span class="mono-k">Any other check · pick a skill, say what you try, the DM sets the difficulty</span>
       <div class="skill-grid">${skillsOf(me).map(k => `<button class="${k.proficient ? "prof" : ""}" data-skill="${esc(k.key)}"><small>${esc(k.name)}</small><b>${signed(k.mod)}</b></button>`).join("")}</div>` : ""}
   </div>`;
@@ -1354,11 +1632,11 @@ function sheetHTML(inRail) {
   return `${v.party.length > 1 && !inRail ? `<div class="tabs">${v.party.map(p => `<button class="${p.id === c.id ? "on" : ""}" data-sheet="${esc(p.id)}">${esc(firstName(p.name))}${isMe(p.id) ? " (you)" : ""}</button>`).join("")}</div>` : ""}
     <div class="cs-id">${face(c)}<div>
       <span class="nm">${esc(c.name)}</span>
-      <span class="sub-line">Level ${c.level} ${esc(c.class)} · ${esc(kitName(c.kit))} · ${esc(c.pronouns || "they/them")}</span>
+      <span class="sub-line">Level ${c.level} ${esc(roleLine(c))} · ${esc(c.pronouns || "they/them")}</span>
       <span class="pl">${own ? "You" : pl ? `Played by ${esc(pl.name)}` : ""}${c.zone_name ? ` · at ${esc(c.zone_name)}` : ""}</span>
       ${c.conditions?.length ? `<span class="conds">${c.conditions.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note || "")}">${esc(k.label)}</span>`).join("")}</span>` : ""}
     </div></div>
-    <div><div class="hp-k"><span class="mono-k">Hit points</span><b>${c.hp} / ${c.max_hp}</b></div><div class="bar5"><i class="${c.hp / c.max_hp <= .34 ? "low" : ""}" style="width:${hpPct(c)}%"></i></div></div>
+    <div><div class="hp-k"><span class="mono-k">Hit points</span><b>${c.hp} / ${c.max_hp}</b></div><div class="bar5"><i class="${c.hp / c.max_hp <= .34 ? "low" : ""}" style="width:${hpPct(c)}%"></i></div>${c.build?.temp_hp ? `<span class="small-note">+${c.build.temp_hp} temporary HP</span>` : ""}</div>
     <div><div class="vit4">
       <div><span>ARMOR</span><b>${c.ac}</b></div><div><span>GOLD</span><b>${c.gold}</b></div>
       <div><span>LEVEL</span><b>${c.level}</b></div><div><span>XP</span><b>${c.xp}${c.next_level_xp ? `<small>/${c.next_level_xp}</small>` : ""}</b></div></div>
@@ -1368,13 +1646,15 @@ function sheetHTML(inRail) {
       ${c.level_up ? `<p class="small-note">Level ${c.level_up.level} in ${Math.max(0, c.next_level_xp - c.xp)} XP: +${c.level_up.hp} max HP${c.level_up.proficiency_bonus > c.proficiency_bonus ? `, proficiency ${signed(c.level_up.proficiency_bonus)}` : ""}.</p>` : ""}
     </div>
     <div class="stat6">${ABIL.map(a => {
-      const p = (c.proficient || []).includes(a);
-      return `<div class="${p ? "prof" : ""}" title="${ABIL_NAME[a]}${p ? `, proficient (+${c.proficiency_bonus})` : ""}"><span>${a}${p ? " ★" : ""}</span><b>${signed(c.modifiers?.[a] ?? mod(c.scores[a]))}</b><small>${c.scores[a]}</small></div>`;
+      const p = !c.build && (c.proficient || []).includes(a);
+      const sv = c.build?.saves?.[a];
+      return `<div class="${p || sv?.proficient ? "prof" : ""}" title="${ABIL_NAME[a]}${p ? `, proficient (+${c.proficiency_bonus})` : ""}"><span>${a}${p ? " ★" : ""}</span><b>${signed(c.modifiers?.[a] ?? mod(c.scores[a]))}</b><small>${c.scores[a]}${sv ? ` · save ${signed(sv.mod)}${sv.proficient ? "★" : ""}` : ""}</small></div>`;
     }).join("")}</div>
     ${c.death_saves && !c.dead ? `<div class="eq">Death saves <b>${c.death_saves.successes}</b> of 3 successes · <b>${c.death_saves.failures}</b> of 3 failures${c.death_saves.stable ? " · stable" : ""}</div>` : ""}
     <section><span class="mono-k">Skills · passive Perception ${c.passive_perception ?? 10}</span>
       <div class="skills">${(c.skills || []).map(k => `<div class="${k.proficient ? "prof" : ""}" title="${esc(k.name)} (${esc(k.ability)})${k.proficient ? ", proficient" : ""}${k.expertise ? ", expertise" : ""}"><span>${esc(k.name)}${k.proficient ? " ★" : ""}${k.expertise ? "★" : ""}</span><b>${signed(k.mod)}</b></div>`).join("")}</div>
     </section>
+    ${sheetBuildHTML(c, own)}
     <section><span class="mono-k">Carrying</span>
       ${items.map(i => {
         const on = i.equipped || worn.has(i.id);
@@ -1386,6 +1666,57 @@ function sheetHTML(inRail) {
     </section>
     ${c.backstory || c.concept ? `<section><span class="mono-k">Story</span><p class="story-p">${esc(c.backstory || c.concept)}</p></section>` : ""}
     ${own ? `<section><span class="mono-k">Dice</span><button class="row-line" data-act="auto-roll"><span class="nm">${v.you?.auto_roll ? "The game rolls for you" : "You roll your own dice"}<small>${v.you?.auto_roll ? "turns resolve as soon as you send them" : "attacks and checks wait for your roll"}</small></span><span class="verb">${v.you?.auto_roll ? "Roll myself" : "Roll for me"}</span></button></section>` : ""}`;
+}
+
+// sheetBuildHTML is the class half of a sheet: level-up picks waiting,
+// limited uses, slots and spells, and features.
+function sheetBuildHTML(c, own) {
+  const b = c.build, v = S.view;
+  if (!b) return "";
+  const pips = (left, max) => `<span class="pips">${Array.from({ length: max }, (_, i) => `<i class="${i < left ? "ok" : ""}"></i>`).join("")}</span>`;
+  let out = "";
+  if (b.made_before_classes) out += `<p class="small-note">Made before classes, so they play as a ${esc(b.class_name.toLowerCase())}.${own && v.status === "lobby" ? " Change something to rebuild them." : ""}</p>`;
+  if (own && b.pending_choices.length) {
+    S._sc = S._sc || {};
+    const picks = Object.fromEntries(b.pending_choices.map(ch => [ch.key, S._sc[ch.key] || [...(b.picks?.[ch.key] || [])]]));
+    out += `<section class="levelup"><span class="mono-k">New level · choose</span>${choicesHTML(b.pending_choices, picks, "spick")}
+      <button class="btn primary" data-act="save-choices">Keep these</button></section>`;
+  }
+  if (b.resources.length) out += `<section><span class="mono-k">Uses</span>${b.resources.map(r => `<div class="row-line"><span class="nm">${esc(r.name)}<small>back after a ${r.recharge} rest</small></span>${r.max > 6 ? `<b class="note">${r.max - r.used}/${r.max}</b>` : pips(r.max - r.used, r.max)}</div>`).join("")}</section>`;
+  if (b.caster) {
+    const sw = spellWord();
+    out += `<section><span class="mono-k">${esc(sw)}${b.spell_dc ? ` · save DC ${b.spell_dc} · attack ${signed(b.spell_attack)}` : ""}</span>
+      ${b.slots?.length ? `<div class="slots">${b.slots.map(s => `<div><span>${ORD[s.level]}</span>${pips(s.left, s.max)}</div>`).join("")}</div>` : ""}
+      ${b.concentration ? `<p class="small-note">Concentrating on <b>${esc(b.concentration_name)}</b>. Taking damage may break it.</p>` : ""}
+      ${S.prepFor === c.id && b.prepare ? `${spellRows(b.prepare.options, S._prep, b.prepare, "sspell")}
+        <div class="row"><button class="back" data-act="prep-cancel">Cancel</button><button class="btn primary" data-act="prep-save">Prepare these</button></div>`
+        : `${(b.spells || []).slice().sort((x, y) => x.level - y.level).map(s => `<div class="row-line"><span class="nm">${esc(s.name)}<small>${s.level ? ORD[s.level] : "cantrip"} · ${esc(s.range)}${s.conc ? " · concentration" : ""} · ${esc(s.desc)}</small></span></div>`).join("")}
+        ${own && b.prepare && !v.encounter ? `<button class="link ink" data-act="prep-edit">Change prepared ${esc(sw.toLowerCase())}</button>` : ""}`}
+    </section>`;
+  }
+  out += `<section><span class="mono-k">Features${b.feats.length ? " · feats" : ""}</span>
+    ${b.features.map(f => `<details class="feat"><summary>${esc(f.name)}<small>${f.level ? `level ${f.level}` : "trait"}</small></summary><p>${esc(f.desc)}</p></details>`).join("")}
+    ${b.feats.map(k => `<details class="feat"><summary>${esc(rules()?.feats?.[k]?.name || k)}<small>feat</small></summary><p>${esc(rules()?.feats?.[k]?.desc || "")}</p></details>`).join("")}
+  </section>`;
+  return out;
+}
+
+// sheetPick toggles a level-up pick or a spell being prepared on the sheet.
+function sheetPick(ds) {
+  const me = mine(), b = me?.build;
+  if (!b) return;
+  if (ds.spick) {
+    const [key, o] = ds.spick.split("|"), ch = b.pending_choices.find(x => x.key === key);
+    S._sc = S._sc || {};
+    const got = S._sc[key] || (S._sc[key] = [...(b.picks?.[key] || [])]);
+    if (ch.repeat && got.length < ch.count) got.push(o); else toggle(got, o, ch.count);
+  } else {
+    const s = spellOf(ds.sspell) || b.spells.find(x => x.key === ds.sspell), sp = S._prep;
+    const same = sp.filter(k => ((spellOf(k)?.level ?? 1) === 0) === (s.level === 0));
+    if (sp.includes(s.key)) sp.splice(sp.indexOf(s.key), 1);
+    else { if (same.length >= (s.level === 0 ? b.prepare.cantrips : b.prepare.prepared)) sp.splice(sp.indexOf(same[0]), 1); sp.push(s.key); }
+  }
+  stageMode() ? renderRails() : renderPanel();
 }
 
 // journal. Quests, people, places and clues come from the world record on
@@ -1561,25 +1892,20 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-era],[data-lethal],[data-kit],[data-prof],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send]");
+  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send]");
   if (!t || t.disabled) return;
   const ds = t.dataset, act = ds.act;
   if (ds.open) return go(`#/c/${ds.open}`);
   if (ds.premise) { $("#premise").value = ds.premise[0].toUpperCase() + ds.premise.slice(1); return; }
   if (ds.era != null && !act) { S.era = ds.era; $("#eras").outerHTML = erasHTML(); return; }
   if (ds.lethal) { S.lethality = ds.lethal; $("#death").outerHTML = deathHTML(); return; }
-  if (ds.kit) { readEditor().kit = ds.kit; return renderBuilder(); }
+  if (builderClick(ds)) return;
+  if (ds.spick || ds.sspell) return sheetPick(ds);
   if (ds.swap) {
     const d = readEditor(), a = ds.swap;
     if (!S.swap) S.swap = a;
     else if (S.swap === a) S.swap = "";
-    else { [d.scores[a], d.scores[S.swap]] = [d.scores[S.swap], d.scores[a]]; S.swap = ""; }
-    return renderBuilder();
-  }
-  if (ds.prof) {
-    const d = readEditor(), a = ds.prof, p = d.proficient || (d.proficient = []);
-    if (p.includes(a)) p.splice(p.indexOf(a), 1);
-    else { p.push(a); if (p.length > 2) p.shift(); }
+    else { [d.scores[a], d.scores[S.swap]] = [d.scores[S.swap], d.scores[a]]; S.swap = ""; preview(); }
     return renderBuilder();
   }
   if (ds.step) { readEditor(); S.step = +ds.step; return renderBuilder(); }
@@ -1599,6 +1925,8 @@ document.addEventListener("click", async e => {
     const o = S._tray?.[+ds.pick];
     if (!o) return;
     if (o.talk) return openTalk(o.talk);
+    if (o.off) return toast(o.sub);
+    if (o.next) { S._next = { ...o.next, from: S.tray }; S.tray = "next"; return renderDock(); }
     return send(o.send, o.hint);
   }
   if (ds.check) { S.hint = { check: { ability: ds.check, purpose: "other" } }; S.tray = ""; renderDock(); const ta = $("#say"); if (ta) { ta.value = S.composer = ta.value || "I try to "; ta.focus(); } return; }
@@ -1646,21 +1974,30 @@ document.addEventListener("click", async e => {
         t.disabled = true; t.innerHTML = `<span class="spinner"></span> Drafting…`;
         try {
           const r = await api("POST", `/campaigns/${S.route}/characters/draft`, { concept });
-          S.draft = { ...r.character, concept: r.character.concept || concept, proficient: r.character.proficient || [] };
-          S.step = 3;
+          S.draft = { ...blankDraft(), ...r.character, concept: r.character.concept || concept };
+          S.prev = null; await preview(true);
+          S.step = steps().length - 1;
         } finally { renderLobby(); }
         return;
       }
-      case "build": S.draft = blankDraft(); S.step = 0; return renderLobby();
+      case "build": S.draft = blankDraft(); S.prev = null; S.step = 0; return renderLobby();
       case "edit": {
         const c = mine();
-        S.draft = { name: c.name, class: c.class, kit: c.kit, pronouns: c.pronouns, backstory: c.backstory || "", concept: c.concept || "", scores: { ...c.scores }, proficient: [...c.proficient] };
-        S.step = 0;
-        return renderLobby();
+        const spec = c.build?.spec;
+        // Sheets made before classes are rebuilt from their kit.
+        S.draft = spec ? { ...blankDraft(), ...structuredClone(spec) } : { ...blankDraft(), name: c.name, class: c.class, kit: c.kit, pronouns: c.pronouns, backstory: c.backstory || "", concept: c.concept || "" };
+        S.prev = null; S.step = 0;
+        renderLobby();
+        await preview(!spec);
+        return;
       }
-      case "step-next": readEditor(); S.step = Math.min(STEPS.length - 1, S.step + 1); return renderBuilder();
+      case "step-next":
+        readEditor();
+        if (steps()[S.step] === "Class" && !S.draft.class_key) return toast("Pick a class first.");
+        S.step = Math.min(steps().length - 1, S.step + 1); return renderBuilder();
+      case "spells-default": if (S.prev) { S.draft.spells = [...(S.prev.default_spells || [])]; preview(); } return renderBuilder();
       case "step-back": readEditor(); S.step = Math.max(0, S.step - 1); return renderBuilder();
-      case "cancel-draft": S.draft = null; S.swap = ""; return render();
+      case "cancel-draft": S.draft = null; S.prev = null; S.swap = ""; return render();
       case "save-char": {
         const d = readEditor();
         t.disabled = true;
@@ -1702,7 +2039,25 @@ document.addEventListener("click", async e => {
         toast(auto ? "The game rolls your dice from now on." : "You roll your own dice again.");
         return refreshView();
       }
-      case "new-char": S.draft = blankDraft(); S.step = 0; return renderBuilder();
+      case "new-char": S.draft = blankDraft(); S.prev = null; S.step = 0; return renderBuilder();
+      case "save-choices": {
+        const b = mine()?.build;
+        t.disabled = true;
+        for (const ch of b?.pending_choices || []) {
+          const picks = S._sc?.[ch.key] || [];
+          if (picks.length) await api("POST", `/campaigns/${S.route}/me/choose`, { key: ch.key, picks });
+        }
+        S._sc = {};
+        await refreshView(); refreshJournal();
+        return toast("Saved.");
+      }
+      case "prep-edit": S.prepFor = mine()?.id; S._prep = (mine()?.build?.spells || []).map(x => x.key).filter(k => mine().build.prepare.options.includes(k)); return refreshJournal();
+      case "prep-cancel": S.prepFor = ""; return refreshJournal();
+      case "prep-save":
+        t.disabled = true;
+        await api("POST", `/campaigns/${S.route}/me/spells`, { spells: S._prep });
+        S.prepFor = "";
+        await refreshView(); return refreshJournal();
       case "jtab": J.tab = ds.k; J.q = ""; J.editing = ""; return refreshJournal();
       case "note-edit": J.editing = ds.id; refreshJournal(); return $("#n-edit")?.focus();
       case "note-cancel": J.editing = ""; return refreshJournal();

@@ -121,6 +121,30 @@ Engine state on characters and enemies (`Conditions`), never set by the model di
   can't be farmed for good dice.
 - **Free play.** Outside fights there is no turn order; whoever writes acts.
 
+## Wave 2: the SRD ruleset (2026-10-29)
+
+- **Source.** SRD 5.2.1 (CC-BY-4.0): 12 classes with one subclass each,
+  levels 1-5; 9 species; the SRD backgrounds plus six more in the same
+  shape; origin and general feats, fighting styles, six invocations; about
+  75 spells up to 3rd level. All data is Go tables in `internal/game`
+  (`classes.go`, `origins.go`, `spells.go`); rules live in `combat5e.go`,
+  `magic.go`, `features.go` and `sheet.go`.
+- **Eras reskin, rules don't change.** Every class, subclass, species,
+  background and spell has a name for gaslight, pulp, modern and future
+  (`EraNames`); a test keeps names unique inside an era. The interpreter and
+  `SpellByRef` accept the key, the SRD name or any era name.
+- **Kept from before.** Weapon damage still adds no ability modifier (the
+  enemy HP scale was tuned for it); rage, sneak attack, smite and the like add
+  their own dice. Zones stand in for distance: touch is the same zone, near
+  one zone, far two.
+- **Bonus action.** The budget has a bonus slot. Spending the action still
+  ends the turn, so bonus actions come in the same message. Outside fights
+  features cost nothing.
+- **Concentration** is one spell per caster; its conditions carry the spell
+  and caster, and a failed CON save (DC max(10, half the damage)) ends them.
+- **Old sheets** (no `class_key`) play as the class their kit maps to with
+  their old proficient abilities as saves and their old HP.
+
 ## Changes from the live play-test (deepseek-v4.1-flash)
 
 - Quests stay completable whatever the author names: an obtain/deliver item that exists

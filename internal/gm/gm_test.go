@@ -417,7 +417,7 @@ func TestSnapshotShowsBudgetAndOnlyValidIDs(t *testing.T) {
 	r.act(t, "u1", "look", llm.Call("look", map[string]any{}))
 	req := r.f.Tagged("interpret")[0]
 	u := lastUser(req)
-	for _, want := range []string{"LEFT THIS TURN: action 1, move 1, free unlimited", "EXITS:", "ZONES:", "Tamsin Hale [npc", "PLAYER (Aria) SAYS: look"} {
+	for _, want := range []string{"LEFT THIS TURN: action 1, bonus action 1, move 1, free unlimited", "EXITS:", "ZONES:", "Tamsin Hale [npc", "PLAYER (Aria) SAYS: look"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("interpreter prompt missing %q", want)
 		}
@@ -1326,5 +1326,55 @@ func TestStunnedCharacterLosesTheirTurn(t *testing.T) {
 	}
 	if len(r.events(t, "conditions")) == 0 {
 		t.Fatal("conditions event")
+	}
+}
+
+// makeWizard turns u1's character into a first-level wizard who knows
+// fire bolt and magic missile.
+func makeWizard(t *testing.T, r *rig) *game.Character {
+	t.Helper()
+	w := r.world(t)
+	c := w.CharacterOf("u1")
+	c.ClassKey, c.Kit, c.Spells = "wizard", "arcanist", []string{"fire_bolt", "mage_hand", "ray_of_frost", "magic_missile", "shield", "sleep"}
+	c.Scores[game.INT] = 16
+	_, err := r.g.Store.Save(bg, w)
+	must(t, err)
+	return c
+}
+
+func TestCastFromTheDockSkipsTheInterpreter(t *testing.T) {
+	r := fightRig(t, 3, game.EnemySpec{Name: "Marsh Ghoul", HP: 30, AC: 5, AttackBonus: 2, Damage: "1d4"})
+	makeWizard(t, r)
+	foe := r.world(t).Encounter.Enemies[0]
+	before := len(r.f.Tagged("interpret"))
+	res, err := r.g.TakeAction(bg, r.id, "u1", "I cast magic missile at the ghoul", Hints{Act: &ActHint{Kind: game.ActCast, Spell: "magic_missile", Target: foe.ID}})
+	must(t, err)
+	if len(r.f.Tagged("interpret")) != before {
+		t.Fatal("a dock cast should not ask the interpreter")
+	}
+	st := res.Resolution.Steps[0]
+	if st.Action.Kind != game.ActCast || st.Error != "" {
+		t.Fatalf("step %+v", st)
+	}
+	c := r.world(t).CharacterOf("u1")
+	if game.SlotsLeft(c)[0] != game.SlotsMax(c)[0]-1 {
+		t.Fatal("magic missile should spend a 1st-level slot")
+	}
+	if e := r.world(t).Enemy(foe.ID); e.HP >= 30 {
+		t.Fatal("magic missile should hit")
+	}
+}
+
+func TestInterpreterCastsByEraName(t *testing.T) {
+	r := fightRig(t, 3, game.EnemySpec{Name: "Marsh Ghoul", HP: 30, AC: 5, AttackBonus: 2, Damage: "1d4"})
+	makeWizard(t, r)
+	res := r.act(t, "u1", "I hurl a mote of fire at the ghoul", llm.Call("cast_spell", map[string]any{"spell": "Fire Bolt", "target": "Marsh Ghoul"}))
+	st := res.Resolution.Steps[0]
+	if st.Action.Kind != game.ActCast || st.Action.Spell != "fire_bolt" || st.Error != "" {
+		t.Fatalf("step %+v", st)
+	}
+	reqs := r.f.Tagged("interpret")
+	if !strings.Contains(lastUser(reqs[len(reqs)-1]), "SPELLS") {
+		t.Fatal("interpreter prompt should list the caster's spells")
 	}
 }

@@ -35,7 +35,7 @@ const (
 // ActionKinds lists every valid kind.
 var ActionKinds = append([]string{ActLook, ActSay, ActEquip, ActDrop, ActEndTurn, ActMove, ActReposition, ActTravel,
 	ActAttack, ActSubdue, ActCheck, ActUseItem, ActTalkTo, ActBuy, ActSell, ActAcceptQuest, ActTurnInQuest,
-	ActPickUp, ActGiveItem, ActRest}, tacticKinds...)
+	ActPickUp, ActGiveItem, ActRest}, append(tacticKinds, magicKinds...)...)
 
 // MaxSteps is how many steps one message may resolve.
 const MaxSteps = 4
@@ -54,6 +54,10 @@ type Action struct {
 	Method  string `json:"method,omitempty"`  // subdue method; shove: prone | push
 	Text    string `json:"text,omitempty"`    // speech, or what the check is for
 	Promise string `json:"promise,omitempty"` // talk_to: what the character gave their word to do
+	Spell   string `json:"spell,omitempty"`   // cast_spell
+	Level   int    `json:"level,omitempty"`   // cast_spell slot level; use_feature amount or slot
+	Feature string `json:"feature,omitempty"` // use_feature
+	Option  string `json:"option,omitempty"`  // attack: smite | stun
 }
 
 // Roll is a dice roll reported to players.
@@ -94,15 +98,17 @@ func dmgRoll(label, kind string, r dice.Result) Roll {
 
 // Step is the outcome of one action.
 type Step struct {
-	Action        Action        `json:"action"`
-	Slot          Slot          `json:"slot,omitempty"`
-	OK            bool          `json:"ok"`
-	Error         string        `json:"error,omitempty"`
-	Skipped       bool          `json:"skipped,omitempty"`
-	Rolls         []Roll        `json:"rolls,omitempty"`
-	Tier          dice.Tier     `json:"tier,omitempty"`
-	Changes       []string      `json:"changes,omitempty"`
-	Info          []string      `json:"info,omitempty"` // facts for the narrator (look results etc.)
+	Action  Action    `json:"action"`
+	Slot    Slot      `json:"slot,omitempty"`
+	OK      bool      `json:"ok"`
+	Error   string    `json:"error,omitempty"`
+	Skipped bool      `json:"skipped,omitempty"`
+	Rolls   []Roll    `json:"rolls,omitempty"`
+	Tier    dice.Tier `json:"tier,omitempty"`
+	Changes []string  `json:"changes,omitempty"`
+	Info    []string  `json:"info,omitempty"` // facts for the narrator (look results etc.)
+	// Grant adds to the turn budget after the step (action surge, dash).
+	Grant         *Budget       `json:"-"`
 	Quests        []QuestUpdate `json:"quests,omitempty"`
 	Arrived       string        `json:"arrived,omitempty"` // new location id
 	CombatStarted bool          `json:"combat_started,omitempty"`
@@ -231,6 +237,11 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 			continue
 		}
 		st.OK = true
+		if st.Grant != nil {
+			trial.Action += st.Grant.Action
+			trial.Move = max(0, trial.Move+st.Grant.Move)
+			trial.Bonus += st.Grant.Bonus
+		}
 		*budget = trial
 		if trade {
 			tradedWith[strings.ToLower(a.Target)] = true
@@ -303,6 +314,12 @@ func costOf(w *World, c *Character, a Action) (Slot, error) {
 		default:
 			return "", fmt.Errorf("%s is %s away; you can move at most 2 zones in a turn", z.Name, zonesWord(d))
 		}
+	}
+	switch a.Kind {
+	case ActCast:
+		return spellSlot(c, a)
+	case ActFeature:
+		return featureSlot(w, c, a)
 	}
 	for _, k := range ActionKinds {
 		if k == a.Kind {
@@ -400,6 +417,10 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 		return shove(ctx, c, a, st)
 	case ActGrapple:
 		return grapple(ctx, c, a, st)
+	case ActCast:
+		return castSpell(ctx, c, a, st)
+	case ActFeature:
+		return useFeature(ctx, c, a, st)
 	}
 	return fmt.Errorf("unknown action %q", a.Kind)
 }
@@ -910,41 +931,48 @@ func attack(ctx *Ctx, c *Character, a Action, st *Step) error {
 			c.Weapon = it.ID
 		}
 	}
+	if c.Conditions.Has(CondWildShape) {
+		wpn = &Item{Name: "claws", Kind: ItemWeapon, Damage: "1d8", Ability: WIS}
+	}
 	reach := InferReach(wpn)
 	d := ZoneDistance(l, c.ZoneID, e.ZoneID)
 	if !InReach(reach, d) {
 		return fmt.Errorf("%s is %s away and %s has %s reach; reposition closer first", e.Display(), zonesWord(d), wpn.Name, ReachName(reach))
 	}
-	toHit, _ := AttackMod(c, wpn)
-	cover := CoverBonus(l, c.ZoneID, e.ZoneID)
-	edge, why := AttackEdge(c.Conditions, e.Conditions, d)
-	out := AttackWithEdge(ctx.R, fmt.Sprintf("%s attacks %s with %s", c.Name, e.Display(), wpn.Name), toHit, e.AC+cover, wpn.Damage, edge, why)
-	out.Roll.Parts, out.Roll.Cover = AttackParts(c, wpn), cover
-	if c.Conditions.remove(CondHidden) {
-		st.Changes = append(st.Changes, c.Name+" gives away their hiding place")
+	if e.Conditions.Has(CondInvisible) {
+		return fmt.Errorf("%s can't be seen", e.Display())
 	}
-	c.Conditions.remove(CondHelped)
-	st.Rolls = append(st.Rolls, checkRoll("attack", out.Roll))
-	st.Tier = out.Roll.Tier
-	if !out.Hit {
-		st.Changes = append(st.Changes, fmt.Sprintf("%s misses %s", c.Name, e.Display()))
-		if out.Roll.Tier == dice.CritFailure {
-			AdjustTension(w, 1)
+	opts := strikeOpts{Smite: a.Option == "smite" && c.HasFeature("divine_smite"), Stun: a.Option == "stun"}
+	if opts.Smite && lowestSlot(c, 1) == 0 {
+		return fmt.Errorf("%s has no spell slot left to smite with", c.Name)
+	}
+	n := attacksPerAction(c)
+	if IsFocus(wpn) {
+		n = 1 // a focus bolt is a cantrip, not a weapon attack
+	}
+	for i := 0; i < n; i++ {
+		if e.Defeated() {
+			if e = nextFoeInReach(w, c, reach); e == nil {
+				break
+			}
 		}
+		if strike(w, ctx.R, c, e, wpn, opts, st) && opts.Smite {
+			opts.Smite = false // one smite per attack action is plenty
+		}
+	}
+	return nil
+}
+
+// nextFoeInReach is another living foe c can reach, for a second attack.
+func nextFoeInReach(w *World, c *Character, reach Reach) *Enemy {
+	if w.Encounter == nil {
 		return nil
 	}
-	dr := dmgRoll(fmt.Sprintf("%s damage", wpn.Name), "damage", *out.Damage)
-	dr.Crit = out.Crit
-	st.Rolls = append(st.Rolls, dr)
-	dmg := out.Damage.Total
-	e.HP = max(0, e.HP-dmg)
-	line := fmt.Sprintf("%s hits %s for %d damage (%d/%d HP)", c.Name, e.Display(), dmg, e.HP, e.MaxHP)
-	if out.Crit {
-		line = "Critical hit! " + line
-	}
-	st.Changes = append(st.Changes, line)
-	if e.HP == 0 {
-		st.Changes = append(st.Changes, defeat(w, e, false)...)
+	l := w.Here()
+	for _, e := range w.Encounter.Living() {
+		if InReach(reach, ZoneDistance(l, c.ZoneID, e.ZoneID)) && !e.Conditions.Has(CondInvisible) {
+			return e
+		}
 	}
 	return nil
 }
@@ -972,12 +1000,11 @@ func subdue(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if e.Conditions.Has(CondStunned) || e.Conditions.Has(CondRestrained) {
 		dc -= 2 // easier to pin or talk down a foe that can't fight back
 	}
-	edge, why := checkEdge(c.Conditions)
-	mod, parts, what := c.CheckMod(ab), CheckParts(c, ab), string(ab)
+	parts, what := CheckParts(c, ab), string(ab)
 	if sk, ok := SkillByKey(subdueSkill(method)); ok && sk.Ability == ab {
-		mod, parts, what = c.SkillMod(sk), SkillParts(c, sk), sk.Name
+		parts, what = SkillParts(c, sk), sk.Name
 	}
-	ch := ctx.R.D20Edge(mod, dc, edge)
+	ch, parts, why := charCheck(ctx.R, c, ab, parts, dc)
 	c.Conditions.remove(CondHelped)
 	st.Rolls = append(st.Rolls, Roll{Label: fmt.Sprintf("%s tries to %s %s (%s)", c.Name, strings.ReplaceAll(method, "_", " "), e.Display(), what),
 		Kind: "subdue", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: parts, Against: "DC",
@@ -1034,6 +1061,9 @@ func completeMain(w *World) []string {
 	w.Campaign.Status = StatusCompleted
 	return changes
 }
+
+// EndFight ends the encounter as won, with its rewards.
+func EndFight(w *World) []string { return endEncounter(w) }
 
 func endEncounter(w *World) []string {
 	l := w.Here()
@@ -1145,11 +1175,10 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if patient != nil {
 		dc = 10
 	}
-	mod := c.CheckMod(ab)
 	parts := CheckParts(c, ab)
 	label := fmt.Sprintf("%s %s check", c.Name, ab)
 	if hasSkill {
-		mod, parts = c.SkillMod(sk), SkillParts(c, sk)
+		parts = SkillParts(c, sk)
 		label = fmt.Sprintf("%s %s check", c.Name, sk.Name)
 	}
 	if lockEdge != nil {
@@ -1158,7 +1187,6 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 			dc = 15
 		}
 		if ab == DEX && w.FindItemOf(OwnerCharacter, c.ID, "thieves_tools") != nil {
-			mod += 2
 			parts = append(parts, RollPart{Label: "Thieves' tools", Value: 2})
 			label += " with thieves' tools"
 		}
@@ -1172,8 +1200,7 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if a.Text != "" {
 		label += " to " + trimTo(a.Text, 60)
 	}
-	edge, why := checkEdge(c.Conditions)
-	ch := ctx.R.D20Edge(mod, dc, edge)
+	ch, parts, why := charCheck(ctx.R, c, ab, parts, dc)
 	c.Conditions.remove(CondHelped)
 	st.Rolls = append(st.Rolls, Roll{Label: label, Kind: "check", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: parts, Against: "DC",
 		Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: why})
@@ -1295,9 +1322,10 @@ func rest(ctx *Ctx, c *Character, st *Step) error {
 		return fmt.Errorf("you can't rest during a fight")
 	}
 	l := w.Here()
-	ClearAllConditions(w)
 	if l.Danger == 0 {
+		ClearAllConditions(w)
 		for _, ch := range w.Characters {
+			LongRest(ch)
 			SetHP(ch, ch.MaxHP)
 		}
 		s := &w.Campaign.Scene
@@ -1307,7 +1335,11 @@ func rest(ctx *Ctx, c *Character, st *Step) error {
 		AdjustTension(w, -1)
 		return nil
 	}
+	clearShortRest(w)
 	for _, ch := range w.Characters {
+		if ch.Dead {
+			continue
+		}
 		if ch.Down() {
 			SetHP(ch, 1)
 		} else {
@@ -1316,6 +1348,11 @@ func rest(ctx *Ctx, c *Character, st *Step) error {
 	}
 	AdvanceTime(w, 1)
 	st.Changes = append(st.Changes, fmt.Sprintf("The party takes a short rest (%s)", w.Campaign.Scene.TimeName()))
+	for _, ch := range w.Characters {
+		if !ch.Dead {
+			st.Changes = append(st.Changes, ShortRest(ch)...)
+		}
+	}
 	roll := ctx.R.Die(100)
 	if roll <= l.Danger*8 {
 		st.Rolls = append(st.Rolls, Roll{Label: "Random encounter while resting", Kind: "encounter", Total: roll, Target: l.Danger * 8})
