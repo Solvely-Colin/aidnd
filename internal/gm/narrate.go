@@ -23,7 +23,8 @@ Rules:
 - Write as a storyteller, never as the engine: no game words (zone, exit, NPC, attitude, disposition, HP, AC, budget, action, step, engine, state) and no lists of who is where. Say "across the green" or "down by the steps", not "one zone off".
 - 40-100 words, plain language, lead with what happened. Second person plural or character names; present tense.
 - You may change the world only through the provided directive tools; code validates them. You cannot change player HP or gold.
-- Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.`
+- Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.
+- WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
 
 const quickSystem = `You are the narrator of a tabletop game. The player took only free actions (looking, a remark, readying gear).
 Answer briefly in at most 60 words using only the facts given, as a storyteller: no game words (zone, exit, NPC, attitude, HP, budget, action, engine) and no lists of who is where; answer the question asked, not everything in the state. If what they look for is not there, say so plainly. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
@@ -54,7 +55,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	if quick {
 		req := llm.Request{Tag: "narrate_quick", Temperature: 0.6, MaxTokens: 200, Messages: []llm.Message{
 			llm.System(quickSystem),
-			llm.User(fmt.Sprintf("%s\nPLAYER (%s): %s\n\nWHAT HAPPENED:\n%s", snapshot(w, actor, false), actor.Name, text, happened)),
+			llm.User(fmt.Sprintf("%s%s\nPLAYER (%s): %s\n\nWHAT HAPPENED:\n%s", snapshot(w, actor, false), worldMemory(w, actor), actor.Name, text, happened)),
 		}}
 		resp, err := g.LLM.Chat(ctx, req)
 		if err == nil {
@@ -77,6 +78,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	}
 	b.WriteString("\nSTATE:\n")
 	b.WriteString(snapshot(w, actor, true))
+	b.WriteString(worldMemory(w, actor))
 	if len(recent) > 0 {
 		fmt.Fprintf(&b, "\nRECENT LOG:\n%s\n", strings.Join(recent, "\n"))
 	}
@@ -84,7 +86,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	b.WriteString(dir.Note())
 	tools := directiveTools()
 	if w.InCombat() || res.CombatStarted {
-		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true})
+		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true, DirResolvePromise: true})
 	}
 	req := llm.Request{Tag: "narrate", Temperature: 0.8, MaxTokens: 600, Tools: tools,
 		Messages: []llm.Message{llm.System(narratorSystem), llm.User(b.String())}}
@@ -409,8 +411,9 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		return fmt.Sprintf("%s now stocks %s", n.Name, strings.Join(added, ", ")), nil
 	case DirNPCNote:
 		var a struct {
-			NPCID string `json:"npc_id"`
-			Note  string `json:"note"`
+			NPCID     string `json:"npc_id"`
+			Note      string `json:"note"`
+			Important bool   `json:"important"`
 		}
 		if err := c.Decode(&a); err != nil {
 			return "", err
@@ -419,12 +422,17 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		if n == nil {
 			return "", fmt.Errorf("unknown npc %q", a.NPCID)
 		}
-		n.Remember(trim(a.Note, 140))
+		if a.Important {
+			n.Keep(fmt.Sprintf("day %d: %s", w.Campaign.Scene.Day, trim(a.Note, 140)))
+		} else {
+			n.Remember(trim(a.Note, 140))
+		}
 		return "", nil
 	case DirAdjustDisp:
 		var a struct {
-			NPCID string `json:"npc_id"`
-			Delta int    `json:"delta"`
+			NPCID  string `json:"npc_id"`
+			Delta  int    `json:"delta"`
+			Reason string `json:"reason"`
 		}
 		if err := c.Decode(&a); err != nil {
 			return "", err
@@ -433,7 +441,15 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		if n == nil || n.LocationID != l.ID {
 			return "", fmt.Errorf("no npc %q here", a.NPCID)
 		}
-		n.Disposition = clampInt(n.Disposition+clampInt(a.Delta, -1, 1), -3, 3)
+		d := clampInt(a.Delta, -1, 1)
+		n.Disposition = clampInt(n.Disposition+d, -3, 3)
+		if r := strings.TrimSpace(a.Reason); r != "" && d != 0 {
+			feel := "warmed to the party"
+			if d < 0 {
+				feel = "cooled toward the party"
+			}
+			n.Remember(fmt.Sprintf("%s: %s", feel, trim(r, 100)))
+		}
 		return "", nil
 	case DirNPCGivesItem:
 		var a struct {
@@ -466,7 +482,9 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		return fmt.Sprintf("%s gives %s to %s", n.Name, it.Name, to.Name), nil
 	case DirRecordLore:
 		var a struct {
-			Text string `json:"text"`
+			Text   string   `json:"text"`
+			Kind   string   `json:"kind"`
+			NPCIDs []string `json:"npc_ids"`
 		}
 		if err := c.Decode(&a); err != nil {
 			return "", err
@@ -474,8 +492,34 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		if strings.TrimSpace(a.Text) == "" {
 			return "", fmt.Errorf("text is required")
 		}
-		w.AddChronicle(trim(a.Text, 300))
+		kind := game.FactNote
+		for _, k := range game.FactKinds {
+			if a.Kind == k {
+				kind = k
+			}
+		}
+		ids := npcIDs(w, a.NPCIDs)
+		if kind == game.FactPromise && len(ids) == 0 {
+			return "", fmt.Errorf("a promise needs npc_ids: who the party gave its word to")
+		}
+		if len(w.OpenPromises()) >= 8 && kind == game.FactPromise {
+			return "", fmt.Errorf("too many open promises; resolve one first")
+		}
+		w.Record(game.ChronicleEntry{Text: trim(a.Text, 300), Kind: kind, NPCIDs: ids})
 		return "", nil
+	case DirResolvePromise:
+		var a struct {
+			ID      string `json:"promise_id"`
+			Outcome string `json:"outcome"`
+			Note    string `json:"note"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		if a.Outcome != game.PromiseKept && a.Outcome != game.PromiseBroken {
+			return "", fmt.Errorf("outcome must be kept or broken")
+		}
+		return game.ResolvePromise(w, a.ID, a.Outcome == game.PromiseKept, trim(a.Note, 200))
 	case DirAdjustTension:
 		var a struct {
 			Delta int `json:"delta"`
@@ -629,7 +673,7 @@ func normalizeQuote(s string) string {
 func (g *GM) summarize(ctx context.Context, w *game.World, recent []string) {
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "summarize", Temperature: 0.3, MaxTokens: 400, Messages: []llm.Message{
 		llm.System("Summarize the story so far in at most 120 words: key events, promises, enemies and open threads. Facts only."),
-		llm.User(fmt.Sprintf("PREVIOUS SUMMARY: %s\n\nRECENT LOG:\n%s", w.Campaign.Summary, strings.Join(recent, "\n")))}})
+		llm.User(fmt.Sprintf("PREVIOUS SUMMARY: %s\n\nFACTS RECORDED SINCE:\n%s\n\nRECENT LOG:\n%s", w.Campaign.Summary, orNone(factsSince(w, w.Campaign.SummaryTurn)), strings.Join(recent, "\n")))}})
 	if err == nil && strings.TrimSpace(resp.Content) != "" {
 		w.Campaign.Summary = trim(resp.Content, 1200)
 		w.Campaign.SummaryTurn = w.Campaign.Turn

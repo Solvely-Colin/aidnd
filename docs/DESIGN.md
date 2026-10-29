@@ -109,3 +109,15 @@ changes below (enemies act once per round, softer early fights).
 - A beat in which someone new shows up names them as `figure`. The figure is created offstage and brought into the actor's zone when the beat plays (and attacks if hostile).
 - Examining an NPC counts toward talk_to_npc objectives. Looking at something that is not here says so instead of describing the whole place.
 - Narration must not use game words (zone, NPC, HP, ...). If it does anyway, one rewrite pass replaces them.
+
+## World memory
+
+The chronicle is the world's long-term memory, and the engine writes to it, not just the narrator.
+
+- Every fact has an id, turn, day, kind (fact, deed, death, promise, rumor), place and the NPCs it concerns. Facts from before this change get ids on load.
+- The engine records: a named NPC killed or subdued (with where), and accepting a quest as a promise to its giver. That promise is kept when the quest is turned in (or completes with no giver); only the engine settles it.
+- When a player gives an NPC their word, the interpreter fills talk_to's `promise` field and the engine records an open promise to that NPC (live model: "I swear I'll bring you back the keeper's lantern" became one).
+- The narrator records facts with `record_lore` (a promise must name who it was made to; at most 8 open) and settles its own promises with `resolve_promise`. A kept promise warms everyone it was made to by one step, a broken one cools them, and they remember it for good.
+- NPCs keep up to 6 permanent memories (`keeps`: attacked, subdued, gifts, quests done, promises settled, `npc_note` with important) next to the 8 rolling notes. `adjust_disposition` takes a reason, which the NPC remembers.
+- Locations store the day the party was last there; coming back on a later day adds "returns after N days away" to the resolution.
+- Each narration prompt carries a WORLD MEMORY block: up to 4 facts set in this place, 2 about each person in the scene, open promises with ids, 3 other recent facts, and the named dead. Quick answers get it too. The story summary is rebuilt from the facts recorded since the last summary as well as the log.

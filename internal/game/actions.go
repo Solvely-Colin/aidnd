@@ -52,6 +52,7 @@ type Action struct {
 	Purpose string `json:"purpose,omitempty"` // ability_check: search | unlock | force | other
 	Method  string `json:"method,omitempty"`  // subdue method
 	Text    string `json:"text,omitempty"`    // speech, or what the check is for
+	Promise string `json:"promise,omitempty"` // talk_to: what the character gave their word to do
 }
 
 // Roll is a dice roll reported to players.
@@ -504,6 +505,13 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 			}
 		}
 	}
+	if p := strings.TrimSpace(a.Promise); p != "" {
+		if f := w.Record(ChronicleEntry{Kind: FactPromise, Source: SourceEngine, NPCIDs: []string{n.ID},
+			Text: fmt.Sprintf("%s promised %s: %s", c.Name, n.Name, trimTo(p, 200))}); f != nil {
+			n.Remember(fmt.Sprintf("%s promised me: %s", c.Name, trimTo(p, 120)))
+			st.Info = append(st.Info, fmt.Sprintf("%s gives %s their word (%s)", c.Name, n.Name, trimTo(p, 200)))
+		}
+	}
 	st.Changes = append(st.Changes, fmt.Sprintf("%s talks with %s", c.Name, n.Name))
 	return nil
 }
@@ -564,8 +572,16 @@ func moveThrough(ctx *Ctx, c *Character, ref string, st *Step) error {
 func arrive(ctx *Ctx, loc *Location, via *Edge, st *Step) {
 	w := ctx.W
 	from := w.Campaign.LocationID
+	day := w.Campaign.Scene.Day
+	if prev := w.Location(from); prev != nil && from != loc.ID {
+		prev.LastDay = day
+	}
+	if loc.Visited && from != loc.ID && loc.LastDay > 0 && day > loc.LastDay {
+		st.Info = append(st.Info, returnNote(loc, day))
+	}
 	w.Campaign.LocationID = loc.ID
 	loc.Visited = true
+	loc.LastDay = day
 	if via != nil && via.State == EdgeKnown {
 		via.State = EdgeOpen
 	}
@@ -735,7 +751,7 @@ func findFoe(w *World, ref string, allowNPC bool) (*Enemy, error) {
 				}
 			}
 			n.Disposition = -3
-			n.Remember("was attacked by the party")
+			n.Keep(fmt.Sprintf("day %d: was attacked by the party", w.Campaign.Scene.Day))
 			if e := npcAsEnemy(w, n); e != nil {
 				return e, nil
 			}
@@ -842,10 +858,17 @@ func defeat(w *World, e *Enemy, subdued bool) []string {
 	changes := []string{fmt.Sprintf("%s %s", e.Display(), verb)}
 	w.Defeats = append(w.Defeats, DefeatRecord{Name: e.Name, NPCID: e.NPCID, LocationID: w.Campaign.LocationID, Turn: w.Campaign.Turn})
 	if n := w.NPC(e.NPCID); n != nil && e.NPCID != "" {
+		here := w.Location(w.Campaign.LocationID)
+		where := w.Campaign.LocationID
+		if here != nil {
+			where = here.Name
+		}
 		if !subdued {
 			n.Alive = false
+			w.Record(ChronicleEntry{Kind: FactDeath, Source: SourceEngine, NPCIDs: []string{n.ID}, Text: fmt.Sprintf("%s was killed by the party at %s", n.Name, where)})
 		} else {
-			n.Remember("was subdued by the party")
+			n.Keep(fmt.Sprintf("day %d: was subdued by the party", w.Campaign.Scene.Day))
+			w.Record(ChronicleEntry{Kind: FactDeed, Source: SourceEngine, NPCIDs: []string{n.ID}, Text: fmt.Sprintf("The party subdued %s at %s", n.Name, where)})
 		}
 		if n.Antagonist || n.ID == w.Campaign.AntagonistID {
 			changes = append(changes, completeMain(w)...)
@@ -862,6 +885,7 @@ func completeMain(w *World) []string {
 			mq.Objectives[i].Done = true
 		}
 		mq.Status = QuestTurnedIn
+		keepQuestPromise(w, mq)
 	}
 	w.Campaign.Status = StatusCompleted
 	return changes
@@ -1084,4 +1108,12 @@ func NPCJoinsFight(w *World, n *NPC) *Enemy {
 		}
 	}
 	return npcAsEnemy(w, n)
+}
+
+// returnNote tells the narrator how long the party has been away.
+func returnNote(loc *Location, day int) string {
+	if gap := day - loc.LastDay; gap > 1 {
+		return fmt.Sprintf("The party returns to %s after %d days away", loc.Name, gap)
+	}
+	return fmt.Sprintf("The party returns to %s after a day away", loc.Name)
 }

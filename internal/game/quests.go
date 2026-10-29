@@ -28,6 +28,7 @@ func AcceptQuest(w *World, questID string) (*Quest, error) {
 	}
 	q.Status = QuestActive
 	q.AcceptedTurn = w.Campaign.Turn
+	questPromise(w, q)
 	return q, nil
 }
 
@@ -166,6 +167,7 @@ func completeObjective(w *World, q *Quest, o *Objective) ([]QuestUpdate, []strin
 		if q.GiverID == "" {
 			changes = append(changes, grantRewards(w, q, nil)...)
 			q.Status = QuestTurnedIn
+			keepQuestPromise(w, q)
 		}
 	}
 	return ups, changes
@@ -196,7 +198,8 @@ func TurnInQuest(w *World, questID string, c *Character) ([]QuestUpdate, []strin
 	}
 	changes := grantRewards(w, q, c)
 	q.Status = QuestTurnedIn
-	g.Remember(fmt.Sprintf("%s completed %q for me", c.Name, q.Title))
+	keepQuestPromise(w, q)
+	g.Keep(fmt.Sprintf("day %d: %s completed %q for me", w.Campaign.Scene.Day, c.Name, q.Title))
 	if g.Disposition < 3 {
 		g.Disposition++
 	}
