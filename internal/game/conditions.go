@@ -90,7 +90,7 @@ type condRule struct {
 	NoTick bool
 	// LosesTurn effects take the bearer's whole turn.
 	LosesTurn bool
-	Summary     string // player-facing effect
+	Summary   string // player-facing effect
 }
 
 var condRules = map[string]condRule{
@@ -459,6 +459,9 @@ type ConditionTick struct {
 	// LostTurn is set when the bearer is stunned and loses the turn.
 	LostTurn bool `json:"lost_turn,omitempty"`
 }
+
+// Add merges another tick into t.
+func (t *ConditionTick) Add(o ConditionTick) { t.add(o) }
 
 func (t *ConditionTick) add(o ConditionTick) {
 	t.Changes = append(t.Changes, o.Changes...)

@@ -235,6 +235,24 @@ func buildFrom(spec CharacterSpec) *Character {
 	return c
 }
 
+// PreviewBuild is the unsaved character a spec makes, for the builder.
+func PreviewBuild(spec CharacterSpec, scores Scores) *Character {
+	c := buildFrom(spec)
+	c.Skills = buildSkills(spec)
+	if scores == nil {
+		scores, _ = standardScores(spec.Scores)
+	}
+	if scores == nil {
+		scores = Scores{}
+		for _, a := range Abilities {
+			scores[a] = 10
+		}
+	}
+	c.Scores = scores
+	c.Spells = spec.Spells
+	return c
+}
+
 // ValidateBuild checks a class spec: class, species and background exist,
 // the standard array, background ability boosts, class skills, picks and
 // spells. It returns the final scores.

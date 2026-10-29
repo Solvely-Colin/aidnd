@@ -20,9 +20,15 @@ type Hints struct {
 // ActHint is a tactical action picked from the dock (dodge, help, shove...).
 // It is resolved as picked, without the interpreter.
 type ActHint struct {
-	Kind   string `json:"kind"`
-	Target string `json:"target,omitempty"`
-	Method string `json:"method,omitempty"`
+	Kind    string `json:"kind"`
+	Target  string `json:"target,omitempty"`
+	Method  string `json:"method,omitempty"`
+	Spell   string `json:"spell,omitempty"`   // cast_spell
+	Feature string `json:"feature,omitempty"` // use_feature
+	Zone    string `json:"zone,omitempty"`
+	Level   int    `json:"level,omitempty"` // slot level, or lay on hands HP
+	Item    string `json:"item,omitempty"`
+	Option  string `json:"option,omitempty"` // attack: smite | stun
 }
 
 // CheckHint is a check the player called for from the dock. Search,
@@ -70,7 +76,88 @@ func sheetLine(w *game.World, c *game.Character) string {
 	if cs := c.Conditions.String(); cs != "" {
 		st += " (" + cs + ")"
 	}
-	return fmt.Sprintf("%s [%s] (%s) %s L%d, HP %d/%d%s, AC %d, gold %d", c.Name, c.ID, game.NormPronouns(c.Pronouns), c.Class, c.Level, c.HP, c.MaxHP, st, game.ArmorClass(w, c), c.Gold)
+	if c.TempHP > 0 {
+		st += fmt.Sprintf(" +%d temp HP", c.TempHP)
+	}
+	if c.Conc != nil {
+		st += " (concentrating on " + game.SpellName(game.Spells[c.Conc.Spell], w.Setting()) + ")"
+	}
+	return fmt.Sprintf("%s [%s] (%s) %s, %s, HP %d/%d%s, AC %d, gold %d", c.Name, c.ID, game.NormPronouns(c.Pronouns), c.Class, buildLine(w, c), c.HP, c.MaxHP, st, game.ArmorClass(w, c), c.Gold)
+}
+
+// buildLine is "level 3 Human Occultist (Thaumaturge)" in the setting.
+func buildLine(w *game.World, c *game.Character) string {
+	setting := w.Setting()
+	sp := game.SpeciesName(game.Species[c.SpeciesKey()], setting)
+	return strings.Replace(game.ClassLine(c, setting), "Level", "level", 1) + ", " + sp
+}
+
+// spellLines lists the actor's slots and spells for the interpreter.
+func spellLines(w *game.World, c *game.Character) []string {
+	if !c.IsCaster() {
+		return nil
+	}
+	setting := w.Setting()
+	var out []string
+	max, left := game.SlotsMax(c), game.SlotsLeft(c)
+	var slots []string
+	for i := range max {
+		if max[i] > 0 {
+			slots = append(slots, fmt.Sprintf("level %d: %d/%d", i+1, left[i], max[i]))
+		}
+	}
+	out = append(out, fmt.Sprintf("SPELL SLOTS: %s; spell save DC %d, spell attack %+d", orNone(slots), game.SpellDC(c), sumParts(game.SpellAttackParts(c))))
+	var sp []string
+	for _, k := range c.SpellList() {
+		s := game.Spells[k]
+		cost := "ACTION"
+		if s.Cast == game.SlotBonus {
+			cost = "BONUS"
+		}
+		lvl := "cantrip"
+		if s.Level > 0 {
+			lvl = fmt.Sprintf("level %d", s.Level)
+		}
+		conc := ""
+		if s.Conc {
+			conc = ", concentration"
+		}
+		sp = append(sp, fmt.Sprintf("%s \"%s\" (%s, %s, %s%s): %s", k, game.SpellName(s, setting), lvl, cost, s.Range, conc, s.Desc))
+	}
+	out = append(out, "SPELLS:\n  "+strings.Join(sp, "\n  "))
+	return out
+}
+
+// abilityLines lists the actor's usable class and species abilities.
+func abilityLines(w *game.World, c *game.Character) string {
+	var out []string
+	for _, u := range game.FeatureUses(w, c) {
+		cost := strings.ToUpper(string(u.Slot))
+		if cost == "BONUS" {
+			cost = "BONUS ACTION"
+		}
+		uses := ""
+		if u.Max > 0 {
+			uses = fmt.Sprintf(", %d/%d left", u.Left, u.Max)
+		}
+		ready := ""
+		if !u.Ready {
+			ready = " [not now: " + u.Why + "]"
+		}
+		out = append(out, fmt.Sprintf("%s \"%s\" (%s%s): %s%s", u.Key, u.Name, cost, uses, u.Desc, ready))
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return "ABILITIES:\n  " + strings.Join(out, "\n  ")
+}
+
+func sumParts(ps []game.RollPart) int {
+	n := 0
+	for _, p := range ps {
+		n += p.Value
+	}
+	return n
 }
 
 // snapshot is the compact state block shared by interpreter and narrator.
@@ -91,6 +178,19 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 			abil = append(abil, fmt.Sprintf("%s %+d", a, m))
 		}
 		line("CHECK MODIFIERS: %s (proficient: %v)", strings.Join(abil, ", "), actor.Proficient)
+		if actor.ClassKey != "" {
+			var sv []string
+			for _, a := range game.Abilities {
+				sv = append(sv, fmt.Sprintf("%s %+d", a, actor.SaveMod(a)))
+			}
+			line("SAVES: %s", strings.Join(sv, ", "))
+		}
+		for _, l := range spellLines(w, actor) {
+			line("%s", l)
+		}
+		if al := abilityLines(w, actor); al != "" {
+			line("%s", al)
+		}
 		var sks []string
 		for _, k := range actor.SkillList() {
 			if sk, ok := game.SkillByKey(k); ok {

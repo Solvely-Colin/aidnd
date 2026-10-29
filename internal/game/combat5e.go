@@ -112,6 +112,9 @@ func weaponAbility(c *Character, wpn *Item) Ability {
 	return ab
 }
 
+// WeaponDamage is weaponDamage for the sheet.
+func WeaponDamage(c *Character, wpn *Item) string { return weaponDamage(c, wpn) }
+
 // weaponDamage is the damage dice for c with wpn: martial arts, beast
 // claws and shillelagh raise the die.
 func weaponDamage(c *Character, wpn *Item) string {

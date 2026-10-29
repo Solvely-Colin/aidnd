@@ -62,9 +62,21 @@ func interpreterTools() []llm.Tool {
 			"zone": str("zone id from ZONES")}, "zone")),
 		tool(game.ActTravel, "MOVE. Fast-travel to a previously visited location (not in combat).", obj(map[string]any{
 			"destination": str("location id from KNOWN PLACES")}, "destination")),
-		tool(game.ActAttack, "ACTION. Attack an enemy with the equipped weapon (or a named carried weapon). Must be in reach.", obj(map[string]any{
+		tool(game.ActAttack, "ACTION. Attack an enemy with the equipped weapon (or a named carried weapon). Must be in reach. With Extra Attack the engine makes both attacks.", obj(map[string]any{
 			"target": str("enemy id from ENEMIES (or an NPC id only if the player clearly attacks them)"),
-			"weapon": str("optional item id of a carried weapon to use")}, "target")),
+			"weapon": str("optional item id of a carried weapon to use"),
+			"option": enum("optional: smite spends a spell slot on Divine Smite if it hits (paladins); stun spends focus on Stunning Strike (monks level 5). Only when the player asks for it", "smite", "stun")}, "target")),
+		tool(game.ActCast, "Cast one of the actor's spells listed in SPELLS (cost shown there: ACTION or BONUS). Use it whenever the player casts, prays, channels or uses a power that matches a known spell, by its name in this setting. Damage spells need a target enemy or zone; healing and buffs take a party member (empty = self).", obj(map[string]any{
+			"spell":  str("spell key from SPELLS"),
+			"target": str("enemy id or party member id"),
+			"zone":   str("zone id for spells that fill a zone (fireball, web) or misty step's destination"),
+			"level":  num("optional slot level to cast with (higher levels are stronger); 0 = lowest available", 0, 3)}, "spell")),
+		tool(game.ActFeature, "Use a class or species ability from ABILITIES (rage, second wind, cunning action, flurry of blows, lay on hands, wild shape...). Cost is shown there; bonus actions can come before or after the main action in the same message.", obj(map[string]any{
+			"feature": str("ability key from ABILITIES"),
+			"target":  str("optional enemy or party member id"),
+			"zone":    str("optional zone id"),
+			"item":    str("item id for fast hands"),
+			"amount":  num("lay on hands: HP to heal; create slot: slot level", 0, 50)}, "feature")),
 		tool(game.ActSubdue, "ACTION. Non-lethal takedown: grapple, tie up, intimidate, calm or persuade an enemy to stop fighting.", obj(map[string]any{
 			"target": str("enemy id"),
 			"method": enum("how", "grapple", "tie_up", "intimidate", "calm", "persuade")}, "target", "method")),
@@ -111,7 +123,8 @@ var skillEnum = enum("the skill the check uses (it sets the ability): athletics 
 func toAction(tc llm.ToolCall) (game.Action, error) {
 	var a struct {
 		Target, Weapon, Method, Ability, Skill, Purpose, Text, Item, Exit, Zone, Destination, NPC, Quest, To, Promise string
-		DC                                                                                                            int
+		Spell, Feature, Option                                                                                        string
+		DC, Level, Amount                                                                                             int
 	}
 	if err := tc.Decode(&a); err != nil {
 		return game.Action{}, err
@@ -130,7 +143,11 @@ func toAction(tc llm.ToolCall) (game.Action, error) {
 	case game.ActTravel:
 		act.Target = firstOf(a.Destination, a.Target)
 	case game.ActAttack:
-		act.Target, act.Item = a.Target, a.Weapon
+		act.Target, act.Item, act.Option = a.Target, a.Weapon, a.Option
+	case game.ActCast:
+		act.Spell, act.Target, act.Zone, act.Level = a.Spell, a.Target, a.Zone, a.Level
+	case game.ActFeature:
+		act.Feature, act.Target, act.Zone, act.Item, act.Level = a.Feature, a.Target, a.Zone, a.Item, a.Amount
 	case game.ActSubdue:
 		act.Target, act.Method = a.Target, a.Method
 	case game.ActCheck:

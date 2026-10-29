@@ -109,6 +109,9 @@ func (c *Character) HasSkill(key string) bool {
 	return false
 }
 
+// HasExpertise reports double proficiency in a skill.
+func (c *Character) HasExpertise(key string) bool { return c.hasExpertise(key) }
+
 func (c *Character) hasExpertise(key string) bool {
 	return containsStr(c.Expertise, key) || containsStr(c.Picks["expertise"], key) || containsStr(c.Picks["scholar"], key)
 }

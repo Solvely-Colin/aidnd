@@ -356,7 +356,11 @@ func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []stor
 			}
 		}
 		tick := game.StartCharacterTurn(next, &w.Campaign.Turns.Budget)
+		tick.Add(game.StartTurnEffects(w, g.Dice, next))
 		evs = append(evs, conditionEvents(out, tick)...)
+		if w.Encounter != nil && len(w.Encounter.Living()) == 0 {
+			evs = append(evs, conditionEvents(out, game.ConditionTick{Changes: game.EndFight(w)})...) // an aura finished them
+		}
 		if !tick.LostTurn || passes >= len(w.Campaign.Turns.Order) {
 			out.NextActor = actorOf(next)
 			evs = append(evs, store.NewEvent("turn_started", next.PlayerID, map[string]any{"character_id": next.ID, "player_id": next.PlayerID, "name": next.Name, "budget": w.Campaign.Turns.Budget}))

@@ -98,17 +98,17 @@ func dmgRoll(label, kind string, r dice.Result) Roll {
 
 // Step is the outcome of one action.
 type Step struct {
-	Action        Action        `json:"action"`
-	Slot          Slot          `json:"slot,omitempty"`
-	OK            bool          `json:"ok"`
-	Error         string        `json:"error,omitempty"`
-	Skipped       bool          `json:"skipped,omitempty"`
-	Rolls         []Roll        `json:"rolls,omitempty"`
-	Tier          dice.Tier     `json:"tier,omitempty"`
-	Changes       []string      `json:"changes,omitempty"`
-	Info          []string      `json:"info,omitempty"` // facts for the narrator (look results etc.)
+	Action  Action    `json:"action"`
+	Slot    Slot      `json:"slot,omitempty"`
+	OK      bool      `json:"ok"`
+	Error   string    `json:"error,omitempty"`
+	Skipped bool      `json:"skipped,omitempty"`
+	Rolls   []Roll    `json:"rolls,omitempty"`
+	Tier    dice.Tier `json:"tier,omitempty"`
+	Changes []string  `json:"changes,omitempty"`
+	Info    []string  `json:"info,omitempty"` // facts for the narrator (look results etc.)
 	// Grant adds to the turn budget after the step (action surge, dash).
-	Grant *Budget `json:"-"`
+	Grant         *Budget       `json:"-"`
 	Quests        []QuestUpdate `json:"quests,omitempty"`
 	Arrived       string        `json:"arrived,omitempty"` // new location id
 	CombatStarted bool          `json:"combat_started,omitempty"`
@@ -1061,6 +1061,9 @@ func completeMain(w *World) []string {
 	w.Campaign.Status = StatusCompleted
 	return changes
 }
+
+// EndFight ends the encounter as won, with its rewards.
+func EndFight(w *World) []string { return endEncounter(w) }
 
 func endEncounter(w *World) []string {
 	l := w.Here()

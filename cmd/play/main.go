@@ -390,6 +390,14 @@ type charSpec struct {
 	Pronouns   string         `json:"pronouns,omitempty"`
 	Scores     map[string]int `json:"scores"`
 	Proficient []string       `json:"proficient"`
+	// the 5e build, passed back as drafted
+	ClassKey   string              `json:"class_key,omitempty"`
+	Species    string              `json:"species,omitempty"`
+	Background string              `json:"background,omitempty"`
+	Boost      map[string]int      `json:"boost,omitempty"`
+	Skills     []string            `json:"skills,omitempty"`
+	Picks      map[string][]string `json:"picks,omitempty"`
+	Spells     []string            `json:"spells,omitempty"`
 }
 
 var abilities = []string{"STR", "DEX", "CON", "INT", "WIS", "CHA"}

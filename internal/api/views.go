@@ -132,6 +132,7 @@ type CharacterView struct {
 	Dead       bool             `json:"dead,omitempty"`
 	DeathSaves *game.DeathSaves `json:"death_saves,omitempty"`
 	Readied    bool             `json:"readied,omitempty"`
+	Build      BuildView        `json:"build"`
 }
 
 // SkillView is one skill line on the sheet.
@@ -294,13 +295,13 @@ func characterView(w *game.World, c *game.Character) CharacterView {
 	}
 	for _, sk := range game.Skills {
 		sv := SkillView{Key: sk.Key, Name: sk.Name, Ability: sk.Ability, Mod: c.SkillMod(sk), Proficient: c.HasSkill(sk.Key)}
-		for _, e := range c.Expertise {
-			sv.Expertise = sv.Expertise || e == sk.Key
-		}
+		sv.Expertise = c.HasExpertise(sk.Key)
 		v.Skills = append(v.Skills, sv)
 	}
 	v.Passive = c.PassivePerception()
 	v.Dying, v.Dead, v.Readied = c.Dying(), c.Dead, c.Readied != nil
+	v.Build = buildView(w, c)
+	v.Attack.Damage = game.WeaponDamage(c, wpn)
 	if c.Death != nil && c.Down() {
 		d := *c.Death
 		v.DeathSaves = &d

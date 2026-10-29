@@ -25,6 +25,7 @@ Rules:
 - Laying hands on someone who is not an enemy in this fight (grab, pin, shove, trip, restrain, pickpocket) is ability_check (athletics or sleight_of_hand) naming that person in its text, never a bare reposition. Shoving or tripping an enemy is shove; grabbing and holding one is grapple; pinning or tying up a badly hurt enemy to end its fight is subdue.
 - Teamwork in a fight: "I cover / defend myself / brace" = dodge; "I back away carefully" = disengage (then reposition); "I distract it so X can hit" / "I give X a hand" = help; "I duck out of sight" = hide; "I wait for it to come to me" / "I shoot whatever comes through the door" = ready.
 - Give ability_check the skill that fits (stealth to sneak, perception to notice, insight to read someone, persuasion, deception, intimidation, athletics to climb, medicine to treat or stabilize a dying ally...).
+- Spells and powers: when the player casts, prays, invokes, or uses a power that matches one of the actor's SPELLS (by its name in this setting or what it does), call cast_spell with that spell key. Class abilities in ABILITIES (rage, second wind, action surge, cunning action, flurry of blows, lay on hands, wild shape, bardic inspiration...) are use_feature. Never cast a spell the actor doesn't list. Bonus actions don't spend the ACTION, so "I rage and attack" = use_feature rage + attack.
 - "skip", "pass", "wait", "end my turn" = end_turn.
 - A MAP SELECTION is only a hint. The player's words win. A selected NPC means the person spoken to, traded with or examined; attack them only if the words clearly say so.`
 
@@ -235,14 +236,14 @@ func directCheck(w *game.World, actor *game.Character, h Hints) ([]game.Action, 
 
 // tacticKinds are the actions the dock may send directly.
 var dockActs = map[string]bool{game.ActDodge: true, game.ActDisengage: true, game.ActHelp: true, game.ActHide: true,
-	game.ActReady: true, game.ActShove: true, game.ActGrapple: true}
+	game.ActReady: true, game.ActShove: true, game.ActGrapple: true, game.ActCast: true, game.ActFeature: true, game.ActAttack: true}
 
 // directAct turns a dock tactic into the action itself.
 func directAct(w *game.World, actor *game.Character, h ActHint) ([]game.Action, error) {
 	if !dockActs[h.Kind] {
 		return nil, fmt.Errorf("%w: unknown dock action %q", ErrBadRequest, h.Kind)
 	}
-	a := game.Action{Kind: h.Kind, Target: h.Target, Method: h.Method}
+	a := game.Action{Kind: h.Kind, Target: h.Target, Method: h.Method, Spell: h.Spell, Feature: h.Feature, Zone: h.Zone, Level: h.Level, Item: h.Item, Option: h.Option}
 	if msg := validateAction(w, actor, &a); msg != "" {
 		return nil, fmt.Errorf("%w: %s", ErrBadRequest, msg)
 	}
@@ -451,10 +452,46 @@ func validateAction(w *game.World, c *game.Character, a *game.Action) string {
 			return fmt.Sprintf("no enemy %q here", a.Target)
 		}
 		a.Target = e.ID
+	case game.ActCast:
+		s := game.SpellByRef(a.Spell)
+		if s == nil || !c.KnowsSpell(s.Key) {
+			return fmt.Sprintf("%s doesn't know a spell %q; pick from SPELLS", c.Name, a.Spell)
+		}
+		a.Spell = s.Key
+		resolveTargetZone(w, a)
+	case game.ActFeature:
+		f := game.FeatureActByRef(a.Feature)
+		if f == nil {
+			return fmt.Sprintf("no ability %q; pick from ABILITIES", a.Feature)
+		}
+		a.Feature = f.Key
+		resolveTargetZone(w, a)
+		if a.Item != "" {
+			if it := w.FindItemOf(game.OwnerCharacter, c.ID, a.Item); it != nil {
+				a.Item = it.ID
+			}
+		}
 	default:
 		return fmt.Sprintf("unknown action %q", a.Kind)
 	}
 	return ""
+}
+
+// resolveTargetZone turns names in a spell or ability's target and zone
+// into ids, leaving what it can't match for the engine to report.
+func resolveTargetZone(w *game.World, a *game.Action) {
+	if a.Target != "" {
+		if e := w.Enemy(a.Target); e != nil {
+			a.Target = e.ID
+		} else if t := w.Character(a.Target); t != nil {
+			a.Target = t.ID
+		}
+	}
+	if l := w.Here(); l != nil && a.Zone != "" {
+		if z := l.Zone(a.Zone); z != nil {
+			a.Zone = z.ID
+		}
+	}
 }
 
 func npcHere(w *game.World, a *game.Action, merchant bool) string {

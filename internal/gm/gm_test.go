@@ -417,7 +417,7 @@ func TestSnapshotShowsBudgetAndOnlyValidIDs(t *testing.T) {
 	r.act(t, "u1", "look", llm.Call("look", map[string]any{}))
 	req := r.f.Tagged("interpret")[0]
 	u := lastUser(req)
-	for _, want := range []string{"LEFT THIS TURN: action 1, move 1, free unlimited", "EXITS:", "ZONES:", "Tamsin Hale [npc", "PLAYER (Aria) SAYS: look"} {
+	for _, want := range []string{"LEFT THIS TURN: action 1, bonus action 1, move 1, free unlimited", "EXITS:", "ZONES:", "Tamsin Hale [npc", "PLAYER (Aria) SAYS: look"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("interpreter prompt missing %q", want)
 		}

@@ -113,7 +113,7 @@ var Classes = map[string]*ClassDef{
 		Scores:   [6]int{8, 14, 12, 13, 10, 15},
 		Subclass: Subclass{"lore", "College of Lore", "A collector of secrets with skills to spare."},
 		Era:      &EraNames{"Showman", "Crooner", "Con Artist", "Diplomat"}, SubEra: &EraNames{"Society of Raconteurs", "Gossip Columnist", "Influencer", "Cultural Attaché"},
-		Choices:  []ChoiceAt{{2, "expertise", 2}},
+		Choices: []ChoiceAt{{2, "expertise", 2}},
 		Features: []Feature{
 			{"spellcasting", "Spellcasting", 1, "Casts bard spells with Charisma.", false},
 			{"bardic_inspiration", "Bardic Inspiration", 1, "Bonus action: an ally adds a d6 to their next d20 roll. Uses equal to your CHA modifier; back on a short rest from level 5.", false},
@@ -157,7 +157,7 @@ var Classes = map[string]*ClassDef{
 		Scores:   [6]int{15, 13, 14, 8, 12, 10},
 		Subclass: Subclass{"champion", "Champion", "Raw athletic excellence and brutal criticals."},
 		Era:      &EraNames{"Soldier", "Veteran", "Soldier", "Marine"}, SubEra: &EraNames{"Prize Fighter", "Doughboy", "Special Forces", "Shock Trooper"},
-		Choices:  []ChoiceAt{{1, "fighting_style", 1}},
+		Choices: []ChoiceAt{{1, "fighting_style", 1}},
 		Features: []Feature{
 			{"fighting_style", "Fighting Style", 1, "A combat specialty (Archery, Defense, Great Weapon Fighting or Two-Weapon Fighting).", false},
 			{"second_wind", "Second Wind", 1, "Bonus action: heal 1d10 + your level. 2 uses (3 from level 4), one back on a short rest.", false},
@@ -186,7 +186,7 @@ var Classes = map[string]*ClassDef{
 		Scores:   [6]int{15, 10, 13, 8, 12, 14},
 		Subclass: Subclass{"devotion", "Oath of Devotion", "Honesty, courage and a blade that shines."},
 		Era:      &EraNames{"Crusader", "Templar", "Vigilante", "Vanguard"}, SubEra: &EraNames{"Knight of the Order", "Sworn Lawman", "Masked Defender", "Peacekeeper"},
-		Choices:  []ChoiceAt{{2, "fighting_style", 1}},
+		Choices: []ChoiceAt{{2, "fighting_style", 1}},
 		Features: []Feature{
 			{"lay_on_hands", "Lay on Hands", 1, "Bonus action: heal from a pool of 5 x your level HP, or spend 5 to cure poison.", false},
 			{"spellcasting", "Spellcasting", 1, "Casts paladin spells with Charisma.", false},
@@ -202,7 +202,7 @@ var Classes = map[string]*ClassDef{
 		Scores:   [6]int{12, 15, 13, 8, 14, 10},
 		Subclass: Subclass{"hunter", "Hunter", "A specialist at bringing down the wounded."},
 		Era:      &EraNames{"Frontier Scout", "Big-Game Hunter", "Survivalist", "Scout"}, SubEra: &EraNames{"Bounty Hunter", "Safari Guide", "Tracker", "Xeno-Hunter"},
-		Choices:  []ChoiceAt{{2, "fighting_style", 1}},
+		Choices: []ChoiceAt{{2, "fighting_style", 1}},
 		Features: []Feature{
 			{"spellcasting", "Spellcasting", 1, "Casts ranger spells with Wisdom.", false},
 			{"favored_enemy", "Favored Enemy", 1, "Cast Hunter's Mark twice per long rest without a slot.", false},
@@ -216,7 +216,7 @@ var Classes = map[string]*ClassDef{
 		Scores:   [6]int{8, 15, 13, 12, 14, 10},
 		Subclass: Subclass{"thief", "Thief", "Quick hands and a talent for climbing."},
 		Era:      &EraNames{"Gunslinger", "Gumshoe", "Operator", "Smuggler"}, SubEra: &EraNames{"Cat Burglar", "Second-Story Man", "Infiltrator", "Ghost"},
-		Choices:  []ChoiceAt{{1, "expertise", 2}},
+		Choices: []ChoiceAt{{1, "expertise", 2}},
 		Features: []Feature{
 			{"sneak_attack", "Sneak Attack", 1, "Once a turn, +1d6 (2d6 at level 3, 3d6 at 5) with a finesse or ranged weapon when you have advantage or an ally is in the target's zone.", false},
 			{"expertise", "Expertise", 1, "Double proficiency in two skills.", false},
@@ -245,7 +245,7 @@ var Classes = map[string]*ClassDef{
 		Scores:   [6]int{8, 13, 14, 12, 10, 15},
 		Subclass: Subclass{"fiend", "Fiend Patron", "A pact with something infernal that feeds on your victories."},
 		Era:      &EraNames{"Diabolist", "Cultist", "Hexer", "Void-Touched"}, SubEra: &EraNames{"Infernal Compact", "The Crawling Patron", "Deal with the Devil", "Void Entity"},
-		Choices:  []ChoiceAt{{1, "invocation", 1}, {2, "invocation", 3}, {5, "invocation", 5}},
+		Choices: []ChoiceAt{{1, "invocation", 1}, {2, "invocation", 3}, {5, "invocation", 5}},
 		Features: []Feature{
 			{"pact_magic", "Pact Magic", 1, "Few spell slots that all cast at your highest level, back on a short rest.", false},
 			{"invocations", "Eldritch Invocations", 1, "Secrets that shape your power (1, then 3 at level 2, 5 at level 5).", false},
@@ -259,7 +259,7 @@ var Classes = map[string]*ClassDef{
 		Scores:   [6]int{8, 14, 13, 15, 12, 10},
 		Subclass: Subclass{"evoker", "Evoker", "Blasts that never miss entirely."},
 		Era:      &EraNames{"Natural Philosopher", "Occultist", "Hacker", "Technomancer"}, SubEra: &EraNames{"Galvanist", "Thaumaturge", "Black-Hat", "Plasma Engineer"},
-		Choices:  []ChoiceAt{{2, "scholar", 1}},
+		Choices: []ChoiceAt{{2, "scholar", 1}},
 		Features: []Feature{
 			{"spellcasting", "Spellcasting", 1, "Casts wizard spells with Intelligence.", false},
 			{"arcane_recovery", "Arcane Recovery", 1, "Your first short rest each day recovers spell slots worth half your level.", false},
