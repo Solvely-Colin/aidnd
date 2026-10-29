@@ -565,8 +565,6 @@ function renderFeed(force) {
   const lastNarr = evs.map(e => e.type).lastIndexOf("narration");
   feed.innerHTML = evs.map((e, i) => eventHTML(e, i === lastNarr)).join("") + (isThinking() ? `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>The game master is writing…</div>` : "");
   if (stick) requestAnimationFrame(toBottom);
-  // a roll lands once; later re-renders show it settled
-  evs.forEach(e => { if (isFresh(e) && (e.type === "action_resolved" || e.type === "enemy_turns")) S.landed.add(e.id); });
   requestAnimationFrame(tumble);
 }
 
@@ -622,11 +620,11 @@ function diceRow(r, verb) {
 }
 
 function rollHTML(g, opts = {}) {
-  const fresh = opts.fresh ? "fresh" : "", foe = opts.foe ? "foe" : "";
+  const fresh = opts.fresh ? "fresh" : "", foe = opts.foe ? "foe" : "", ev = opts.fresh ? ` data-ev="${opts.ev}"` : "";
   const r = g.d20;
   if (!r) {
     const d = g.dmg;
-    return `<div class="roll solo ${d.kind} ${fresh}"><div class="roll-body"><div class="roll-head"><span class="roll-label">${esc(d.label)}</span></div>${diceRow(d, d.kind === "heal" ? "healed" : "damage")}</div></div>`;
+    return `<div class="roll solo ${d.kind} ${fresh}"${ev}><div class="roll-body"><div class="roll-head"><span class="roll-label">${esc(d.label)}</span></div>${diceRow(d, d.kind === "heal" ? "healed" : "damage")}</div></div>`;
   }
   const tier = r.tier || "";
   const words = OUTCOME[r.kind === "attack" ? "attack" : "check"];
@@ -641,21 +639,22 @@ function rollHTML(g, opts = {}) {
   const scale = Math.max(25, r.target + 5, r.total + 1);
   const pct = n => Math.max(0, Math.min(100, n / scale * 100)).toFixed(1);
   const crit = tier === "critical_success" ? "nat 20" : tier === "critical_failure" ? "nat 1" : "";
-  const by = crit || (ok ? `by ${margin}` : `short ${-margin}`);
-  return `<div class="roll ${esc(r.kind)} ${esc(tier)} ${ok ? "ok" : "no"} ${foe} ${fresh}" title="d20 ${r.natural} ${signed(r.mod)} = ${r.total} vs ${against} ${r.target}">
+  const by = crit || (ok ? (margin ? `by ${margin}` : "exactly") : `short ${-margin}`);
+  return `<div class="roll ${esc(r.kind)} ${esc(tier)} ${ok ? "ok" : "no"} ${foe} ${fresh}"${ev} title="d20 ${r.natural} ${signed(r.mod)} = ${r.total} vs ${against} ${r.target}">
     <div class="die"><svg viewBox="0 0 40 44" aria-hidden="true"><path d="M20 1.5 38 11.5v21L20 42.5 2 32.5v-21z"/><path class="facet" d="M20 1.5 31 27H9zM9 27 2 11.5M31 27l7-15.5M9 27 20 42.5 31 27"/></svg><b data-face>${r.natural}</b></div>
     <div class="roll-body">
       <div class="roll-head"><span class="roll-label">${esc(r.label)}</span><span class="stamp">${words[tier] || ""}</span></div>
       <div class="sum">${sum}<span class="vs">vs ${against} <b>${r.target}</b>${r.cover ? ` <small>+${r.cover} cover</small>` : ""}</span></div>
-      <div class="track" aria-hidden="true"><i class="fill" style="--w:${pct(r.total)}%"></i><i class="need" style="left:${pct(r.target)}%"></i></div>
-      <div class="margin">${by}</div>
+      <div class="meter"><div class="track" aria-hidden="true"><i class="fill" style="--w:${pct(r.total)}%"></i><i class="need" style="left:${pct(r.target)}%"></i></div><span class="margin">${by}</span></div>
       ${g.dmg ? diceRow(g.dmg, opts.foe ? `damage to ${esc(opts.target || "")}`.trim() : "damage") : ""}
     </div></div>`;
 }
 
 function isFresh(e) { return e.created_at && Date.now() / 1000 - e.created_at < FRESH_SECS && !S.landed.has(e.id); }
 
-// tumble spins the die faces of fresh rolls, then lands them once.
+// tumble spins the die faces of fresh rolls, then lands them. A roll counts
+// as landed only once its spin ends, so a re-render mid-spin spins again
+// rather than skipping straight to the result.
 function tumble() {
   const cards = [...document.querySelectorAll(".roll.fresh:not(.rolling)")];
   if (!cards.length) return;
@@ -663,7 +662,11 @@ function tumble() {
   cards.forEach((card, i) => {
     card.classList.add("rolling");
     const faces = [...card.querySelectorAll("[data-face]")], real = faces.map(f => f.textContent);
-    const land = () => { faces.forEach((f, j) => f.textContent = real[j]); card.classList.remove("fresh", "rolling"); card.classList.add("landed"); };
+    const land = () => {
+      faces.forEach((f, j) => f.textContent = real[j]);
+      card.classList.remove("fresh", "rolling"); card.classList.add("landed");
+      S.landed.add(+card.dataset.ev);
+    };
     if (still || !faces.length) return land();
     const until = performance.now() + 650 + i * 280;
     const spin = () => {
@@ -686,7 +689,7 @@ function eventHTML(e, latest) {
     case "action_resolved": {
       let h = "";
       const fresh = isFresh(e);
-      const rolls = rollGroups((d.steps || []).flatMap(s => s.rolls || [])).map(g => rollHTML(g, { fresh })).join("");
+      const rolls = rollGroups((d.steps || []).flatMap(s => s.rolls || [])).map(g => rollHTML(g, { fresh, ev: e.id })).join("");
       if (rolls) h += `<div class="rolls">${rolls}</div>`;
       const notes = [];
       (d.steps || []).forEach(s => { if (s.error) notes.push(`<div class="ev-note bad">${esc(s.error)}</div>`); });
@@ -703,7 +706,7 @@ function eventHTML(e, latest) {
       const rolls = (d.turns || []).filter(t => t.attack?.roll).map(t => rollHTML({
         d20: { ...t.attack.roll, kind: "attack", label: t.attack.roll.label || t.enemy },
         dmg: t.attack.damage ? { ...t.attack.damage, kind: "damage", crit: t.attack.crit } : null,
-      }, { fresh, foe: true, target: t.target })).join("");
+      }, { fresh, ev: e.id, foe: true, target: t.target })).join("");
       return `${rolls ? `<div class="rolls foe">${rolls}</div>` : ""}${d.narration ? `<p class="ev-narr">${esc(d.narration)}</p>` : ""}`;
     }
     case "quest_updated": return `<div class="ev-quest"><span>Quest</span>${esc(d.text || d.title)}</div>`;

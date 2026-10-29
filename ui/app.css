@@ -341,10 +341,11 @@ a { color: var(--accent); }
 .sum .vs { margin-left: auto; color: var(--text-3); font-size: 13px; white-space: nowrap; }
 .sum .vs b { color: var(--text); font-size: 15px; }
 .sum .vs small { font-size: 11px; }
-.track { position: relative; height: 6px; border-radius: 3px; background: var(--card-2); }
+.meter { display: flex; align-items: center; gap: 10px; }
+.track { flex: 1; position: relative; height: 6px; border-radius: 3px; background: var(--card-2); }
 .track .fill { position: absolute; inset: 0 auto 0 0; width: var(--w); border-radius: 3px; background: var(--tone); }
 .track .need { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--text); border-radius: 1px; }
-.margin { font: 600 11.5px var(--mono); color: var(--text-3); text-align: right; margin-top: -2px; }
+.margin { flex: none; min-width: 52px; font: 600 11.5px var(--mono); color: var(--text-3); text-align: right; }
 .dmg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: 600 14px var(--mono); padding-top: 8px; border-top: 1px dashed var(--line-2); }
 .roll.solo .dmg { border-top: 0; padding-top: 0; }
 .dmg-k { font-size: 11.5px; color: var(--text-3); }
