@@ -13,6 +13,10 @@ const ICON = {
   you: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>`,
   book: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M9 7h6"/></svg>`,
   close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  menu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M14 4v16"/></svg>`,
+  heart: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z"/></svg>`,
+  chev: `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
+  logo: `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13z" fill="var(--accent)"/><path d="M16 8 23 20H9z" fill="var(--bg)"/></svg>`,
   quill: `<svg class="quill" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M40 6C26 8 16 18 12 34l-2 8 6-5c14-3 22-14 24-31z"/><path d="M12 34l12-12M18 30h8"/></svg>`,
 };
 
@@ -104,16 +108,19 @@ function leaveCampaign() {
 function renderSignin(err = "") {
   app.innerHTML = `
   <div class="signin">
-    <form class="card stack" id="signin">
-      <div>
-        <h1>aidnd</h1>
+    <div class="signin-box">
+      <div class="signin-head">
+        ${ICON.logo}
+        <h1>ai<b>dnd</b></h1>
         <p>An AI game master for you and your friends.</p>
       </div>
+    <form id="signin">
       <label class="field"><span>Your name</span><input class="input" name="name" autocomplete="nickname" maxlength="40" required value="${esc(localName())}"></label>
       <label class="field"><span>Play code</span><input class="input" name="code" type="password" autocomplete="current-password" required></label>
       <div class="error">${esc(err)}</div>
       <button class="btn primary block">Sign in</button>
     </form>
+    </div>
   </div>`;
   $("#signin").onsubmit = async e => {
     e.preventDefault();
@@ -138,18 +145,20 @@ async function renderHome() {
   app.innerHTML = `
   <div class="page">
     <header class="topbar">
-      <div class="titles"><span class="brand">ai<b>dnd</b></span></div>
-      <button class="btn small ghost" data-act="signout">Sign out</button>
+      <div class="titles"><span class="brand">${ICON.logo}<span>ai<b>dnd</b></span></span></div>
+      <button class="me-btn" data-act="signout" title="Sign out">Sign out<span class="avatar" style="width:30px;height:30px;font-size:13px">${esc(S.me.name[0] || "?")}</span></button>
     </header>
-    <main class="wrap stack">
+    <main class="wrap">
       <div class="hero"><h2>Welcome back, ${esc(S.me.name)}.</h2><p>Pick up a story, join a friend's table, or start something new.</p></div>
-      <div id="lists" class="stack"><div class="muted">Loading your stories…</div></div>
-      <section class="card stack" id="new">
-        <p class="eyebrow">Start a new story</p>
-        <textarea class="textarea serif" id="premise" rows="3" placeholder="What is this story about? A place, a mood, a mystery…"></textarea>
-        <div class="chips">${PREMISES.map(p => `<button class="chip" data-premise="${esc(p)}">${esc(p)}</button>`).join("")}</div>
-        <div class="row spread"><span class="muted" style="font-size:13px">The game master writes the world. This takes about a minute.</span>
-          <button class="btn primary" data-act="create">Create story</button></div>
+      <div id="lists"><div class="muted">Loading your stories…</div></div>
+      <section class="section">
+        <div class="section-head"><h2>Start a new story</h2></div>
+        <div class="new-story" id="new">
+          <textarea class="textarea serif" id="premise" rows="3" placeholder="What is this story about? A place, a mood, a mystery…"></textarea>
+          <div class="chips">${PREMISES.map(p => `<button class="chip" data-premise="${esc(p)}">${esc(p)}</button>`).join("")}</div>
+          <div class="foot"><span class="muted">The game master writes the world. It takes about a minute.</span>
+            <button class="btn primary" data-act="create">Create story</button></div>
+        </div>
       </section>
     </main>
   </div>`;
@@ -159,14 +168,17 @@ async function renderHome() {
     const mineIds = new Set(mine.campaigns.map(c => c.id));
     const open = all.campaigns.filter(c => c.status === "lobby" && !mineIds.has(c.id) && c.players < c.max_players);
     const card = c => `<button class="game-card" data-open="${esc(c.id)}">
-        <div class="row spread"><h3>${esc(c.title)}</h3>${statusPill(c.status)}</div>
-        ${c.pitch ? `<p>${esc(c.pitch)}</p>` : ""}
-        <span class="muted" style="font-size:12.5px">${c.players}/${c.max_players} players · ${ago(c.updated_at)}</span>
+        <div class="gc-main">
+          <div class="gc-top"><h3>${esc(c.title)}</h3>${statusPill(c.status)}</div>
+          ${c.pitch ? `<p>${esc(c.pitch)}</p>` : ""}
+          <span class="meta">${c.players}/${c.max_players} players · ${ago(c.updated_at)}</span>
+        </div>${ICON.chev}
       </button>`;
+    const list = (title, cs) => `<section class="section"><div class="section-head"><h2>${title}</h2></div><div class="game-list">${cs.map(card).join("")}</div></section>`;
     $("#lists").innerHTML = `
-      ${mine.campaigns.length ? `<section class="stack"><p class="eyebrow">Your stories</p>${mine.campaigns.map(card).join("")}</section>` : ""}
-      ${open.length ? `<section class="stack"><p class="eyebrow">Open tables</p>${open.map(card).join("")}</section>` : ""}
-      ${!mine.campaigns.length && !open.length ? `<div class="muted">No stories yet. Start one below.</div>` : ""}`;
+      ${mine.campaigns.length ? list("Your stories", mine.campaigns) : ""}
+      ${open.length ? list("Open tables", open) : ""}
+      ${!mine.campaigns.length && !open.length ? `<section class="section"><div class="empty">No stories yet. Start one below.</div></section>` : ""}`;
   } catch (e) { $("#lists").innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
@@ -198,11 +210,11 @@ async function createCampaign() {
 // ---- campaign
 
 async function openCampaign(id) {
-  if (!S.view) app.innerHTML = `<div class="signin"><span class="spinner muted"></span></div>`;
+  if (!S.view) app.innerHTML = `<div class="center-msg"><span class="spinner muted"></span></div>`;
   try {
     S.view = await api("GET", `/campaigns/${id}`);
   } catch (e) {
-    app.innerHTML = `<div class="signin"><div class="card stack"><div class="error">${esc(e.message)}</div><button class="btn" onclick="location.hash='#/'">Back home</button></div></div>`;
+    app.innerHTML = `<div class="center-msg"><div class="card stack"><div class="error">${esc(e.message)}</div><button class="btn" onclick="location.hash='#/'">Back home</button></div></div>`;
     return;
   }
   if (!S.meta) api("GET", "/meta").then(m => { S.meta = m; if (S.view?.status === "lobby") render(); }).catch(() => {});
@@ -266,20 +278,21 @@ function renderSetup(soft) {
       <button class="icon-btn" data-act="home" aria-label="Back">${ICON.back}</button>
       <div class="titles"><h1>${esc(v.title)}</h1><div class="sub">Gathering the party</div></div>
     </header>
-    <main class="wrap stack">
-      <section class="card stack">
-        <p class="eyebrow">The story</p>
+    <main class="wrap">
+      <div class="story-head">
+        <span class="pill accent" style="justify-self:start">New story</span>
+        <h2>${esc(v.title)}</h2>
         <p class="pitch">${esc(v.pitch || v.premise)}</p>
-      </section>
-      <section class="card stack">
-        <div class="row spread"><p class="eyebrow" style="margin:0">Party</p><span class="muted" style="font-size:13px">${v.players.length}/${v.max_players} seats</span></div>
+      </div>
+      <section class="section">
+        <div class="section-head"><h2>Party</h2><span class="muted" style="font-size:13px">${v.players.length}/${v.max_players} seats</span></div>
         <div class="party-list" id="party">${partyRows()}</div>
         ${!v.you?.joined ? `<button class="btn primary" data-act="join">Join as ${esc(S.me.name)}</button>` : ""}
       </section>
       ${v.you?.joined ? (S.draft ? editorHTML() : me ? readyHTML(me) : conceptHTML()) : ""}
-      ${v.you?.joined ? `<section class="stack">
+      ${v.you?.joined ? `<section class="start-bar">
         <button class="btn primary block" data-act="start" ${allReady ? "" : "disabled"}>Begin the story</button>
-        <span class="muted" style="font-size:13px;text-align:center">${allReady ? "Everyone is ready. Anyone at the table can begin." : "Starts once every player has a character. Friends can join with the same play code."}</span>
+        <span class="muted">${allReady ? "Everyone is ready. Anyone at the table can begin." : "Starts once every player has a character. Friends can join with the same play code."}</span>
       </section>` : ""}
     </main>
   </div>`;
@@ -299,22 +312,26 @@ function partyRows() {
 
 function conceptHTML() {
   const pick = CONCEPTS[Math.floor(Math.random() * CONCEPTS.length)];
-  return `<section class="card stack">
-    <p class="eyebrow">Your character</p>
+  return `<section class="section">
+    <div class="section-head"><h2>Your character</h2></div>
+    <div class="card stack">
     <label class="field"><span>Who are you?</span>
       <textarea class="textarea serif" id="concept" rows="3" placeholder="e.g. ${esc(pick)}"></textarea></label>
     <span class="muted" style="font-size:13px">Describe them in a sentence: age, trade, a flaw, a want. The game master drafts a sheet you can change.</span>
     <button class="btn primary" data-act="draft">Draft my character</button>
+    </div>
   </section>`;
 }
 
 function readyHTML(c) {
-  return `<section class="card stack">
-    <div class="row spread"><p class="eyebrow" style="margin:0">Your character</p><button class="btn small" data-act="edit">Edit</button></div>
-    <div class="row" style="gap:14px"><div class="avatar" style="width:48px;height:48px;font-size:20px">${esc(c.name[0])}</div>
+  return `<section class="section">
+    <div class="section-head"><h2>Your character</h2><button class="btn small" data-act="edit">Edit</button></div>
+    <div class="card stack">
+    <div class="row" style="gap:14px;flex-wrap:nowrap"><div class="avatar" style="width:48px;height:48px;font-size:20px">${esc(c.name[0])}</div>
       <div><div class="serif" style="font-size:20px;font-weight:600">${esc(c.name)}</div>
       <div class="muted" style="font-size:13px">${esc(c.class)} · ${esc(c.pronouns || "they/them")} · ${esc(kitName(c.kit))}</div></div></div>
     ${c.backstory ? `<p class="serif" style="margin:0;color:var(--text-2)">${esc(c.backstory)}</p>` : ""}
+    </div>
   </section>`;
 }
 
@@ -327,8 +344,9 @@ const signed = n => (n >= 0 ? "+" : "") + n;
 function editorHTML() {
   const d = S.draft, arr = S.meta?.standard_array || [15, 14, 13, 12, 10, 8];
   const kits = S.meta?.kits || [];
-  return `<section class="card stack" id="editor">
-    <p class="eyebrow">Your character</p>
+  return `<section class="section">
+    <div class="section-head"><h2>Your character</h2></div>
+    <div class="card stack" id="editor">
     <div class="grid2">
       <label class="field"><span>Name</span><input class="input" id="d-name" value="${esc(d.name)}" maxlength="40"></label>
       <label class="field"><span>Pronouns</span><input class="input" id="d-pron" value="${esc(d.pronouns || "they/them")}" maxlength="20"></label>
@@ -350,6 +368,7 @@ function editorHTML() {
     <div class="row spread">
       <button class="btn ghost" data-act="cancel-draft">Cancel</button>
       <button class="btn primary" data-act="save-char">Save character</button>
+    </div>
     </div>
   </section>`;
 }
@@ -399,9 +418,8 @@ function renderChrome() {
     <button class="icon-btn" data-act="home" aria-label="Back">${ICON.back}</button>
     <div class="titles"><h1>${esc(v.title)}</h1>
       <div class="sub">${esc(loc?.name || "")}${v.scene ? ` · Day ${v.scene.day}, ${esc(v.scene.time)}` : ""}${v.encounter ? ` · <span style="color:var(--bad)">Combat, round ${v.encounter.round}</span>` : ""}</div></div>
-    <button class="icon-btn hide-wide" data-panel="scene" aria-label="Scene">${ICON.scene}</button>
-    <button class="icon-btn hide-wide" data-panel="journal" aria-label="Journal">${ICON.book}</button>
-    ${me ? `<button class="pill ${me.hp <= me.max_hp / 3 ? "bad" : ""}" data-panel="you" style="cursor:pointer">♥ ${me.hp}/${me.max_hp}</button>` : ""}`;
+    ${me ? `<button class="hp ${me.hp <= me.max_hp / 3 ? "low" : ""}" data-panel="you" aria-label="Your character">${ICON.heart}${me.hp}/${me.max_hp}</button>` : ""}
+    <button class="icon-btn hide-wide" data-panel="${S.panel}" aria-label="Scene, character, journal and map">${ICON.menu}</button>`;
   renderComposer();
   renderPanel();
 }
@@ -641,7 +659,7 @@ function journalHTML() {
   const quests = v.quests.filter(q => q.status !== "available" || q.is_main);
   return `
     <section><p class="eyebrow">Quests</p>${quests.length ? quests.map(q => `
-      <div class="card" style="padding:14px;display:grid;gap:6px"><div class="row spread"><b class="serif" style="font-size:16px">${esc(q.title)}</b>${q.is_main ? `<span class="pill accent">Main</span>` : `<span class="pill">${esc(q.status)}</span>`}</div>
+      <div class="quest-card"><div class="row spread"><b class="serif" style="font-size:16px">${esc(q.title)}</b>${q.is_main ? `<span class="pill accent">Main</span>` : `<span class="pill">${esc(q.status)}</span>`}</div>
         ${q.summary ? `<div class="muted" style="font-size:13px">${esc(q.summary)}</div>` : ""}
         ${q.objectives.map(o => `<div class="objective ${o.done ? "done" : ""}"><span>${o.done ? "☑" : "☐"}</span><span>${esc(o.text)}</span></div>`).join("")}
         ${q.reward_gold || q.reward_xp ? `<div class="muted" style="font-size:12px">Reward: ${[q.reward_gold && q.reward_gold + " gold", q.reward_xp && q.reward_xp + " XP"].filter(Boolean).join(", ")}${q.giver_name ? " · from " + esc(q.giver_name) : ""}</div>` : ""}
