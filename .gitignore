@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+.dev.vars
+*.db
+*.db-shm
+*.db-wal
+/server
+/play
+.local/
+wrangler.local.jsonc

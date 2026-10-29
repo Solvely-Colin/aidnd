@@ -1,0 +1,45 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "aidnd",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-10-13",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	// The player UI. The Worker runs first only for the API and login.
+	"assets": {
+		"directory": "./ui",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/api/*", "/auth/*"]
+	},
+	// The Go game server. One named instance holds every campaign, so the
+	// live event stream and turn timers stay in one process.
+	"containers": [
+		{
+			"class_name": "GameServer",
+			"image": "./Dockerfile",
+			"instance_type": "lite",
+			"max_instances": 2
+		}
+	],
+	"durable_objects": {
+		"bindings": [{ "name": "GAME", "class_name": "GameServer" }]
+	},
+	"exports": {
+		"GameServer": { "type": "durable-object", "storage": "sqlite" }
+	},
+	// Saved games. The container reaches it through the d1.internal bridge.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "aidnd",
+			"database_id": "9002c6f6-cc55-43ed-b043-b153c4a23443"
+		}
+	],
+	"vars": {
+		"LLM_MODEL": "deepseek-v4.1-flash",
+		"LLM_BASE_URL": "https://ollama.com/v1",
+		"LLM_REASONING_EFFORT": "none"
+	}
+	// Secrets (wrangler secret put): APP_SECRET, PLAY_CODE, LLM_API_KEY.
+}

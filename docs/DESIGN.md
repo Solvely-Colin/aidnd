@@ -1,0 +1,88 @@
+# aidnd design notes
+
+## Package layout
+
+```
+cmd/server        main: env config + wiring
+cmd/play          terminal client for play-testing
+internal/dice     injectable RNG (seeded or scripted), "2d6+3" notation, d20 checks -> 4 tiers
+internal/game     pure rules engine, no I/O
+  types.go        Campaign, Player, Character, Location, Zone, Edge, NPC, Enemy, Encounter,
+                  Item/Owner, Quest/Objective, Lore, Beat, Scene, Budget, TurnState
+  world.go        World aggregate (whole campaign state) + lenient id/name lookups
+  catalog.go      fixed item catalog + six kits; reach inference; custom-item clamping
+  rules.go        modifiers, proficiency, XP/levels, AC, attacks, subdue DC, enemy caps + HP budget
+  validate.go     character sheet validation/creation, quest validation (reward caps, id resolution)
+  graph.go        exits, BFS travel over visited/passable edges, stub fill-in with growth caps
+  zones.go        zone layouts (authored or generic), distances, reach, cover, enemy tags
+  quests.go       accept, automatic objective evaluation, freeform (judge-only), turn-in, lair gate
+  trade.go        buy/sell (disposition pricing), pick up, drop, give, equip
+  turns.go        budget, seat order (down skipped), setbacks, encounters, enemy AI turns
+  actions.go      Action -> Step -> Resolution: the deterministic resolver for 1-4 steps
+internal/store    SQLite (modernc.org/sqlite): schema.sql, whole-world load/save in one tx, events
+internal/llm      OpenAI-compatible chat client + scripted fake
+internal/gm       prompts, tool schemas, interpret -> resolve -> direct -> narrate -> judge pipeline
+internal/api      net/http handlers, auth, player-safe views, SSE hub
+internal/web      single-file /dev/ testing table
+```
+
+## Core ideas
+
+- `game.World` is the unit of state. The store loads it, the pipeline mutates it only
+  through `game` functions, and the store saves it plus new events in one transaction.
+- Entities live in slices (not maps) so seeded runs iterate in a stable order. IDs come from
+  a per-campaign counter (`loc3`, `npc7`, `item12`).
+- Every lookup is lenient: by id first, then by name (case/punctuation/article-insensitive),
+  then by substring. That is what the LLM's output is matched against.
+- `game.Resolve(ctx, actor, actions)` is the only way a player turn changes state. It pays
+  each step from the budget on a trial copy, executes it, and commits the budget only if the
+  step succeeded; invalid ids come back as step errors without spending anything.
+- The engine never calls the LLM. `Ctx.OnArrive` (fill a stub + lay out zones) and
+  `Ctx.Ambush` (author enemies) are hooks the orchestrator supplies; when nil, deterministic
+  fallbacks (hint-only fill, generic zones, generic enemies) are used.
+
+## Rule decisions (where the brief left room)
+
+- The party moves as one: one `Campaign.LocationID`; characters only have a zone. Fleeing
+  through an exit moves the whole party (down allies carried) and ends the encounter, no XP.
+- A second move in a turn is a dash paid with the action, in and out of combat.
+- Damage is the weapon's dice only (no ability modifier); a natural 20 doubles the dice.
+- Proficiency +2/+2/+3/+3/+4 for levels 1–5. XP thresholds 0/150/400/800/1300.
+  Level-up HP = 6 + CON mod (min 1).
+- AC: armor base + DEX (capped per armor), +2 for a shield; unarmored 10 + DEX.
+- "Badly hurt" for subdue = at or below half HP. Grapple/tie-up need the same zone;
+  intimidate/calm/persuade reach 1 zone.
+- Free: look, say, equip, drop, accept_quest, and (outside combat) reposition.
+  Move: go through an exit, travel, reposition in combat. Action: everything else,
+  including fleeing through an exit in combat and talk_to. turn_in_quest is free (it pairs
+  with handing over the item, which costs the action).
+- Rest: a long rest (full HP, next dawn) only at danger-0 places; elsewhere a short rest
+  (half max HP, down allies to 1, one time segment, random-encounter roll).
+- Random encounters: d100 <= 8 x danger per travel hop or rest.
+- Main-quest objectives tick strictly in order; side-quest objectives in any order.
+  Talk/defeat objectives count only after the quest was accepted. A reach_location
+  objective counts for any place already visited, so reaching it early is not wasted.
+- Lair-gate edges ignore keys and checks; they open when all main objectives but the last
+  are done. Defeating (or subduing) the antagonist completes the campaign.
+
+## Changes from the live play-test (deepseek-v4.1-flash)
+
+- Quests stay completable whatever the author names: an obtain/deliver item that exists
+  nowhere is created as a quest item, held by the NPC the objective names (handed over when
+  the party talks to them) or lying at the place the quest points to (named place, else the
+  previous reach_location, else an unvisited place; never the hub or lair). A deliver_item
+  whose target is the recipient becomes the item fetched earlier. A defeat_enemy foe that is
+  not an NPC gets `Objective.Where` and appears when the party arrives there.
+- Enemies act once per round, spread over the party's turns (`Enemy.ActedRound`): after
+  each character's turn, ceil(waiting / turns left in the round) of them act.
+- Lower early-level pressure: enemy max damage 4 + 2(danger + level) and HP budget
+  party x (4 + 3 x danger + 4 x (level - 1)).
+- Story-beat ambushes wait until the party is outside the safe hub; authored enemies may not
+  reuse the antagonist's name (the real antagonist waits in the lair).
+- The interpreter continues the conversation ("queued so far: ...; call the next tool or say
+  done") when a message reads like several steps, because some models return one tool call
+  per reply.
+- The HTTP client retries a reply cut off by max_tokens (reasoning models spend the cap on
+  hidden thinking) without the cap. `LLM_REASONING_EFFORT` passes `reasoning_effort`.
+- Merchants remember trades; quest items are never for sale. A carried shield shows as
+  equipped (it always counted toward AC).
