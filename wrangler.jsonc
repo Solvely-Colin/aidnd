@@ -7,12 +7,12 @@
 	"observability": { "enabled": true },
 	// Keep APP_SECRET/PLAY_CODE if they were set as dashboard variables.
 	"keep_vars": true,
-	// The player UI. The Worker runs first only for the API and login.
+	// The player UI. The Worker runs first only for the API, login and art.
 	"assets": {
 		"directory": "./ui",
 		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api/*", "/auth/*"]
+		"run_worker_first": ["/api/*", "/auth/*", "/img/*"]
 	},
 	// The Go game server. One named instance holds every campaign, so the
 	// live event stream and turn timers stay in one process.
@@ -38,6 +38,9 @@
 			"database_id": "9002c6f6-cc55-43ed-b043-b153c4a23443"
 		}
 	],
+	// Story covers and character portraits (worker/art.ts).
+	"ai": { "binding": "AI" },
+	"r2_buckets": [{ "binding": "ART", "bucket_name": "aidnd-art" }],
 	"vars": {
 		"LLM_MODEL": "deepseek-v4.1-flash",
 		"LLM_BASE_URL": "https://ollama.com/v1",
