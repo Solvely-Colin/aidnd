@@ -340,7 +340,7 @@ func TestOnD1(t *testing.T) {
 	openMem = func(t *testing.T) (*Store, error) { s, _ := openD1(t); return s, nil }
 	for name, f := range map[string]func(*testing.T){
 		"RoundTrip": TestWorldRoundTrip, "NotFound": TestNotFound, "Events": TestEventsAppendAndReplay,
-		"Atomic": TestSaveIsAtomic, "List": TestListCampaigns,
+		"Atomic": TestSaveIsAtomic, "List": TestListCampaigns, "Notes": TestNotes,
 	} {
 		t.Run(name, f)
 	}
@@ -364,5 +364,42 @@ func TestD1RefusesWrongSecret(t *testing.T) {
 	defer srv.Close()
 	if _, err := OpenD1(srv.URL, "wrong"); err == nil {
 		t.Fatal("opened with the wrong secret")
+	}
+}
+
+func TestNotes(t *testing.T) {
+	s, err := openMem(t)
+	must(t, err)
+	defer s.Close()
+	w := richWorld(t)
+	_, err = s.Save(ctx, w)
+	must(t, err)
+	id := w.Campaign.ID
+	a, err := s.AddNote(ctx, id, Note{PlayerID: "u1", Text: "the ferryman lied", Turn: 3, Day: 2, Time: "night"})
+	must(t, err)
+	_, err = s.AddNote(ctx, id, Note{PlayerID: "u2", Text: "not yours"})
+	must(t, err)
+	// saving the world again must not wipe notes
+	_, err = s.Save(ctx, w)
+	must(t, err)
+	got, err := s.Notes(ctx, id, "u1")
+	must(t, err)
+	if len(got) != 1 || got[0].ID != a.ID || got[0].Text != "the ferryman lied" || got[0].Day != 2 || got[0].Time != "night" {
+		t.Fatalf("notes %+v", got)
+	}
+	if err := s.UpdateNote(ctx, id, "u2", a.ID, "stolen"); err != ErrNotFound {
+		t.Fatalf("another player edited a note: %v", err)
+	}
+	must(t, s.UpdateNote(ctx, id, "u1", a.ID, "the ferryman lied twice"))
+	got, _ = s.Notes(ctx, id, "u1")
+	if got[0].Text != "the ferryman lied twice" {
+		t.Fatalf("edit %+v", got)
+	}
+	if err := s.DeleteNote(ctx, id, "u2", a.ID); err != ErrNotFound {
+		t.Fatalf("another player deleted a note: %v", err)
+	}
+	must(t, s.DeleteNote(ctx, id, "u1", a.ID))
+	if got, _ = s.Notes(ctx, id, "u1"); len(got) != 0 {
+		t.Fatalf("after delete %+v", got)
 	}
 }

@@ -96,10 +96,32 @@ they/them, and drafts fill it from the concept.
 | `GET /campaigns/{id}/locations/{lid}` | any caller | A visited or known location; 404 otherwise. |
 | `GET /campaigns/{id}/npcs/{nid}` | any caller | Public NPC view and merchant stock. |
 | `GET /campaigns/{id}/quests` | any caller | `{quests: [...]}` |
-| `GET /campaigns/{id}/journal` | any caller | `{summary, chronicle: [{id, turn, day, kind, text, location_id, npc_ids, source, quest_id, status, outcome}], quests, setbacks}`; `kind` is fact, deed, death, promise or rumor; promises have `status` open, kept or broken |
+| `GET /campaigns/{id}/journal` | any caller | `{summary, chronicle: [{id, turn, day, kind, text, location_id, npc_ids, source, quest_id, status, outcome}], quests, setbacks, people, places}`; `kind` is fact, deed, death, promise or rumor; promises have `status` open, kept or broken. See Journal. |
+| `GET /campaigns/{id}/notes` | joined player | `{notes: [{id, text, turn, day, time, created_at, updated_at}]}`, the caller's own notes, oldest first. |
+| `POST /campaigns/{id}/notes` | joined player | `{text}` → 201 note, stamped with the current turn, day and time of day. |
+| `POST /campaigns/{id}/notes/{nid}` | note's author | `{text}` replaces the text. 404 for anyone else's note. |
+| `DELETE /campaigns/{id}/notes/{nid}` | note's author | Deletes the note. |
 | `POST /campaigns/{id}/stream-token` | any caller | `{token, expires_at}` for the event stream. |
 | `GET /campaigns/{id}/events` | see SSE | Server-sent events. |
 | `GET /campaigns/{id}/log?after=&limit=` | any caller | Same events as JSON pages: `{events, last_id}`. |
+
+### Journal
+
+The journal is built from the world record, never from model output, so it
+only lists what the engine knows the party has come across.
+
+- `people`: NPCs at places the party has visited (the antagonist only while
+  the party is in the same place). Each has the NPC brief fields plus
+  `location_name`, `met` (the party has spoken with them), `here`, and
+  `quests` (titles of visible quests they gave). Nearby people come first,
+  then the most recently spoken to.
+- `places`: known locations with `name, kind, hint, danger, visited, here,
+  is_hub, people`; `description` only once visited. Here first, then
+  visited, then places only seen from a path.
+
+Notes are private to the player who wrote them (up to 200 per campaign,
+4000 characters each). They are stored apart from the world, so neither
+the narrator nor other players see them.
 
 "Any caller" means authenticated: the API key in service mode, anything in
 open mode.
