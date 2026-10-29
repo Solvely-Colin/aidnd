@@ -46,6 +46,9 @@ type Config struct {
 	SkipAfterSeconds    int  // players may skip an idle turn after this (default 120)
 	SummaryEvery        int  // regenerate story-so-far every N turns (default 10)
 	RecentEvents        int  // log lines given to the LLM (default 12)
+	// PlayerDice makes turns that need a player's d20 wait for that player
+	// to roll it (unless they chose auto-roll). Off, the engine rolls at once.
+	PlayerDice bool
 }
 
 func (c *Config) defaults() {
@@ -188,6 +191,11 @@ func (g *GM) SaveCharacter(ctx context.Context, campaignID, playerID string, spe
 	if p == nil {
 		return nil, ErrForbidden
 	}
+	if w.Campaign.Status == game.StatusActive {
+		if old := w.CharacterOf(playerID); old != nil && old.Dead {
+			return g.replaceDead(ctx, w, playerID, old, spec)
+		}
+	}
 	if w.Campaign.Status != game.StatusLobby {
 		return nil, Conflict("characters are locked once the campaign starts")
 	}
@@ -243,4 +251,36 @@ func (g *GM) CreateCharacterFromConcept(ctx context.Context, campaignID, playerI
 	}
 	spec := g.DraftCharacter(ctx, w, concept)
 	return g.SaveCharacter(ctx, campaignID, playerID, spec)
+}
+
+// replaceDead brings in a new character for a player whose character died.
+// They join where the party stands, with the dead character's XP, and take
+// the same seat; the fallen character's belongings are left where they lie.
+func (g *GM) replaceDead(ctx context.Context, w *game.World, playerID string, old *game.Character, spec game.CharacterSpec) (*game.Character, error) {
+	for _, other := range w.Characters {
+		if other.ID != old.ID && strings.EqualFold(strings.TrimSpace(other.Name), strings.TrimSpace(spec.Name)) {
+			return nil, Conflict("%s is already in the party; pick another name", other.Name)
+		}
+	}
+	for _, it := range w.ItemsOf(game.OwnerCharacter, old.ID) {
+		it.Owner = game.Owner{Kind: game.OwnerLocation, ID: w.Campaign.LocationID}
+	}
+	zone, seat := old.ZoneID, -1
+	for i, id := range w.Campaign.Turns.Order {
+		if id == old.ID {
+			seat = i
+		}
+	}
+	removeCharacter(w, old.ID)
+	c, err := game.CreateCharacter(w, playerID, spec)
+	if err != nil {
+		return nil, err
+	}
+	game.JoinMidway(w, c, old.XP, zone)
+	if seat >= 0 {
+		w.Campaign.Turns.Order[seat] = c.ID
+	}
+	_, err = g.commit(ctx, w, store.NewEvent("character_created", playerID, map[string]any{
+		"player_id": playerID, "character_id": c.ID, "name": c.Name, "class": c.Class, "kit": c.Kit, "concept": c.Concept, "replaces": old.ID, "joins_midway": true}))
+	return c, err
 }

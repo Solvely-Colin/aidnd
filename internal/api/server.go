@@ -81,6 +81,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/start", s.auth(s.handleStart))
 	mux.HandleFunc("POST /campaigns/{id}/actions", s.auth(s.handleAction))
 	mux.HandleFunc("POST /campaigns/{id}/skip", s.auth(s.handleSkip))
+	mux.HandleFunc("POST /campaigns/{id}/roll", s.auth(s.handleRoll))
+	mux.HandleFunc("POST /campaigns/{id}/roll/cancel", s.auth(s.handleCancelRoll))
+	mux.HandleFunc("POST /campaigns/{id}/me/dice", s.auth(s.handleDice))
 	mux.HandleFunc("GET /campaigns/{id}/map", s.auth(s.handleMap))
 	mux.HandleFunc("GET /campaigns/{id}/locations/{lid}", s.auth(s.handleLocation))
 	mux.HandleFunc("GET /campaigns/{id}/npcs/{nid}", s.auth(s.handleNPC))
@@ -368,7 +371,8 @@ func (s *Server) handleMyCampaigns(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Premise string `json:"premise"`
+		Premise   string `json:"premise"`
+		Lethality string `json:"lethality"` // standard (default) | story
 	}
 	if err := decode(r, &body); err != nil {
 		s.fail(w, err)
@@ -378,6 +382,12 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	if body.Lethality == game.LethalityStory {
+		if wld, err = s.gm.SetLethality(r.Context(), wld.Campaign.ID, body.Lethality); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, campaignView(wld, whoFrom(r).PlayerID))
 }
@@ -531,17 +541,65 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		TargetID string        `json:"target_id"`
 		ZoneID   string        `json:"zone_id"`
 		Check    *gm.CheckHint `json:"check"`
+		Act      *gm.ActHint   `json:"act"`
 	}
 	if err := decode(r, &body); err != nil {
 		s.fail(w, err)
 		return
 	}
-	res, err := s.gm.TakeAction(r.Context(), r.PathValue("id"), p, body.Text, gm.Hints{TargetID: body.TargetID, ZoneID: body.ZoneID, Check: body.Check})
+	res, err := s.gm.TakeAction(r.Context(), r.PathValue("id"), p, body.Text, gm.Hints{TargetID: body.TargetID, ZoneID: body.ZoneID, Check: body.Check, Act: body.Act})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	writeJSON(w, 200, res)
+}
+
+// handleRoll rolls the dice for the player's pending turn.
+func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	res, err := s.gm.Roll(r.Context(), r.PathValue("id"), p)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, res)
+}
+
+// handleCancelRoll takes back a pending turn before its roll.
+func (s *Server) handleCancelRoll(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	if err := s.gm.CancelPending(r.Context(), r.PathValue("id"), p); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// handleDice sets whether the player rolls their own dice.
+func (s *Server) handleDice(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		AutoRoll bool `json:"auto_roll"`
+	}
+	if err := decode(r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.gm.SetAutoRoll(r.Context(), r.PathValue("id"), p, body.AutoRoll); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"auto_roll": body.AutoRoll})
 }
 
 func (s *Server) handleSkip(w http.ResponseWriter, r *http.Request) {

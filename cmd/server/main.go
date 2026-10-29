@@ -86,6 +86,7 @@ func main() {
 		LoreBudget:          envInt("LORE_BUDGET", 1800),
 		DebugDirector:       envBool("DEBUG_DIRECTOR", false),
 		SkipAfterSeconds:    envInt("SKIP_AFTER_SECONDS", 120),
+		PlayerDice:          envBool("PLAYER_DICE", true),
 	}, dice.New(time.Now().UnixNano()))
 	g.Log = logger
 	cfg := api.Config{APIKey: apiKey}

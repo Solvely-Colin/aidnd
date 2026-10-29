@@ -96,36 +96,62 @@ type EncounterView struct {
 }
 
 type CharacterView struct {
-	ID         string          `json:"id"`
-	PlayerID   string          `json:"player_id"`
-	Name       string          `json:"name"`
-	Concept    string          `json:"concept,omitempty"`
-	Class      string          `json:"class"`
-	Kit        string          `json:"kit"`
-	Backstory  string          `json:"backstory,omitempty"`
-	Pronouns   string          `json:"pronouns"`
-	Scores     game.Scores     `json:"scores"`
-	Modifiers  map[string]int  `json:"modifiers"`
-	Proficient []game.Ability  `json:"proficient"`
-	ProfBonus  int             `json:"proficiency_bonus"`
-	Level      int             `json:"level"`
-	XP         int             `json:"xp"`
-	LevelXP    int             `json:"level_xp"` // XP the current level began at
-	NextLevel  int             `json:"next_level_xp,omitempty"`
-	HP         int             `json:"hp"`
-	MaxHP      int             `json:"max_hp"`
-	Down       bool            `json:"down"`
-	AC         int             `json:"ac"`
-	Gold       int             `json:"gold"`
-	Weapon     *ItemView       `json:"weapon,omitempty"`
-	Armor      *ItemView       `json:"armor,omitempty"`
-	Attack     AttackView      `json:"attack"`
-	ACParts    []game.ACPart   `json:"ac_parts"`
-	LevelUp    *LevelUpView    `json:"level_up,omitempty"`
-	Conditions []ConditionView `json:"conditions"`
-	ZoneID     string          `json:"zone_id,omitempty"`
-	ZoneName   string          `json:"zone_name,omitempty"`
-	Inventory  []ItemView      `json:"inventory"`
+	ID         string           `json:"id"`
+	PlayerID   string           `json:"player_id"`
+	Name       string           `json:"name"`
+	Concept    string           `json:"concept,omitempty"`
+	Class      string           `json:"class"`
+	Kit        string           `json:"kit"`
+	Backstory  string           `json:"backstory,omitempty"`
+	Pronouns   string           `json:"pronouns"`
+	Scores     game.Scores      `json:"scores"`
+	Modifiers  map[string]int   `json:"modifiers"`
+	Proficient []game.Ability   `json:"proficient"`
+	ProfBonus  int              `json:"proficiency_bonus"`
+	Level      int              `json:"level"`
+	XP         int              `json:"xp"`
+	LevelXP    int              `json:"level_xp"` // XP the current level began at
+	NextLevel  int              `json:"next_level_xp,omitempty"`
+	HP         int              `json:"hp"`
+	MaxHP      int              `json:"max_hp"`
+	Down       bool             `json:"down"`
+	AC         int              `json:"ac"`
+	Gold       int              `json:"gold"`
+	Weapon     *ItemView        `json:"weapon,omitempty"`
+	Armor      *ItemView        `json:"armor,omitempty"`
+	Attack     AttackView       `json:"attack"`
+	ACParts    []game.ACPart    `json:"ac_parts"`
+	LevelUp    *LevelUpView     `json:"level_up,omitempty"`
+	Conditions []ConditionView  `json:"conditions"`
+	ZoneID     string           `json:"zone_id,omitempty"`
+	ZoneName   string           `json:"zone_name,omitempty"`
+	Inventory  []ItemView       `json:"inventory"`
+	Skills     []SkillView      `json:"skills"`
+	Passive    int              `json:"passive_perception"`
+	Dying      bool             `json:"dying,omitempty"`
+	Dead       bool             `json:"dead,omitempty"`
+	DeathSaves *game.DeathSaves `json:"death_saves,omitempty"`
+	Readied    bool             `json:"readied,omitempty"`
+}
+
+// SkillView is one skill line on the sheet.
+type SkillView struct {
+	Key        string       `json:"key"`
+	Name       string       `json:"name"`
+	Ability    game.Ability `json:"ability"`
+	Mod        int          `json:"mod"`
+	Proficient bool         `json:"proficient"`
+	Expertise  bool         `json:"expertise,omitempty"`
+}
+
+// PendingView is a turn waiting for its player's roll.
+type PendingView struct {
+	Kind        string             `json:"kind"`
+	CharacterID string             `json:"character_id"`
+	PlayerID    string             `json:"player_id"`
+	Name        string             `json:"name"`
+	Text        string             `json:"text,omitempty"`
+	Preview     []game.PlannedStep `json:"preview,omitempty"`
 }
 
 // AttackView is the equipped weapon's attack line.
@@ -184,6 +210,7 @@ type YouView struct {
 	CharacterID string `json:"character_id,omitempty"`
 	Joined      bool   `json:"joined"`
 	YourTurn    bool   `json:"your_turn"`
+	AutoRoll    bool   `json:"auto_roll"`
 }
 
 type SceneView struct {
@@ -214,6 +241,10 @@ type CampaignView struct {
 	TurnStarted int64           `json:"turn_started,omitempty"`
 	Budget      *game.Budget    `json:"budget,omitempty"`
 	You         YouView         `json:"you"`
+	// FreeRoam is set outside fights: anyone on their feet can act.
+	FreeRoam  bool          `json:"free_roam"`
+	Pending   []PendingView `json:"pending"`
+	Lethality string        `json:"lethality"`
 }
 
 func itemView(w *game.World, it *game.Item, c *game.Character, n *game.NPC) ItemView {
@@ -261,14 +292,31 @@ func characterView(w *game.World, c *game.Character) CharacterView {
 	for _, it := range w.ItemsOf(game.OwnerCharacter, c.ID) {
 		v.Inventory = append(v.Inventory, itemView(w, it, c, nil))
 	}
+	for _, sk := range game.Skills {
+		sv := SkillView{Key: sk.Key, Name: sk.Name, Ability: sk.Ability, Mod: c.SkillMod(sk), Proficient: c.HasSkill(sk.Key)}
+		for _, e := range c.Expertise {
+			sv.Expertise = sv.Expertise || e == sk.Key
+		}
+		v.Skills = append(v.Skills, sv)
+	}
+	v.Passive = c.PassivePerception()
+	v.Dying, v.Dead, v.Readied = c.Dying(), c.Dead, c.Readied != nil
+	if c.Death != nil && c.Down() {
+		d := *c.Death
+		v.DeathSaves = &d
+	}
 	return v
 }
 
 func conditions(w *game.World, c *game.Character) []ConditionView {
 	out := []ConditionView{}
 	switch {
+	case c.Dead:
+		out = append(out, ConditionView{"dead", "Dead", "Fell in battle. Their player can make a new character."})
+	case c.Dying():
+		out = append(out, ConditionView{"dying", "Dying", fmt.Sprintf("At 0 HP and making death saves (%d of 3 successes, %d of 3 failures). Any healing, a healer's kit or a DC 10 Medicine check stops it.", c.Death.Successes, c.Death.Failures)})
 	case c.Down():
-		out = append(out, ConditionView{"down", "Down", "At 0 HP. A healer's kit can bring them back."})
+		out = append(out, ConditionView{"down", "Down", "At 0 HP but stable. Any healing or a rest brings them back."})
 	case c.HP*2 <= c.MaxHP:
 		out = append(out, ConditionView{"bloodied", "Bloodied", "At half health or less."})
 	}
@@ -445,16 +493,39 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	for _, p := range w.Players {
 		v.Players = append(v.Players, PlayerView{ID: p.ID, Name: p.Name, CharacterID: p.CharacterID})
 	}
+	v.Lethality = c.Lethality
+	if v.Lethality == "" {
+		v.Lethality = game.LethalityStandard
+	}
+	v.Pending = []PendingView{}
 	if c.Status == game.StatusActive {
+		v.FreeRoam = !w.InCombat()
 		if a := w.ActiveCharacter(); a != nil {
 			v.Active = &gm.Actor{CharacterID: a.ID, PlayerID: a.PlayerID, Name: a.Name}
 			b := c.Turns.Budget
 			v.Budget = &b
 			v.TurnStarted = c.Turns.Started
 		}
+		if v.FreeRoam {
+			b := game.FullBudget(false)
+			v.Budget = &b
+		}
+		for _, ch := range w.Party() {
+			if p := c.Pending[ch.ID]; p != nil {
+				v.Pending = append(v.Pending, PendingView{Kind: p.Kind, CharacterID: ch.ID, PlayerID: ch.PlayerID, Name: ch.Name, Text: p.Text, Preview: p.Preview})
+			}
+		}
 	}
 	if p := w.Player(playerID); p != nil {
-		v.You = YouView{PlayerID: p.ID, CharacterID: p.CharacterID, Joined: true, YourTurn: v.Active != nil && v.Active.PlayerID == p.ID}
+		v.You = YouView{PlayerID: p.ID, CharacterID: p.CharacterID, Joined: true, AutoRoll: p.AutoRoll}
+		if c.Status == game.StatusActive {
+			if v.FreeRoam {
+				me := w.Character(p.CharacterID)
+				v.You.YourTurn = me != nil && !me.Down()
+			} else {
+				v.You.YourTurn = v.Active != nil && v.Active.PlayerID == p.ID
+			}
+		}
 	} else if playerID != "" {
 		v.You.PlayerID = playerID
 	}

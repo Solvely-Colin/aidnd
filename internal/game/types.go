@@ -67,6 +67,9 @@ type Player struct {
 	CharacterID string `json:"character_id,omitempty"`
 	Token       string `json:"-"` // open dev mode bearer token
 	JoinedTurn  int    `json:"joined_turn"`
+	// AutoRoll lets the engine roll this player's dice straight away. Off
+	// (the default), a turn that needs their d20 waits for them to roll it.
+	AutoRoll bool `json:"auto_roll,omitempty"`
 }
 
 // Character is a player character sheet.
@@ -92,10 +95,27 @@ type Character struct {
 	// Conditions are status effects (poisoned, prone...). Only the engine
 	// adds them: enemy attacks, validated hazards, and their own ticks.
 	Conditions Conditions `json:"conditions,omitempty"`
+	// CharExtra is the rest of the 5e sheet, stored as one JSON column.
+	CharExtra
 }
 
-// Down reports whether the character is at 0 HP.
-func (c *Character) Down() bool { return c.HP <= 0 }
+// CharExtra holds sheet parts added after the first schema: skills, death
+// saves, reactions and readied actions.
+type CharExtra struct {
+	Skills    []string `json:"skills,omitempty"`    // proficient skill keys
+	Expertise []string `json:"expertise,omitempty"` // skills with double proficiency
+	// Death is set while the character lies at 0 HP and not yet dead.
+	Death *DeathSaves `json:"death,omitempty"`
+	Dead  bool        `json:"dead,omitempty"`
+	// ReactedRound is the encounter round of their last reaction
+	// (opportunity attack or readied attack); one per round.
+	ReactedRound int `json:"reacted_round,omitempty"`
+	// Readied is an attack held for when an enemy comes within reach.
+	Readied *Readied `json:"readied,omitempty"`
+}
+
+// Down reports whether the character is at 0 HP (dying, stable or dead).
+func (c *Character) Down() bool { return c.HP <= 0 || c.Dead }
 
 // Mod returns the ability modifier for a.
 func (c *Character) Mod(a Ability) int { return Mod(c.Scores[a]) }
@@ -300,6 +320,14 @@ type Enemy struct {
 	// ActedRound is the last round this enemy took its turn in.
 	ActedRound int        `json:"acted_round,omitempty"`
 	Conditions Conditions `json:"conditions,omitempty"`
+	EnemyExtra
+}
+
+// EnemyExtra holds enemy state added after the first schema, stored as one
+// JSON column.
+type EnemyExtra struct {
+	// ReactedRound is the round of its last opportunity attack.
+	ReactedRound int `json:"reacted_round,omitempty"`
 }
 
 // Defeated reports whether the enemy is out of the fight.
@@ -559,4 +587,22 @@ type Campaign struct {
 	Summary      string    `json:"summary,omitempty"` // running story so far
 	SummaryTurn  int       `json:"summary_turn"`
 	CreatedAt    int64     `json:"created_at"`
+	CampaignExtra
 }
+
+// Lethality settings: what three failed death saves mean.
+const (
+	LethalityStandard = "standard" // the character dies
+	LethalityStory    = "story"    // the character is out of the fight but lives
+)
+
+// CampaignExtra holds campaign state added after the first schema, stored
+// as one JSON column.
+type CampaignExtra struct {
+	Lethality string `json:"lethality,omitempty"` // "" is standard
+	// Pending holds turns waiting for their player to roll, by character id.
+	Pending map[string]*PendingAction `json:"pending,omitempty"`
+}
+
+// Deadly reports whether characters can die in this campaign.
+func (c *Campaign) Deadly() bool { return c.Lethality != LethalityStory }

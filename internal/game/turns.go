@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Solvely-Colin/aidnd/internal/dice"
@@ -123,7 +124,7 @@ func EndTurn(w *World, now time.Time) *Character {
 	}
 	for i := 1; i <= n; i++ {
 		idx := (t.Index + i) % n
-		if c := w.Character(t.Order[idx]); c != nil && !c.Down() {
+		if c := w.Character(t.Order[idx]); c != nil && (!c.Down() || (c.Dying() && w.InCombat())) {
 			if idx <= t.Index && w.Encounter != nil {
 				w.Encounter.Round++
 			}
@@ -179,7 +180,10 @@ func Setback(w *World) []string {
 	hub := w.Location(c.HubID)
 	EnsureZones(w, c.HubID)
 	for _, ch := range w.Characters {
-		ch.HP = max(1, ch.MaxHP/2)
+		if ch.Dead {
+			continue
+		}
+		SetHP(ch, max(1, ch.MaxHP/2))
 		lost := ch.Gold / 4
 		ch.Gold -= lost
 		if hub != nil && len(hub.Zones) > 0 {
@@ -279,6 +283,9 @@ func StartEncounter(w *World, specs []EnemySpec) (*Encounter, []string, error) {
 		enc.Enemies = append(enc.Enemies, e)
 	}
 	TagEnemies(enc.Enemies)
+	for _, c := range w.Characters {
+		c.ReactedRound, c.Readied = 0, nil
+	}
 	w.Encounter = enc
 	if b := &w.Campaign.Turns.Budget; b.Free == Unlimited || b.Free > CombatFreeActions {
 		b.Free = CombatFreeActions
@@ -361,6 +368,9 @@ type EnemyTurn struct {
 	Before    []string `json:"before,omitempty"` // start of its turn: stunned, standing up
 	After     []string `json:"after,omitempty"`  // end of its turn: saves, wearing off
 	Rolls     []Roll   `json:"rolls,omitempty"`  // the enemy's own saves
+	// Reactions are characters' automatic attacks during this enemy's turn
+	// (opportunity attacks as it leaves, readied attacks as it comes close).
+	Reactions []Reaction `json:"reactions,omitempty"`
 }
 
 // enemiesActingNow spreads the enemies over the round: each acts once per
@@ -401,17 +411,29 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 	var out []EnemyTurn
 	var changes []string
 	for _, e := range enemiesActingNow(w) {
-		var targets []*Character
+		var targets, hidden []*Character
 		for _, c := range w.Party() {
-			if !c.Down() {
+			switch {
+			case c.Down():
+			case c.Conditions.Has(CondHidden):
+				hidden = append(hidden, c)
+			default:
 				targets = append(targets, c)
 			}
 		}
-		if len(targets) == 0 {
+		if len(targets)+len(hidden) == 0 {
 			break
 		}
 		start, canMove := startEnemyTurn(e)
-		et := enemyAct(w, r, l, e, targets, start, canMove)
+		var et EnemyTurn
+		if len(targets) == 0 {
+			et = EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "hold", Text: e.Display() + " searches for its hidden foes"}
+		} else {
+			et = enemyAct(w, r, l, e, targets, start, canMove)
+		}
+		for _, re := range et.Reactions {
+			changes = append(changes, re.Text)
+		}
 		end := endEnemyTurn(r, e)
 		et.Before, et.After = start.Changes, end.Changes
 		et.Rolls = end.Rolls
@@ -422,6 +444,9 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 		changes = append(changes, end.Changes...)
 		out = append(out, et)
 	}
+	if w.Encounter != nil && len(w.Encounter.Living()) == 0 {
+		changes = append(changes, endEncounter(w)...) // reactions finished them
+	}
 	return out, changes
 }
 
@@ -429,6 +454,15 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 func enemyAct(w *World, r *dice.Roller, l *Location, e *Enemy, targets []*Character, start ConditionTick, canMove bool) EnemyTurn {
 	if start.LostTurn {
 		return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "stunned", Text: e.Display() + " is stunned and does nothing"}
+	}
+	// a readied attack triggers before it can act if it is already close
+	if re := readiedAgainst(w, r, e); len(re) > 0 {
+		if e.Defeated() {
+			return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "down", Text: e.Display() + " falls before it can act", Reactions: re}
+		}
+		et := enemyAct(w, r, l, e, targets, start, canMove)
+		et.Reactions = append(re, et.Reactions...)
+		return et
 	}
 	reach := ReachMelee
 	if e.Ranged {
@@ -462,8 +496,11 @@ func enemyAct(w *World, r *dice.Roller, l *Location, e *Enemy, targets []*Charac
 			et.Text = "Critical! " + et.Text
 		}
 		if t.Down() {
-			t.Conditions = nil // a downed character's fight is over until revived
+			KnockOut(w, t)
 			et.Text += fmt.Sprintf("; %s goes down", t.Name)
+			if lines := releaseGrapples(w, t); len(lines) > 0 {
+				et.Text += "; " + strings.Join(lines, "; ")
+			}
 			return et
 		}
 		if e.Inflicts != "" {
@@ -489,7 +526,15 @@ func enemyAct(w *World, r *dice.Roller, l *Location, e *Enemy, targets []*Charac
 	if step == e.ZoneID || !canMove {
 		return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "hold", Text: e.Display() + " holds position"}
 	}
+	reacts := enemyLeaves(w, r, e)
+	if e.Defeated() {
+		return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "down", Text: e.Display() + " is cut down as it tries to move", Reactions: reacts}
+	}
 	e.ZoneID = step
 	txt := fmt.Sprintf("%s moves to %s, toward %s", e.Display(), ZoneName(l, step), t.Name)
-	return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "move", TargetID: t.ID, Target: t.Name, ToZone: step, Text: txt}
+	reacts = append(reacts, readiedAgainst(w, r, e)...)
+	if e.Defeated() {
+		txt += " and is struck down"
+	}
+	return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "move", TargetID: t.ID, Target: t.Name, ToZone: step, Text: txt, Reactions: reacts}
 }
