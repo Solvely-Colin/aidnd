@@ -8,7 +8,7 @@ import (
 func (f *fixture) sideQuest(t *testing.T, objs ...ObjectiveSpec) *Quest {
 	t.Helper()
 	q, err := AddQuest(f.w, QuestSpec{Title: "Wolves at the Gate", Summary: "Thin the pack.", GiverID: "Elder Maren",
-		Objectives: objs, RewardGold: 40, RewardXP: 60, RewardItems: []RewardItemSpec{{Key: "healing_potion"}}}, false)
+		Objectives: objs, RewardGold: 40, RewardXP: 50, RewardItems: []RewardItemSpec{{Key: "healing_potion"}}}, false)
 	must(t, err)
 	return q
 }
@@ -65,7 +65,7 @@ func TestSideQuestLifecycle(t *testing.T) {
 	if stepErr(r, 0) != "" || q.Status != QuestTurnedIn {
 		t.Fatalf("turn-in: %q", stepErr(r, 0))
 	}
-	if f.aria.Gold != gold+40 || reward.Owner.ID != f.aria.ID || f.bram.XP != xp+60 {
+	if f.aria.Gold != gold+40 || reward.Owner.ID != f.aria.ID || f.bram.XP != xp+50 {
 		t.Fatalf("rewards: gold %d item owner %v xp %d", f.aria.Gold, reward.Owner, f.bram.XP)
 	}
 	if mem := f.elder.Recall(); len(mem) == 0 || !strings.Contains(mem[0], "Aria") {

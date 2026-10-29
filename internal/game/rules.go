@@ -11,14 +11,19 @@ import (
 const MaxLevel = 5
 
 // XPTable is the total XP needed to reach each level (index = level-1).
-var XPTable = []int{0, 150, 400, 800, 1300}
+// Paced for a multi-session campaign: level 2 after the first two legs of
+// the story (a couple of main objectives, a side quest, some fights each),
+// level 3 by the end of a modest campaign, level 4 for long ones full of
+// side work, and level 5 rarely. The 2026-10-29 play-test reached level 3
+// by turn 18 on the old 0/150/400/800/1300 table with bigger awards.
+var XPTable = []int{0, 300, 800, 1600, 2800}
 
 // XP awards.
 const (
-	XPMainObjective = 100
-	XPSideObjective = 50
-	XPSideQuest     = 50
-	XPPerDanger     = 25 // won fights: 25 x location danger
+	XPMainObjective = 75
+	XPSideObjective = 20
+	XPSideQuest     = 40
+	XPPerDanger     = 10 // won fights: 10 x location danger
 )
 
 // ProficiencyBonus by level: +2 at 1-2, +3 at 3-4, +4 at 5.
@@ -185,6 +190,7 @@ type CheckRoll struct {
 	Parts   []RollPart `json:"parts,omitempty"`   // what the modifier is made of
 	Against string     `json:"against,omitempty"` // "AC" or "DC"
 	Cover   int        `json:"cover,omitempty"`   // added to the target
+	EdgeWhy string     `json:"edge_why,omitempty"`
 	dice.Check
 }
 
@@ -226,8 +232,17 @@ type AttackOutcome struct {
 
 // Attack rolls toHit vs ac and, on a hit, damage (dice doubled on a 20).
 func Attack(r *dice.Roller, label string, toHit, ac int, damage string) AttackOutcome {
-	ch := r.D20(toHit, ac)
+	return AttackWithEdge(r, label, toHit, ac, damage, 0, "")
+}
+
+// AttackWithEdge is Attack with advantage (edge > 0) or disadvantage
+// (edge < 0) for the reasons in why.
+func AttackWithEdge(r *dice.Roller, label string, toHit, ac int, damage string, edge int, why string) AttackOutcome {
+	ch := r.D20Edge(toHit, ac, edge)
 	out := AttackOutcome{Roll: CheckRoll{Label: label, Against: "AC", Check: ch}}
+	if edge != 0 {
+		out.Roll.EdgeWhy = why
+	}
 	if !ch.Tier.Succeeded() {
 		return out
 	}

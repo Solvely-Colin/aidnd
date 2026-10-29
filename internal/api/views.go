@@ -1,7 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/Solvely-Colin/aidnd/internal/game"
 	"github.com/Solvely-Colin/aidnd/internal/gm"
@@ -83,6 +85,9 @@ type EnemyView struct {
 	MaxHP   int    `json:"max_hp"`
 	ZoneID  string `json:"zone_id"`
 	Ranged  bool   `json:"ranged"`
+	// Inflicts is the condition its hits can cause; Conditions are on it now.
+	Inflicts   string          `json:"inflicts,omitempty"`
+	Conditions []ConditionView `json:"conditions"`
 }
 
 type EncounterView struct {
@@ -267,6 +272,7 @@ func conditions(w *game.World, c *game.Character) []ConditionView {
 	case c.HP*2 <= c.MaxHP:
 		out = append(out, ConditionView{"bloodied", "Bloodied", "At half health or less."})
 	}
+	out = append(out, statusViews(c.Conditions)...)
 	if l := w.Here(); l != nil && w.Campaign.Status == game.StatusActive {
 		if z := l.Zone(c.ZoneID); z != nil && z.Cover {
 			out = append(out, ConditionView{"cover", "In cover", "+2 AC against attacks from other zones."})
@@ -278,6 +284,42 @@ func conditions(w *game.World, c *game.Character) []ConditionView {
 		}
 	}
 	return out
+}
+
+// statusViews lists engine conditions (poisoned, prone...) with their
+// effect and how long they last.
+func statusViews(cs game.Conditions) []ConditionView {
+	out := []ConditionView{}
+	for _, k := range cs.Kinds() {
+		c := cs.Get(k)
+		note := capFirst(game.ConditionSummary(k))
+		if c.Source != "" {
+			note = "From " + c.Source + ". " + note
+		}
+		switch {
+		case k == game.CondProne:
+		case c.SaveDC > 0 && c.Rounds > 0:
+			note += fmt.Sprintf(". Up to %s more, %s save DC %d each turn to end it early", turnsWord(c.Rounds), c.Save, c.SaveDC)
+		case c.Rounds > 0:
+			note += fmt.Sprintf(". %s left", turnsWord(c.Rounds))
+		}
+		out = append(out, ConditionView{Key: k, Label: capFirst(k), Note: note + "."})
+	}
+	return out
+}
+
+func capFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func turnsWord(n int) string {
+	if n == 1 {
+		return "1 turn"
+	}
+	return fmt.Sprintf("%d turns", n)
 }
 
 func npcBrief(n *game.NPC) NPCBrief {
@@ -379,7 +421,8 @@ func encounterView(w *game.World) *EncounterView {
 	}
 	v := &EncounterView{Round: w.Encounter.Round}
 	for _, e := range w.Encounter.Living() {
-		v.Enemies = append(v.Enemies, EnemyView{ID: e.ID, Name: e.Name, Tag: e.Tag, Display: e.Display(), HP: e.HP, MaxHP: e.MaxHP, ZoneID: e.ZoneID, Ranged: e.Ranged})
+		v.Enemies = append(v.Enemies, EnemyView{ID: e.ID, Name: e.Name, Tag: e.Tag, Display: e.Display(), HP: e.HP, MaxHP: e.MaxHP, ZoneID: e.ZoneID, Ranged: e.Ranged,
+			Inflicts: e.Inflicts, Conditions: statusViews(e.Conditions)})
 	}
 	return v
 }

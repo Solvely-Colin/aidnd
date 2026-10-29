@@ -50,7 +50,10 @@ changes below (enemies act once per round, softer early fights).
   through an exit moves the whole party (down allies carried) and ends the encounter, no XP.
 - A second move in a turn is a dash paid with the action, in and out of combat.
 - Damage is the weapon's dice only (no ability modifier); a natural 20 doubles the dice.
-- Proficiency +2/+2/+3/+3/+4 for levels 1–5. XP thresholds 0/150/400/800/1300.
+- Proficiency +2/+2/+3/+3/+4 for levels 1–5. XP thresholds 0/300/800/1600/2800
+  (slowed 2026-10-29 from 0/150/400/800/1300). Awards: main objective 75, side
+  objective 20, side quest 40 by default (authored rewards capped at 40 + 15 x danger,
+  doubled for the main quest), won fight 10 x danger.
   Level-up HP = 6 + CON mod (min 1).
 - AC: armor base + DEX (capped per armor), +2 for a shield; unarmored 10 + DEX.
 - "Badly hurt" for subdue = at or below half HP. Grapple/tie-up need the same zone;
@@ -75,6 +78,30 @@ changes below (enemies act once per round, softer early fights).
   Crossbow does) and renames the six kits (pulp skirmisher = Gumshoe). `NewItem`
   translates any catalog key into the campaign's era, so authored stock and loot can't
   bring swords into 1931. Existing characters keep the gear they already have.
+
+## Status conditions (2026-10-29)
+
+Engine state on characters and enemies (`Conditions`), never set by the model directly.
+
+| Condition | Effect | Ends |
+|---|---|---|
+| poisoned | disadvantage on attacks and checks | 3 turns, CON save at end of each turn; healer's kit; rest. Outlasts the fight |
+| prone | own attacks at disadvantage; melee against has advantage, ranged against disadvantage | standing up at the start of your turn, which costs the move |
+| restrained | can't move or flee; own attacks at disadvantage; attacks against have advantage | 3 turns, STR save each turn, or an `escape` check (action) |
+| frightened | disadvantage on attacks and checks; can't move closer to the source | 2 turns, WIS save each turn |
+| blinded | own attacks at disadvantage; attacks against have advantage | 1 turn |
+| stunned | loses the next turn; attacks against have advantage | 1 turn |
+
+- Advantage/disadvantage roll two d20s; any source of each cancels out (5e). Rolls carry
+  `edge`, `naturals` and `edge_why`.
+- Sources: an enemy's `inflicts` (authored, enum-validated; stunned only at danger 3+,
+  else downgraded to prone): a hit forces a save vs DC 8 + attack bonus (10..15). The
+  narrator's `hazard` directive (outside fights, once per narration, never stunned): the
+  engine rolls the target's save vs DC 10 + danger and the narration is written after.
+  Fallback wolves knock prone and cave spiders poison.
+- Durations count the bearer's own turns and tick at the end of them; a stunned
+  character's turn passes automatically (enemies still act). The end of a fight clears
+  everything but poison; rests and setbacks clear all; going down clears all.
 
 ## Changes from the live play-test (deepseek-v4.1-flash)
 

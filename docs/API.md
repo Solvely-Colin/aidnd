@@ -167,11 +167,15 @@ and the main quest only shows objectives up to the first one not yet done.
     "attack": {"weapon", "bonus": 4, "ability": "STR", "damage": "1d8", "reach"},
     "ac_parts": [{"label": "Chain Mail", "value": 16}, {"label": "Shield", "value": 2}],  // sums to ac
     "level_up": {"level": 2, "hp": 8, "proficiency_bonus": 2},  // omitted at max level
-    "conditions": [{"key": "down | bloodied | cover | acting", "label", "note"}],  // derived, not stored
+    "conditions": [{"key", "label", "note"}],   // engine conditions (poisoned | prone | restrained |
+                                                // frightened | blinded | stunned; note says the effect,
+                                                // source and turns left) then derived states
+                                                // (down | bloodied | cover | acting)
     "inventory": [{"id", "name", "kind", "equipped", "effect", "to_hit", ...}]
   }],                                                  // every member's full sheet, so players can read each other's
   "players": [{"id", "name", "character_id"}],
-  "encounter": {"round": 2, "enemies": [{"id", "display", "hp", "max_hp", "zone_id", "ranged"}]},
+  "encounter": {"round": 2, "enemies": [{"id", "display", "hp", "max_hp", "zone_id", "ranged",
+                "inflicts": "poisoned", "conditions": [{"key", "label", "note"}]}]},
   "quests": [{"id", "title", "summary", "is_main", "status", "giver_name",
               "objectives": [{"id", "kind", "text", "done"}], "reward_gold", "reward_xp"}],
   "active": {"character_id", "player_id", "name"},
@@ -220,21 +224,27 @@ engine always rolls the dice.
     "steps": [{
       "action": {"kind": "attack", "target": "en_3"}, "slot": "action", "ok": true,
       "error": "",                                 // why a step failed
-      "rolls": [{"label", "kind": "check|attack|damage|heal|subdue|encounter",
+      "rolls": [{"label", "kind": "check|attack|damage|heal|subdue|save|encounter",
                  "natural": 17, "dice": [5], "expr": "1d8+2", "mod": 5, "total": 22,
                  "target": 13, "tier": "success",
                  "parts": [{"label": "DEX", "value": 3}, {"label": "Proficiency", "value": 2}],
-                 "against": "AC", "cover": 2, "crit": false}],   // parts sum to mod; cover is inside target
+                 "against": "AC", "cover": 2, "crit": false,      // parts sum to mod; cover is inside target
+                 "edge": "advantage", "naturals": [6, 17], "edge_why": "target prone"}],  // edge only when rolled twice
       "changes": ["Goblin takes 7 damage (0/7)"],
       "quests": [...], "arrived": "loc_4", "combat_started": false, "combat_ended": true
     }]
   },
   "narration": "...", "quick": false,
   "world_changes": ["A hidden stair is revealed"],
+  "world_rolls": [{"kind": "save", ...}],          // saves against a narrated hazard
   "skipped": [{"action": {...}, "error": "no action left this turn"}],
   "budget": {"action": 0, "move": 1, "free": 2},
   "turn_ended": true,
-  "enemy_turns": [{"enemy", "kind": "move|attack|hold", "target", "attack": {...}, "text"}],
+  "enemy_turns": [{"enemy", "kind": "move|attack|hold|stunned", "target", "attack": {...}, "text",
+                   "save": {...}, "inflicted": "prone",       // target's save against the hit's condition
+                   "before": ["Wolf gets back up"], "after": [], "rolls": [...]}],  // the enemy's own condition ticks
+  "conditions": ["Aria shakes off being poisoned (CON save 15 vs DC 12)"],  // turn-boundary ticks
+  "condition_rolls": [{"kind": "save", ...}],
   "enemy_narration": "...",
   "setback": ["..."],                              // party wipe consequences
   "next_actor": {"character_id", "player_id", "name"},
@@ -297,6 +307,7 @@ data: {"id":42,"campaign_id":"c_...","type":"narration","data":{...},"created_at
 | `narration` | `{text, quick?, opening?, skip?, setback?, character_id?}` |
 | `turn_budget` | `{character_id, budget}`, sent when the turn continues |
 | `enemy_turns` | `{turns, narration}` |
+| `conditions` | `{changes, rolls, lost_turn}`: conditions ticking at a turn boundary (saves, wearing off, standing up, a stunned turn passing) |
 | `quest_updated` | `{quest_id, title, objective_id?, text, status}` |
 | `campaign_ended` | `{status: "completed" \| "failed"}` |
 

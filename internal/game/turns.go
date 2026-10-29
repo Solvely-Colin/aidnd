@@ -187,6 +187,7 @@ func Setback(w *World) []string {
 		}
 		changes = append(changes, fmt.Sprintf("%s: %d/%d HP, lost %d gold", ch.Name, ch.HP, ch.MaxHP, lost))
 	}
+	ClearAllConditions(w)
 	c.Scene.Day++
 	c.Scene.Time = 0
 	c.Scene.Tension = 2
@@ -218,6 +219,9 @@ type EnemySpec struct {
 	Damage      string `json:"damage"`
 	Ranged      bool   `json:"ranged,omitempty"`
 	NPCID       string `json:"npc_id,omitempty"`
+	// Inflicts is a condition each hit forces a save against: poisoned,
+	// prone, restrained, frightened, blinded, or stunned (danger 3+).
+	Inflicts string `json:"inflicts,omitempty"`
 }
 
 // StartEncounter creates a fight here from specs, capping stat blocks by
@@ -239,7 +243,7 @@ func StartEncounter(w *World, specs []EnemySpec) (*Encounter, []string, error) {
 	for _, s := range specs {
 		n := clamp(s.Count, 1, 4)
 		for i := 0; i < n; i++ {
-			blocks = append(blocks, StatBlock{MaxHP: s.HP, AC: s.AC, AttackBonus: s.AttackBonus, Damage: s.Damage, Ranged: s.Ranged})
+			blocks = append(blocks, StatBlock{MaxHP: s.HP, AC: s.AC, AttackBonus: s.AttackBonus, Damage: s.Damage, Ranged: s.Ranged, Inflicts: s.Inflicts})
 			meta = append(meta, s)
 		}
 	}
@@ -249,6 +253,10 @@ func StartEncounter(w *World, specs []EnemySpec) (*Encounter, []string, error) {
 	var notes []string
 	for i := range blocks {
 		notes = append(notes, ClampStatBlock(&blocks[i], caps)...)
+		var note string
+		if blocks[i].Inflicts, note = NormalizeInflict(blocks[i].Inflicts, danger); note != "" {
+			notes = append(notes, note)
+		}
 	}
 	blocks = BudgetEnemies(blocks, EnemyHPBudget(danger, w.PartyLevel(), len(w.Characters)))
 	enc := &Encounter{ID: w.NewID("enc"), LocationID: l.ID, Round: 1}
@@ -323,29 +331,36 @@ func zoneAtDistance(l *Location, from string, d int) string {
 // GenericEnemies is the fallback when the author can't supply enemies.
 func GenericEnemies(kind string, danger, partySize int) []EnemySpec {
 	danger = clamp(danger, 1, 5)
-	name := "Bandit"
+	name, inflicts := "Bandit", ""
 	switch kind {
 	case KindCave:
-		name = "Cave Spider"
+		name, inflicts = "Cave Spider", CondPoisoned
 	case KindDungeon, KindRuin:
 		name = "Skeleton"
 	case KindWilderness:
-		name = "Wolf"
+		name, inflicts = "Wolf", CondProne
 	}
 	n := clamp((partySize+1)/2+danger/3, 1, 4)
-	return []EnemySpec{{Name: name, Count: n, HP: 5 + 3*danger, AC: 11 + danger/2, AttackBonus: 2 + danger/2, Damage: fmt.Sprintf("1d6+%d", danger/2)}}
+	return []EnemySpec{{Name: name, Count: n, HP: 5 + 3*danger, AC: 11 + danger/2, AttackBonus: 2 + danger/2, Damage: fmt.Sprintf("1d6+%d", danger/2), Inflicts: inflicts}}
 }
 
 // EnemyTurn is one engine-resolved enemy line.
 type EnemyTurn struct {
 	EnemyID  string         `json:"enemy_id"`
 	Enemy    string         `json:"enemy"`
-	Kind     string         `json:"kind"` // move | attack | hold
+	Kind     string         `json:"kind"` // move | attack | hold | stunned
 	TargetID string         `json:"target_id,omitempty"`
 	Target   string         `json:"target,omitempty"`
 	Attack   *AttackOutcome `json:"attack,omitempty"`
 	ToZone   string         `json:"to_zone,omitempty"`
 	Text     string         `json:"text"`
+	// Save is the target's save against the attack's condition, if any;
+	// Before and After are condition effects on the enemy itself.
+	Save      *Roll    `json:"save,omitempty"`
+	Inflicted string   `json:"inflicted,omitempty"`
+	Before    []string `json:"before,omitempty"` // start of its turn: stunned, standing up
+	After     []string `json:"after,omitempty"`  // end of its turn: saves, wearing off
+	Rolls     []Roll   `json:"rolls,omitempty"`  // the enemy's own saves
 }
 
 // enemiesActingNow spreads the enemies over the round: each acts once per
@@ -376,7 +391,8 @@ func enemiesActingNow(w *World) []*Enemy {
 
 // RunEnemyTurns lets the enemies whose turn it is act: attack a character
 // in reach (sometimes the weakest), otherwise step one zone toward the
-// nearest.
+// nearest. Conditions apply at the start and end of each enemy's turn, and
+// a hit from an enemy that inflicts a condition forces a save.
 func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 	if !w.InCombat() {
 		return nil, nil
@@ -394,57 +410,86 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 		if len(targets) == 0 {
 			break
 		}
-		reach := ReachMelee
-		if e.Ranged {
-			reach = ReachRanged
-		}
-		var inReach []*Character
-		for _, c := range targets {
-			if InReach(reach, ZoneDistance(l, e.ZoneID, c.ZoneID)) {
-				inReach = append(inReach, c)
-			}
-		}
-		if len(inReach) > 0 {
-			t := inReach[r.Intn(len(inReach))]
-			if r.Intn(4) == 0 {
-				sort.SliceStable(inReach, func(i, j int) bool { return inReach[i].HP < inReach[j].HP })
-				t = inReach[0]
-			}
-			cover := CoverBonus(l, e.ZoneID, t.ZoneID)
-			out1 := Attack(r, fmt.Sprintf("%s attacks %s", e.Display(), t.Name), e.AttackBonus, ArmorClass(w, t)+cover, e.Damage)
-			out1.Roll.Parts, out1.Roll.Cover = []RollPart{{Label: "Attack bonus", Value: e.AttackBonus}}, cover
-			et := EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "attack", TargetID: t.ID, Target: t.Name, Attack: &out1}
-			if out1.Hit {
-				dmg := out1.Damage.Total
-				t.HP = max(0, t.HP-dmg)
-				et.Text = fmt.Sprintf("%s hits %s for %d damage (%d/%d HP)", e.Display(), t.Name, dmg, t.HP, t.MaxHP)
-				if out1.Crit {
-					et.Text = "Critical! " + et.Text
-				}
-				if t.Down() {
-					et.Text += fmt.Sprintf("; %s goes down", t.Name)
-				}
-			} else {
-				et.Text = fmt.Sprintf("%s attacks %s and misses", e.Display(), t.Name)
-			}
+		start, canMove := startEnemyTurn(e)
+		et := enemyAct(w, r, l, e, targets, start, canMove)
+		end := endEnemyTurn(r, e)
+		et.Before, et.After = start.Changes, end.Changes
+		et.Rolls = end.Rolls
+		changes = append(changes, start.Changes...)
+		if et.Kind == "attack" || et.Kind == "move" {
 			changes = append(changes, et.Text)
-			out = append(out, et)
-			continue
 		}
-		// close in on the nearest
-		sort.SliceStable(targets, func(i, j int) bool {
-			return ZoneDistance(l, e.ZoneID, targets[i].ZoneID) < ZoneDistance(l, e.ZoneID, targets[j].ZoneID)
-		})
-		t := targets[0]
-		step := NextStep(l, e.ZoneID, t.ZoneID)
-		if step == e.ZoneID {
-			out = append(out, EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "hold", Text: e.Display() + " holds position"})
-			continue
-		}
-		e.ZoneID = step
-		txt := fmt.Sprintf("%s moves to %s, toward %s", e.Display(), ZoneName(l, step), t.Name)
-		changes = append(changes, txt)
-		out = append(out, EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "move", TargetID: t.ID, Target: t.Name, ToZone: step, Text: txt})
+		changes = append(changes, end.Changes...)
+		out = append(out, et)
 	}
 	return out, changes
+}
+
+// enemyAct is one enemy's action.
+func enemyAct(w *World, r *dice.Roller, l *Location, e *Enemy, targets []*Character, start ConditionTick, canMove bool) EnemyTurn {
+	if start.LostTurn {
+		return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "stunned", Text: e.Display() + " is stunned and does nothing"}
+	}
+	reach := ReachMelee
+	if e.Ranged {
+		reach = ReachRanged
+	}
+	var inReach []*Character
+	for _, c := range targets {
+		if InReach(reach, ZoneDistance(l, e.ZoneID, c.ZoneID)) {
+			inReach = append(inReach, c)
+		}
+	}
+	if len(inReach) > 0 {
+		t := inReach[r.Intn(len(inReach))]
+		if r.Intn(4) == 0 {
+			sort.SliceStable(inReach, func(i, j int) bool { return inReach[i].HP < inReach[j].HP })
+			t = inReach[0]
+		}
+		cover := CoverBonus(l, e.ZoneID, t.ZoneID)
+		edge, why := AttackEdge(e.Conditions, t.Conditions, ZoneDistance(l, e.ZoneID, t.ZoneID))
+		out1 := AttackWithEdge(r, fmt.Sprintf("%s attacks %s", e.Display(), t.Name), e.AttackBonus, ArmorClass(w, t)+cover, e.Damage, edge, why)
+		out1.Roll.Parts, out1.Roll.Cover = []RollPart{{Label: "Attack bonus", Value: e.AttackBonus}}, cover
+		et := EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "attack", TargetID: t.ID, Target: t.Name, Attack: &out1}
+		if !out1.Hit {
+			et.Text = fmt.Sprintf("%s attacks %s and misses", e.Display(), t.Name)
+			return et
+		}
+		dmg := out1.Damage.Total
+		t.HP = max(0, t.HP-dmg)
+		et.Text = fmt.Sprintf("%s hits %s for %d damage (%d/%d HP)", e.Display(), t.Name, dmg, t.HP, t.MaxHP)
+		if out1.Crit {
+			et.Text = "Critical! " + et.Text
+		}
+		if t.Down() {
+			t.Conditions = nil // a downed character's fight is over until revived
+			et.Text += fmt.Sprintf("; %s goes down", t.Name)
+			return et
+		}
+		if e.Inflicts != "" {
+			if so := InflictOnCharacter(r, t, e.Inflicts, InflictDC(e.AttackBonus), e.Display(), e.ID); so != nil {
+				et.Save = &so.Roll
+				if so.Applied {
+					et.Inflicted = e.Inflicts
+				}
+				et.Text += "; " + so.Line
+			}
+		}
+		return et
+	}
+	// close in on the nearest
+	sort.SliceStable(targets, func(i, j int) bool {
+		return ZoneDistance(l, e.ZoneID, targets[i].ZoneID) < ZoneDistance(l, e.ZoneID, targets[j].ZoneID)
+	})
+	t := targets[0]
+	step := NextStep(l, e.ZoneID, t.ZoneID)
+	if fz, ok := frightOf(w, e.Conditions); ok && ZoneDistance(l, step, fz) < ZoneDistance(l, e.ZoneID, fz) {
+		step = e.ZoneID // too scared to close in
+	}
+	if step == e.ZoneID || !canMove {
+		return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "hold", Text: e.Display() + " holds position"}
+	}
+	e.ZoneID = step
+	txt := fmt.Sprintf("%s moves to %s, toward %s", e.Display(), ZoneName(l, step), t.Name)
+	return EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "move", TargetID: t.ID, Target: t.Name, ToZone: step, Text: txt}
 }

@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS characters (
     weapon      TEXT NOT NULL DEFAULT '',
     armor       TEXT NOT NULL DEFAULT '',
     zone_id     TEXT NOT NULL DEFAULT '',
+    conditions  TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (campaign_id, id)
 );
 
@@ -190,6 +191,8 @@ CREATE TABLE IF NOT EXISTS enemies (
     zone_id      TEXT NOT NULL DEFAULT '',
     subdued      INTEGER NOT NULL DEFAULT 0,
     acted_round  INTEGER NOT NULL DEFAULT 0,
+    inflicts     TEXT NOT NULL DEFAULT '',
+    conditions   TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (campaign_id, id)
 );
 

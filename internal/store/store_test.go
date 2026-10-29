@@ -54,9 +54,11 @@ func richWorld(t *testing.T) *game.World {
 	_, err = game.AddQuest(w, game.QuestSpec{Title: "Main", Objectives: []game.ObjectiveSpec{{Kind: game.ObjDefeatEnemy, Text: "kill", Target: "Vex"}}}, true)
 	must(t, err)
 	must(t, game.StartGame(w, time.Unix(100, 0)))
-	_, _, err = game.StartEncounter(w, []game.EnemySpec{{Name: "Bandit", Count: 2, HP: 7, AC: 12, AttackBonus: 3, Damage: "1d6", Ranged: true}})
+	_, _, err = game.StartEncounter(w, []game.EnemySpec{{Name: "Bandit", Count: 2, HP: 7, AC: 12, AttackBonus: 3, Damage: "1d6", Ranged: true, Inflicts: game.CondPoisoned}})
 	must(t, err)
 	w.Encounter.Enemies[0].HP = 3
+	w.Encounter.Enemies[1].Conditions = game.Conditions{{Kind: game.CondProne}}
+	w.Characters[0].Conditions = game.Conditions{{Kind: game.CondPoisoned, Rounds: 2, SaveDC: 11, Save: game.CON, Source: "Bandit", SourceID: w.Encounter.Enemies[0].ID}}
 	w.Lore = []*game.Lore{{ID: "lore1", Title: "Vex's plan", Text: "He wants the bell.", Keywords: []string{"bell"}, AlwaysOn: true, LastTrigger: -100}}
 	w.Beats = []*game.Beat{{ID: "beat1", Title: "Crows", Text: "Crows gather.", Trigger: game.TriggerEnterLocation, Target: wood.ID, Effects: []string{game.EffectAmbush}}}
 	w.AddChronicle("The bell tolled at midnight.")
@@ -157,7 +159,10 @@ func TestLoadedWorldStillPlays(t *testing.T) {
 	actor := got.ActiveCharacter()
 	foe := got.Encounter.Living()[0]
 	foe.ZoneID = actor.ZoneID
-	r := game.Resolve(&game.Ctx{W: got, R: dice.FromSource(dice.NewScripted(19, 4)), Now: time.Unix(200, 0)}, actor,
+	if !actor.Conditions.Has(game.CondPoisoned) {
+		t.Fatal("condition lost on reload")
+	}
+	r := game.Resolve(&game.Ctx{W: got, R: dice.FromSource(dice.NewScripted(19, 19, 4)), Now: time.Unix(200, 0)}, actor,
 		[]game.Action{{Kind: game.ActAttack, Target: foe.Display()}})
 	if r.Steps[0].Error != "" || !foe.Defeated() {
 		t.Fatalf("attack after reload: %+v", r.Steps[0])

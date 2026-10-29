@@ -251,6 +251,12 @@ func TierFor(natural, total, target int) Tier {
 	}
 }
 
+// Edge values for a d20 roll.
+const (
+	Advantage    = "advantage"
+	Disadvantage = "disadvantage"
+)
+
 // Check is a resolved d20 roll against a target number (DC or AC).
 type Check struct {
 	Natural int  `json:"natural"`
@@ -258,11 +264,33 @@ type Check struct {
 	Total   int  `json:"total"`
 	Target  int  `json:"target"`
 	Tier    Tier `json:"tier"`
+	// Edge is advantage or disadvantage; Naturals then holds both dice
+	// and Natural the one kept.
+	Edge     string `json:"edge,omitempty"`
+	Naturals []int  `json:"naturals,omitempty"`
 }
 
 // D20 rolls d20+mod against target.
-func (r *Roller) D20(mod, target int) Check {
+func (r *Roller) D20(mod, target int) Check { return r.D20Edge(mod, target, 0) }
+
+// D20Edge rolls d20+mod against target with advantage (edge > 0: two dice,
+// keep the higher) or disadvantage (edge < 0: keep the lower).
+func (r *Roller) D20Edge(mod, target, edge int) Check {
 	n := r.Die(20)
-	t := n + mod
-	return Check{Natural: n, Mod: mod, Total: t, Target: target, Tier: TierFor(n, t, target)}
+	c := Check{Mod: mod, Target: target}
+	if edge != 0 {
+		m := r.Die(20)
+		c.Naturals = []int{n, m}
+		c.Edge = Advantage
+		if edge > 0 {
+			n = max(n, m)
+		} else {
+			c.Edge = Disadvantage
+			n = min(n, m)
+		}
+	}
+	c.Natural = n
+	c.Total = n + mod
+	c.Tier = TierFor(n, c.Total, target)
+	return c
 }

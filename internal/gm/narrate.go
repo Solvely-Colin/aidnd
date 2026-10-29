@@ -22,7 +22,7 @@ Rules:
 - Do not hand the spotlight to the next player or say whose turn it is.
 - Write as a storyteller, never as the engine: no game words (zone, exit, NPC, attitude, disposition, HP, AC, budget, action, step, engine, state) and no lists of who is where. Say "across the green" or "down by the steps", not "one zone off".
 - 40-100 words, plain language, lead with what happened. Second person plural or character names; present tense.
-- You may change the world only through the provided directive tools; code validates them. You cannot change player HP or gold.
+- You may change the world only through the provided directive tools; code validates them. You cannot change player HP, gold or conditions. Conditions (poisoned, prone, restrained, frightened, blinded, stunned) come only from the engine: name a threat with the hazard tool and narrate the save result it returns; describe conditions already in STATE.
 - Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.
 - WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
 
@@ -32,7 +32,8 @@ Answer briefly in at most 60 words using only the facts given, as a storyteller:
 // narration is the narrator's output for one turn.
 type narration struct {
 	Text    string
-	Changes []string // world changes from directives (and the pacing backstop)
+	Changes []string    // world changes from directives (and the pacing backstop)
+	Rolls   []game.Roll // saves the engine rolled for a hazard directive
 }
 
 func wordCount(s string) int { return len(strings.Fields(s)) }
@@ -110,13 +111,28 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		allowed[t.Name] = true
 	}
 	progressed := false
+	hazarded, rewrite := false, false
 	var results []llm.Message
 	for i, c := range calls {
 		if c.ID == "" {
 			calls[i].ID = fmt.Sprintf("dir_%d", i)
 		}
 		msg := "not allowed now"
-		if allowed[c.Function.Name] {
+		if c.Function.Name == DirHazard && allowed[c.Function.Name] {
+			msg = "only one hazard per narration"
+			if !hazarded {
+				hazarded = true
+				change, roll, err := g.applyHazard(w, c)
+				if err != nil {
+					msg = "rejected: " + err.Error()
+				} else {
+					msg = "applied: " + change
+					out.Changes = append(out.Changes, change)
+					out.Rolls = append(out.Rolls, *roll)
+					rewrite = true // the save decides the story; narrate after it
+				}
+			}
+		} else if allowed[c.Function.Name] {
 			change, err := g.applyDirective(ctx, w, c)
 			if err != nil {
 				msg = "rejected: " + err.Error()
@@ -144,7 +160,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	}
 	textOut := strings.TrimSpace(resp.Content)
 	backstopped := dir.ForceProgress && !progressed && len(out.Changes) > 0
-	if textOut == "" || backstopped {
+	if textOut == "" || backstopped || rewrite {
 		msgs := append([]llm.Message{}, req.Messages...)
 		if len(calls) > 0 {
 			msgs = append(msgs, llm.Message{Role: "assistant", Content: resp.Content, ToolCalls: calls})
@@ -255,6 +271,45 @@ func forceProgress(w *game.World) string {
 	return "A new path is noticed: " + stub.Name
 }
 
+// applyHazard validates a hazard directive and has the engine roll the
+// target's save. It returns the change line and the save.
+func (g *GM) applyHazard(w *game.World, c llm.ToolCall) (string, *game.Roll, error) {
+	var a struct{ Target, Condition, Cause string }
+	if err := c.Decode(&a); err != nil {
+		return "", nil, err
+	}
+	if w.InCombat() {
+		return "", nil, fmt.Errorf("no hazards mid-fight; enemies bring their own")
+	}
+	ch := w.Character(a.Target)
+	if ch == nil {
+		for _, p := range w.Party() {
+			if game.NameMatch(p.Name, a.Target) {
+				ch = p
+			}
+		}
+	}
+	if ch == nil || ch.Down() {
+		return "", nil, fmt.Errorf("hazard target must be a conscious party member")
+	}
+	kind, ok := game.ParseCondition(a.Condition)
+	if !ok || kind == game.CondStunned {
+		return "", nil, fmt.Errorf("unknown or disallowed condition %q", a.Condition)
+	}
+	if ch.Conditions.Has(kind) {
+		return "", nil, fmt.Errorf("%s is already %s", ch.Name, kind)
+	}
+	cause := trim(strings.TrimSpace(a.Cause), 60)
+	if cause == "" {
+		cause = "a hazard"
+	}
+	so := game.InflictOnCharacter(g.Dice, ch, kind, game.HazardDC(w.Here().Danger), cause, "")
+	if so == nil {
+		return "", nil, fmt.Errorf("%s is unaffected", ch.Name)
+	}
+	return so.Line + " (" + cause + ")", &so.Roll, nil
+}
+
 // applyDirective validates and applies one narrator directive.
 func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) (string, error) {
 	l := w.Here()
@@ -292,6 +347,9 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			names = append(names, e.Display())
 		}
 		return "Enemies appear: " + strings.Join(names, ", "), nil
+	case DirHazard:
+		line, _, err := g.applyHazard(w, c)
+		return line, err
 	case DirOfferQuest:
 		var a game.QuestSpec
 		if err := c.Decode(&a); err != nil {

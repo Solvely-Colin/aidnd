@@ -331,7 +331,7 @@ async function openCampaign(id) {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
@@ -715,12 +715,17 @@ function feedItems(evs) {
         break;
       case "enemy_turns":
         (d.turns || []).forEach((t, i) => {
-          if (!t.attack?.roll) return;
+          (t.before || []).forEach(c => out.push({ k: "sys", cond: true, text: c }));
+          if (t.kind === "stunned") return;
+          if (!t.attack?.roll) return (t.after || []).forEach(c => out.push({ k: "sys", cond: true, text: c }));
           const g = { d20: { ...t.attack.roll, kind: "attack", label: t.attack.roll.label || `vs ${t.target || "the party"}` }, dmg: t.attack.damage ? { ...t.attack.damage, kind: "damage" } : null };
           out.push(rollItem(`${e.id}.e${i}`, t.enemy, g, true, t.text ? [t.text] : []));
+          if (t.save) out.push(rollItem(`${e.id}.s${i}`, t.target, { d20: t.save }, false, [], t.target));
+          (t.after || []).forEach(c => out.push({ k: "sys", cond: true, text: c }));
         });
         if (d.narration) out.push({ k: "narr", text: d.narration });
         break;
+      case "conditions": (d.changes || []).forEach(t => out.push({ k: "sys", cond: true, text: t })); break;
       case "quest_updated": {
         const label = d.status === "completed" ? "QUEST DONE" : d.objective_id ? "QUEST" : d.status === "active" ? "NEW QUEST" : "QUEST";
         out.push({ k: "quest", label, text: d.text || d.title });
@@ -732,6 +737,11 @@ function feedItems(evs) {
   flush();
   return out;
 }
+// statuses are the engine conditions on a character (not derived states
+// like bloodied or in cover).
+const STATUS_KEYS = new Set(["poisoned", "prone", "restrained", "frightened", "blinded", "stunned"]);
+const statuses = c => (c.conditions || []).filter(k => STATUS_KEYS.has(k.key)).map(k => k.label);
+
 // the("The Shade") is "The Shade", the("Goblin") is "the Goblin".
 const the = n => /^(the|a|an)\s/i.test(n) ? n : `the ${n}`;
 const list = a => a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
@@ -751,7 +761,7 @@ function rollItem(id, who, g, foe, changes, name) {
 
 function itemHTML(it, latest) {
   switch (it.k) {
-    case "sys": return `<div class="ev-sys ${it.bad ? "bad" : ""}">${esc(it.text)}</div>`;
+    case "sys": return `<div class="ev-sys ${it.bad ? "bad" : ""} ${it.cond ? "cond-line" : ""}">${esc(it.text)}</div>`;
     case "place": return `<div class="ev-place"><span>${esc(it.name)}</span></div>`;
     case "turn": return `<div class="ev-turn ${it.you ? "you" : ""}">· ${it.you ? "Your turn" : `${esc(it.name)}’s turn`} ·</div>`;
     case "act": return actHTML(it.c, it.you, it.text);
@@ -780,6 +790,7 @@ function narrHTML(it, latest) {
 
 const TIER = {
   attack: { critical_success: "CRIT", success: "HIT", failure: "MISS", critical_failure: "FUMBLE" },
+  save: { critical_success: "SAVED", success: "SAVED", failure: "FAILED", critical_failure: "FAILED" },
   check: { critical_success: "CRITICAL", success: "SUCCESS", failure: "FAIL", critical_failure: "FUMBLE" },
 };
 const okTier = t => t === "success" || t === "critical_success";
@@ -791,17 +802,18 @@ function rollHTML(it) {
   }
   if (DIE.isPending(it.sig)) return `<div class="ev-rolling">rolling…</div>`;
   const ok = okTier(r.tier), open = !!S.open[it.id];
-  const words = TIER[r.kind === "attack" ? "attack" : "check"];
+  const words = TIER[r.kind === "attack" || r.kind === "save" ? r.kind : "check"];
   const parts = r.parts?.length ? r.parts : r.mod ? [{ label: "Modifier", value: r.mod }] : [];
   const against = r.against === "AC" || r.kind === "attack" ? "Armor" : "Difficulty";
   return `<div class="roll ${ok ? "ok" : "no"} ${it.foe ? "foe" : ""}">
     <button class="roll-line" data-roll="${esc(it.id)}" aria-expanded="${open}">
       <span class="hex">${r.natural}</span>
       <span class="what">${it.who ? esc(it.who) + " · " : ""}${esc(r.label)} · ${r.total} vs ${r.target}${dm ? ` · ${dm.total} dmg` : ""}</span>
+      ${r.edge ? `<span class="edge ${r.edge}" title="${esc(r.edge_why || "")}">${r.edge === "advantage" ? "ADV" : "DIS"}</span>` : ""}
       <span class="tier">${words[r.tier] || ""}</span><span class="chev">${open ? "–" : "+"}</span>
     </button>
     ${open ? `<div class="breakdown">
-      <div><span>d20</span><span>${r.natural}</span></div>
+      <div><span>d20${r.naturals?.length ? ` (${esc(r.edge)}: rolled ${r.naturals.join(" and ")}${r.edge_why ? `, ${esc(r.edge_why)}` : ""})` : ""}</span><span>${r.natural}</span></div>
       ${parts.map(p => `<div><span>${esc(p.label)}</span><span>${signed(p.value)}</span></div>`).join("")}
       <div class="total"><span>Total</span><span>${r.total}</span></div>
       <div><span>${against}${r.cover ? ` (+${r.cover} cover)` : ""}</span><span>${r.target}</span></div>
@@ -947,13 +959,14 @@ function renderDock() {
     ${enc ? `<div class="foes">${enc.enemies.map(e => `<button class="foe-card ${e.hp > 0 ? "" : "dead"}" ${e.hp > 0 ? `data-attack="${esc(e.id)}"` : "disabled"}>
       <span class="top"><b>${esc(e.display)}</b><span class="hp">${Math.max(0, e.hp)}/${e.max_hp}</span></span>
       <span class="bar3"><i style="width:${Math.max(0, Math.round(100 * e.hp / e.max_hp))}%"></i></span>
+      ${e.hp > 0 && e.conditions?.length ? `<span class="conds">${e.conditions.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note)}">${esc(k.label)}</span>`).join("")}</span>` : ""}
       <span class="cta">${e.hp <= 0 ? "down" : yours && v.budget?.action !== 0 ? "Tap to attack" : e.ranged ? "ranged" : zoneName(e.zone_id)}</span></button>`).join("")}</div>` : ""}
     ${yours && S.tray ? trayHTML(groups[S.tray]) : ""}
     ${yours ? `<div class="turnrow"><span class="who">Your turn</span><span class="acts">${acts}</span></div>` : active ? `<div class="turnrow"><span class="who other">${esc(active.name)}’s turn <em>· ${esc(ap?.name || "")} is thinking</em></span>
       ${v.you?.joined && idle > 120 ? `<span class="acts"><button data-act="skip">Skip their turn</button></span>` : ""}</div>` : ""}
     ${yours ? checkChipHTML() : ""}
     <form class="inputbar ${yours && !thinking ? "you" : ""}" id="say-form">
-      <div class="party">${v.party.map(c => `<button type="button" class="pa ${v.active?.character_id === c.id ? "acting" : ""} ${isMe(c.id) ? "you" : ""}" data-sheet="${esc(c.id)}" title="${esc(c.name)} · ${c.hp}/${c.max_hp} HP">${initial(c.name)}${face(c, "round-f")}<span class="hpl"><i class="${c.hp / c.max_hp <= .5 ? "low" : ""}" style="width:${hpPct(c)}%"></i></span></button>`).join("")}</div>
+      <div class="party">${v.party.map(c => { const st = statuses(c); return `<button type="button" class="pa ${v.active?.character_id === c.id ? "acting" : ""} ${isMe(c.id) ? "you" : ""} ${st.length ? "afflicted" : ""}" data-sheet="${esc(c.id)}" title="${esc(c.name)} · ${c.hp}/${c.max_hp} HP${st.length ? " · " + esc(st.join(", ")) : ""}">${initial(c.name)}${face(c, "round-f")}<span class="hpl"><i class="${c.hp / c.max_hp <= .5 ? "low" : ""}" style="width:${hpPct(c)}%"></i></span></button>`; }).join("")}</div>
       <span class="sep"></span>
       ${thinking ? `<span class="status">The dice are rolling…</span>`
         : yours ? `<textarea id="say" rows="1" enterkeyhint="send" placeholder="${esc(enc ? "Say exactly what you do…" : talkN ? `Say something to ${talkN.name}…` : "What do you do?")}">${esc(kept)}</textarea>
