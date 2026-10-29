@@ -159,12 +159,17 @@ and the main quest only shows objectives up to the first one not yet done.
     "items": [{"id", "name", "kind", ...}]           // on the ground
   },
   "party": [{
-    "id", "player_id", "name", "class", "kit", "level", "xp", "next_level_xp",
-    "hp", "max_hp", "down", "ac", "gold", "zone_id", "proficiency_bonus",
-    "scores": {"STR": 15}, "modifiers": {"STR": 2}, "proficient": ["STR", "CON"],
-    "weapon": {"name", "damage": "1d8", "reach": "melee | ranged"},
-    "inventory": [{"id", "name", "kind", "equipped", "effect", ...}]
-  }],
+    "id", "player_id", "name", "class", "kit", "level", "xp", "level_xp", "next_level_xp",
+    "hp", "max_hp", "down", "ac", "gold", "zone_id", "zone_name", "proficiency_bonus",
+    "scores": {"STR": 15}, "modifiers": {"STR": 2}, "proficient": ["STR", "CON"],  // modifiers include proficiency
+    "weapon": {"name", "damage": "1d8", "reach": "melee | ranged", "to_hit": 4},
+    "armor": {"name", "ac": 16},                       // omitted when unarmored
+    "attack": {"weapon", "bonus": 4, "ability": "STR", "damage": "1d8", "reach"},
+    "ac_parts": [{"label": "Chain Mail", "value": 16}, {"label": "Shield", "value": 2}],  // sums to ac
+    "level_up": {"level": 2, "hp": 8, "proficiency_bonus": 2},  // omitted at max level
+    "conditions": [{"key": "down | bloodied | cover | acting", "label", "note"}],  // derived, not stored
+    "inventory": [{"id", "name", "kind", "equipped", "effect", "to_hit", ...}]
+  }],                                                  // every member's full sheet, so players can read each other's
   "players": [{"id", "name", "character_id"}],
   "encounter": {"round": 2, "enemies": [{"id", "display", "hp", "max_hp", "zone_id", "ranged"}]},
   "quests": [{"id", "title", "summary", "is_main", "status", "giver_name",
