@@ -161,13 +161,16 @@ from the turn budget:
 
 | Slot | Actions |
 |---|---|
-| free | look, say, equip, drop, accept or turn in a quest, reposition outside combat |
+| free | look, say, equip, drop, pick up, accept or turn in a quest, reposition outside combat |
 | move | move to a zone, travel, reposition in combat (a second move spends the action as a dash) |
 | none | end turn ("I wait", "done") |
-| action | attack, subdue, ability checks (search, unlock, force), use item, talk, trade, rest, flee through an exit in combat |
+| action | attack, subdue, ability checks (search, unlock, force), use item, give, talk, trade, rest, flee through an exit in combat |
 
 In combat a turn has 1 action, 1 move and 3 free actions. Outside combat
-free actions are unlimited. Spending the action ends the turn; steps the
+free actions are unlimited. Spending the action ends the turn, but the rest
+of the same message still runs where the move or free actions cover it ("I
+stab it and step back"); `end_turn` stops the message outright. Several
+buys or sells with one merchant in one message cost one action. Steps the
 budget cannot pay for are returned in `skipped` with a reason.
 
 `target_id` and `zone_id` are optional hints from a click (an enemy token,

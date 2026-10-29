@@ -433,11 +433,15 @@ func TestMultiStepWithSkippedStepsAndEnemyTurns(t *testing.T) {
 	if !res.TurnEnded || res.Quick {
 		t.Fatal("attack should end the turn")
 	}
-	if len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0].Error, "turn ended") {
+	if len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0].Error, "no action left") {
 		t.Fatalf("skipped %+v", res.Skipped)
 	}
 	if len(res.EnemyTurns) != 1 || res.EnemyNarration != "The ghoul claws back." {
 		t.Fatalf("enemy turns %+v", res.EnemyTurns)
+	}
+	// the enemy narrator continues the scene the narrator just set
+	if u := lastUser(r.f.Tagged("narrate_enemies")[0]); !strings.Contains(u, "Last narration: Steel rings in the reeds.") {
+		t.Fatalf("enemy prompt %q", u)
 	}
 	if res.NextActor.PlayerID != "u2" {
 		t.Fatal("next actor")
@@ -927,6 +931,12 @@ func TestSnapshotKeepsTheSceneInTheActorsZone(t *testing.T) {
 	if strings.Contains(s, "Tamsin Hale ["+tamsin.ID+"] blacksmith, attitude +1, in "+game.ZoneName(w.Here(), near)+" (elsewhere") {
 		t.Fatal("present NPC marked absent")
 	}
+	// the narrator sees how people in the scene look, and only them
+	tamsin.Desc, corbin.Desc = "Soot to the elbows.", "Heard but not seen."
+	s = snapshot(w, actor, true)
+	if !strings.Contains(s, "looks: Soot to the elbows.") || strings.Contains(s, "Heard but not seen.") {
+		t.Fatalf("scene descriptions wrong:\n%s", s)
+	}
 }
 
 func TestTalkToWalksOverToTheNPC(t *testing.T) {
@@ -981,6 +991,12 @@ func TestCharacterNamesStayUnique(t *testing.T) {
 	d := r.g.DraftCharacter(bg, r.world(t), "caravan guard")
 	if strings.EqualFold(d.Name, "Aria") {
 		t.Fatalf("draft reused a party name: %q", d.Name)
+	}
+	// the model is told the story's people too, so a hero doesn't share a
+	// first name with a watch captain
+	u := lastUser(r.f.Tagged("author_character")[0])
+	if !strings.Contains(u, "People in the story") || !strings.Contains(u, "Elder Corbin") {
+		t.Fatalf("draft prompt lacks the story's people:\n%s", u)
 	}
 }
 

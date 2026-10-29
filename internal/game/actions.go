@@ -135,7 +135,7 @@ type Ctx struct {
 // reposition it depends on distance and is computed in resolve.
 func SlotFor(w *World, a Action) Slot {
 	switch a.Kind {
-	case ActLook, ActSay, ActEquip, ActDrop, ActAcceptQuest, ActTurnInQuest:
+	case ActLook, ActSay, ActEquip, ActDrop, ActPickUp, ActAcceptQuest, ActTurnInQuest:
 		return SlotFree
 	case ActEndTurn:
 		return SlotNone
@@ -155,7 +155,10 @@ func SlotFor(w *World, a Action) Slot {
 
 // Resolve executes up to MaxSteps actions for the active character, in
 // order, against the turn budget. Unaffordable steps are skipped and
-// reported; spending the action ends the turn and skips the rest.
+// reported. Spending the action ends the turn, but the rest of the message
+// still runs where the budget covers it ("I stab it and step back"); only
+// end_turn stops the message outright. Several trades with one merchant in
+// one message cost a single action.
 func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 	w := ctx.W
 	res := &Resolution{ActorID: actor.ID, AllFree: true}
@@ -166,8 +169,10 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		actions = actions[:MaxSteps]
 	}
 	budget := &w.Campaign.Turns.Budget
+	tradedWith := map[string]bool{}
+	stopped := false
 	for i, a := range actions {
-		if res.TurnEnded || w.Campaign.Status != StatusActive {
+		if stopped || w.Campaign.Status != StatusActive {
 			for _, rest := range actions[i:] {
 				res.Skipped = append(res.Skipped, Step{Action: rest, Skipped: true, Error: "your turn ended before this step"})
 			}
@@ -177,11 +182,18 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 			res.Skipped = append(res.Skipped, Step{Action: a, Skipped: true, Error: actor.Name + " is down"})
 			continue
 		}
+		if a.Kind == ActReposition && a.Zone != "" && w.Here().Zone(a.Zone) != nil && w.Here().Zone(a.Zone).ID == actor.ZoneID {
+			continue // already there: nothing to do or report
+		}
 		slot, err := costOf(w, actor, a)
 		if err != nil {
 			st := Step{Action: a, Error: err.Error()}
 			res.Steps = append(res.Steps, st)
 			continue
+		}
+		trade := a.Kind == ActBuy || a.Kind == ActSell
+		if trade && tradedWith[strings.ToLower(a.Target)] {
+			slot = SlotFree // same bargain, already paid for
 		}
 		trial := *budget
 		used, err := trial.Pay(slot)
@@ -199,6 +211,9 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		}
 		st.OK = true
 		*budget = trial
+		if trade {
+			tradedWith[strings.ToLower(a.Target)] = true
+		}
 		if !wasCombat && w.InCombat() && (budget.Free == Unlimited || budget.Free > CombatFreeActions) {
 			budget.Free = CombatFreeActions // a fight broke out during this step
 		}
@@ -224,6 +239,9 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		}
 		res.CombatStarted = res.CombatStarted || st.CombatStarted
 		res.CombatEnded = res.CombatEnded || st.CombatEnded
+		if a.Kind == ActEndTurn {
+			stopped = true
+		}
 		if a.Kind == ActEndTurn || budget.Spent() {
 			res.TurnEnded = true
 		}

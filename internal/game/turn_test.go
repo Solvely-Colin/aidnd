@@ -105,8 +105,65 @@ func TestMoveThenActionInOneTurn(t *testing.T) {
 		{Kind: ActMove, Target: "Oakvale"}, // second move is paid with the action (dash)
 		{Kind: ActLook},
 	})
-	if r.Steps[1].Slot != SlotDash || !r.TurnEnded || len(r.Skipped) != 1 {
+	if r.Steps[1].Slot != SlotDash || !r.TurnEnded || len(r.Skipped) != 0 || len(r.Steps) != 3 {
 		t.Fatalf("slots %v %v skipped %d", r.Steps[0].Slot, r.Steps[1].Slot, len(r.Skipped))
+	}
+}
+
+func TestStepsAfterActionRunWhenBudgetAllows(t *testing.T) {
+	f := newFixture(t)
+	e := f.fight(t, 1, 1, wolf)
+	// "I stab the wolf, then step back to the road" (Station Halcyon play-test)
+	back := f.wood.Zones[0].Name
+	r := Resolve(f.ctx(15, 3), f.bram, []Action{
+		{Kind: ActAttack, Target: "wolf"},
+		{Kind: ActReposition, Zone: back},
+		{Kind: ActAttack, Target: "wolf"},
+	})
+	if stepErr(r, 0) != "" || stepErr(r, 1) != "" || e.HP != 7 {
+		t.Fatalf("steps %q %q hp %d", stepErr(r, 0), stepErr(r, 1), e.HP)
+	}
+	if r.Steps[1].Slot != SlotMove || f.bram.ZoneID != f.wood.Zones[0].ID {
+		t.Fatalf("step back slot %s zone %s", r.Steps[1].Slot, f.bram.ZoneID)
+	}
+	if !r.TurnEnded || len(r.Skipped) != 1 || !strings.Contains(r.Skipped[0].Error, "no action left") {
+		t.Fatalf("ended %v skipped %+v", r.TurnEnded, r.Skipped)
+	}
+}
+
+func TestPickUpIsFree(t *testing.T) {
+	f := newFixture(t)
+	f.goTo(f.hub, 1)
+	it := NewItem(f.w, "torch", Owner{Kind: OwnerLocation, ID: f.hub.ID})
+	r := Resolve(f.ctx(), f.bram, []Action{{Kind: ActPickUp, Item: it.ID}, {Kind: ActLook}})
+	if stepErr(r, 0) != "" || r.Steps[0].Slot != SlotFree || r.TurnEnded || len(r.Steps) != 2 {
+		t.Fatalf("pick up: %q slot %s ended %v", stepErr(r, 0), r.Steps[0].Slot, r.TurnEnded)
+	}
+}
+
+func TestRepositionToOwnZoneIsDropped(t *testing.T) {
+	f := newFixture(t)
+	f.goTo(f.hub, 1)
+	r := Resolve(f.ctx(), f.bram, []Action{{Kind: ActReposition, Zone: f.bram.ZoneID}, {Kind: ActLook}})
+	if len(r.Steps) != 1 || r.Steps[0].Action.Kind != ActLook || stepErr(r, 0) != "" {
+		t.Fatalf("steps %+v", r.Steps)
+	}
+}
+
+func TestSeveralBuysFromOneMerchantCostOneAction(t *testing.T) {
+	f := newFixture(t)
+	f.goTo(f.hub, 1)
+	f.bram.Gold = 200
+	// "I buy a potion and a longsword from Dunna"
+	r := Resolve(f.ctx(), f.bram, []Action{
+		{Kind: ActBuy, Target: "Dunna", Item: "Potion of Healing"},
+		{Kind: ActBuy, Target: "Dunna", Item: "longsword"},
+	})
+	if stepErr(r, 0) != "" || stepErr(r, 1) != "" || len(r.Skipped) != 0 {
+		t.Fatalf("buys %q %q skipped %+v", stepErr(r, 0), stepErr(r, 1), r.Skipped)
+	}
+	if r.Steps[0].Slot != SlotAction || r.Steps[1].Slot != SlotFree || !r.TurnEnded {
+		t.Fatalf("slots %s %s ended %v", r.Steps[0].Slot, r.Steps[1].Slot, r.TurnEnded)
 	}
 }
 

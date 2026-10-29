@@ -500,6 +500,14 @@ func (g *GM) DraftCharacter(ctx context.Context, w *game.World, concept string) 
 		if len(names) > 0 {
 			taken = "\nAlready in the party (use a clearly different name): " + strings.Join(names, ", ") + "."
 		}
+		var people []string
+		for _, n := range w.NPCs {
+			people = append(people, n.Name)
+		}
+		if len(people) > 0 {
+			// a shared first name ("Serafina") makes "I talk to Serafina" ambiguous
+			taken += "\nPeople in the story (share no first or last name with them): " + strings.Join(people, ", ") + "."
+		}
 	}
 	req := llm.Request{Tag: "author_character", Temperature: 0.8, ForceTool: "draft_character", Tools: []llm.Tool{t},
 		Messages: []llm.Message{llm.System(authorSystem), llm.User(fmt.Sprintf(

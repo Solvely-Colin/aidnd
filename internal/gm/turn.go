@@ -217,7 +217,7 @@ func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []stor
 		turns, _ := game.RunEnemyTurns(w, g.Dice)
 		if len(turns) > 0 {
 			out.EnemyTurns = turns
-			out.EnemyNarration = g.narrateEnemies(ctx, w, turns)
+			out.EnemyNarration = g.narrateEnemies(ctx, w, turns, out.Narration)
 			evs = append(evs, store.NewEvent("enemy_turns", "", map[string]any{"turns": turns, "narration": out.EnemyNarration}))
 		}
 	}

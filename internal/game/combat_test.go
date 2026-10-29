@@ -93,8 +93,9 @@ func TestDashCostsMoveAndAction(t *testing.T) {
 	if r.Steps[0].Slot != SlotDash || !r.TurnEnded {
 		t.Fatalf("slot %s ended %v", r.Steps[0].Slot, r.TurnEnded)
 	}
-	if len(r.Skipped) != 1 || !strings.Contains(r.Skipped[0].Error, "turn ended") {
-		t.Fatalf("skipped %+v", r.Skipped)
+	// the free look still runs after the dash spent the action
+	if len(r.Skipped) != 0 || len(r.Steps) != 2 || r.Steps[1].Slot != SlotFree {
+		t.Fatalf("skipped %+v steps %d", r.Skipped, len(r.Steps))
 	}
 	f.w.Campaign.Turns.Budget = FullBudget(true)
 	f.aria.ZoneID = f.wood.Zones[0].ID

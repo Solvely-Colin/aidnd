@@ -139,6 +139,9 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 		if len(holds) > 0 {
 			s += "; HOLDS (gives it when talked to): " + strings.Join(holds, ", ")
 		}
+		if secrets && n.Desc != "" && (actor == nil || withActor(l, actor, n)) {
+			s += "; looks: " + trim(n.Desc, 200)
+		}
 		if secrets && len(n.Memory) > 0 {
 			s += "; remembers: " + strings.Join(n.Memory, " | ")
 		}
