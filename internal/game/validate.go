@@ -30,10 +30,23 @@ type CharacterSpec struct {
 	Pronouns   string         `json:"pronouns,omitempty"` // "she/her"; empty means they/them
 	Scores     map[string]int `json:"scores"`
 	Proficient []string       `json:"proficient"`
+	// The 5e build. With class_key set, kit and proficient are ignored:
+	// the class gives gear and saving throws.
+	ClassKey   string              `json:"class_key,omitempty"`
+	Species    string              `json:"species,omitempty"`
+	Background string              `json:"background,omitempty"`
+	Boost      map[string]int      `json:"boost,omitempty"`  // background ability boosts
+	Skills     []string            `json:"skills,omitempty"` // class skills
+	Picks      map[string][]string `json:"picks,omitempty"`
+	Spells     []string            `json:"spells,omitempty"`
 }
 
 // ValidateCharacter checks the standard array, two proficiencies and kit.
 func ValidateCharacter(spec CharacterSpec) (Scores, []Ability, Problems) {
+	if spec.ClassKey != "" {
+		scores, p := ValidateBuild(spec)
+		return scores, nil, p
+	}
 	var p Problems
 	name := strings.TrimSpace(spec.Name)
 	if name == "" {
@@ -99,6 +112,14 @@ func CreateCharacter(w *World, playerID string, spec CharacterSpec) (*Character,
 	scores, prof, p := ValidateCharacter(spec)
 	if len(p) > 0 {
 		return nil, p
+	}
+	if spec.ClassKey != "" {
+		c := createBuild(w, playerID, spec, scores)
+		w.Characters = append(w.Characters, c)
+		if pl := w.Player(playerID); pl != nil {
+			pl.CharacterID = c.ID
+		}
+		return c, nil
 	}
 	kit := KitFor(w.Setting(), spec.Kit)
 	class := strings.TrimSpace(spec.Class)

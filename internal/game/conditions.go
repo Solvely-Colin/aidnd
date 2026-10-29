@@ -44,8 +44,37 @@ const (
 // StanceKinds lists the stances in display order.
 var StanceKinds = []string{CondHidden, CondDodging, CondDisengaged, CondHelped}
 
-// allKinds is every condition and stance in display order.
-var allKinds = append(append([]string{}, ConditionKinds...), StanceKinds...)
+// Effects of spells and class features. Only the engine sets them.
+const (
+	CondParalyzed  = "paralyzed"
+	CondAsleep     = "asleep"
+	CondOutlined   = "outlined"
+	CondLit        = "lit"
+	CondMarked     = "marked"
+	CondMocked     = "mocked"
+	CondInvisible  = "invisible"
+	CondBlessed    = "blessed"
+	CondGuided     = "guided"
+	CondInspired   = "inspired"
+	CondShielded   = "shielded"
+	CondHasted     = "hasted"
+	CondMageArmor  = "mage_armor"
+	CondAgathys    = "armor_of_agathys"
+	CondShillelagh = "shillelagh"
+	CondRaging     = "raging"
+	CondReckless   = "reckless"
+	CondWildShape  = "wild_shape"
+	CondSorcery    = "innate_sorcery"
+	CondSacred     = "sacred_weapon"
+)
+
+// EffectKinds lists the spell and feature effects in display order.
+var EffectKinds = []string{CondParalyzed, CondAsleep, CondOutlined, CondLit, CondMarked, CondMocked, CondInvisible,
+	CondRaging, CondReckless, CondWildShape, CondBlessed, CondGuided, CondInspired, CondShielded, CondHasted,
+	CondMageArmor, CondAgathys, CondShillelagh, CondSorcery, CondSacred}
+
+// allKinds is every condition, stance and effect in display order.
+var allKinds = append(append(append([]string{}, ConditionKinds...), StanceKinds...), EffectKinds...)
 
 // condRule is a condition's default save and duration.
 type condRule struct {
@@ -56,6 +85,11 @@ type condRule struct {
 	// EndsAtStart conditions last until the start of the bearer's next
 	// turn instead of counting down at the end of turns.
 	EndsAtStart bool
+	// NoTick effects never count down; a rest, the end of concentration or
+	// their own rule ends them.
+	NoTick bool
+	// LosesTurn effects take the bearer's whole turn.
+	LosesTurn bool
 	Summary     string // player-facing effect
 }
 
@@ -72,6 +106,27 @@ var condRules = map[string]condRule{
 	CondDisengaged: {EndsAtStart: true, Summary: "can move away from enemies without opportunity attacks this turn"},
 	CondHidden:     {Rounds: 2, Summary: "enemies can't target them; their next attack has advantage and gives them away"},
 	CondHelped:     {Rounds: 1, Summary: "advantage on their next attack or check"},
+	// Effects. Ten rounds is a minute; concentration ending removes them sooner.
+	CondParalyzed:  {Save: WIS, Rounds: 10, SaveEnds: true, LosesTurn: true, Summary: "can't act; attacks against have advantage and melee hits are critical"},
+	CondAsleep:     {Save: WIS, Rounds: 10, LosesTurn: true, Summary: "can't act and is easier to hit; any damage wakes them"},
+	CondOutlined:   {Save: DEX, Rounds: 10, Summary: "glowing: attacks against them have advantage"},
+	CondLit:        {Rounds: 1, Summary: "the next attack against them has advantage"},
+	CondMarked:     {Rounds: 10, Summary: "takes an extra 1d6 from whoever marked them"},
+	CondMocked:     {Rounds: 1, Summary: "disadvantage on their next attack"},
+	CondInvisible:  {Rounds: 10, Summary: "unseen: can't be targeted, attacks with advantage; attacking or casting ends it"},
+	CondBlessed:    {Rounds: 10, Summary: "+1d4 to attacks and saves"},
+	CondGuided:     {Rounds: 10, Summary: "+1d4 to their next ability check"},
+	CondInspired:   {NoTick: true, Lingers: true, Summary: "adds a bardic inspiration die to their next d20"},
+	CondShielded:   {Rounds: 10, Summary: "+2 AC"},
+	CondHasted:     {Rounds: 10, Summary: "+2 AC and an extra action each turn"},
+	CondMageArmor:  {NoTick: true, Lingers: true, Summary: "AC 13 + DEX without armor"},
+	CondAgathys:    {NoTick: true, Lingers: true, Summary: "frost armor: melee attackers take cold while the temporary HP last"},
+	CondShillelagh: {Rounds: 10, Summary: "staff or club uses WIS and a d8"},
+	CondRaging:     {Rounds: 10, Summary: "+2 Strength damage, half damage from hits, advantage on Strength checks and saves"},
+	CondReckless:   {EndsAtStart: true, Summary: "attacks with advantage this turn; attacks against them have advantage"},
+	CondWildShape:  {Rounds: 10, Summary: "in beast form: claws, and temporary HP to burn"},
+	CondSorcery:    {Rounds: 10, Summary: "+1 spell save DC and advantage on spell attacks"},
+	CondSacred:     {Rounds: 10, Summary: "adds CHA to attack rolls"},
 }
 
 // MinStunDanger is the lowest location danger at which enemies may stun.
@@ -85,6 +140,8 @@ type Condition struct {
 	Save     Ability `json:"save,omitempty"`      // ability for that save
 	Source   string  `json:"source,omitempty"`    // who or what caused it, for display
 	SourceID string  `json:"source_id,omitempty"` // enemy or character id, for frightened
+	Spell    string  `json:"spell,omitempty"`     // the concentration spell that holds it
+	Die      int     `json:"die,omitempty"`       // bardic inspiration die size
 }
 
 // Conditions is the set on one creature, at most one of each kind.
@@ -202,16 +259,36 @@ type SaveOutcome struct {
 }
 
 // CharacterSave rolls c's save of ability a against dc. Poisoned and
-// frightened give disadvantage, as on any check.
+// frightened give disadvantage, as on any check; rage, danger sense and
+// species traits give advantage; bless and inspiration add their dice.
 func CharacterSave(r *dice.Roller, c *Character, a Ability, dc int, why string) Roll {
-	edge, reason := checkEdge(c.Conditions)
-	ch := r.D20Edge(c.CheckMod(a), dc, edge)
+	adv, dis := saveEdge(c, a, why), checkDis(c.Conditions)
+	edge, reason := edge(adv, dis)
+	parts := []RollPart{{Label: string(a), Value: c.Mod(a)}}
+	if c.SaveProficient(a) {
+		parts = append(parts, RollPart{Label: "Proficiency", Value: ProficiencyBonus(c.Level)})
+	}
+	if why != "concentration" || !c.Conditions.Has(CondInspired) {
+		parts = append(parts, rollBonusDice(r, c, "save")...)
+	}
+	ch := charD20(r, c, sumParts(parts), dc, edge)
 	label := fmt.Sprintf("%s %s save", c.Name, a)
 	if why != "" {
-		label += " against " + why
+		label += " against " + condName(why)
 	}
 	return Roll{Label: label, Kind: "save", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier,
-		Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: reason}
+		Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: reason, Parts: parts}
+}
+
+// checkDis is the disadvantage poison and fear put on d20 tests.
+func checkDis(cs Conditions) []string {
+	var dis []string
+	for _, k := range []string{CondPoisoned, CondFrightened} {
+		if cs.Has(k) {
+			dis = append(dis, k)
+		}
+	}
+	return dis
 }
 
 // EnemySave rolls an enemy's save: d20 + half its attack bonus.
@@ -305,8 +382,25 @@ func AttackEdge(attacker, target Conditions, dist int) (int, string) {
 	if attacker.Has(CondHelped) {
 		adv = append(adv, "helped by an ally")
 	}
+	if attacker.Has(CondInvisible) {
+		adv = append(adv, "attacker unseen")
+	}
+	if attacker.Has(CondReckless) {
+		adv = append(adv, "reckless attack")
+	}
+	if attacker.Has(CondMocked) {
+		dis = append(dis, "attacker rattled by mockery")
+	}
 	if target.Has(CondDodging) {
 		dis = append(dis, "target dodging")
+	}
+	if target.Has(CondInvisible) {
+		dis = append(dis, "target unseen")
+	}
+	for _, k := range []string{CondParalyzed, CondAsleep, CondOutlined, CondLit, CondReckless} {
+		if target.Has(k) {
+			adv = append(adv, "target "+strings.ReplaceAll(k, "_", " "))
+		}
 	}
 	if target.Has(CondProne) {
 		if dist == 0 {
@@ -337,8 +431,8 @@ func CanMove(cs Conditions) error {
 	if cs.Has(CondRestrained) {
 		return fmt.Errorf("restrained and can't move; break free first")
 	}
-	if cs.Has(CondStunned) {
-		return fmt.Errorf("stunned")
+	if k := lostTurnKind(cs); k != "" {
+		return fmt.Errorf("%s", condName(k))
 	}
 	return nil
 }
@@ -378,7 +472,7 @@ func (t *ConditionTick) add(o ConditionTick) {
 func StartCharacterTurn(c *Character, b *Budget) ConditionTick {
 	var t ConditionTick
 	c.Readied = nil
-	for _, k := range StanceKinds {
+	for _, k := range allKinds {
 		if condRules[k].EndsAtStart {
 			c.Conditions.remove(k) // lapses quietly
 		}
@@ -391,12 +485,24 @@ func StartCharacterTurn(c *Character, b *Budget) ConditionTick {
 			t.Changes = append(t.Changes, fmt.Sprintf("%s gets back up (that takes the move)", c.Name))
 		}
 	}
-	if s := c.Conditions.Get(CondStunned); s != nil {
+	if k := lostTurnKind(c.Conditions); k != "" {
 		t.LostTurn = true
-		b.Move, b.Action = 0, 0
-		t.Changes = append(t.Changes, fmt.Sprintf("%s is stunned and loses the turn", c.Name))
+		b.Move, b.Action, b.Bonus = 0, 0, 0
+		t.Changes = append(t.Changes, fmt.Sprintf("%s is %s and loses the turn", c.Name, k))
+	} else if c.Conditions.Has(CondHasted) {
+		b.Action++
 	}
 	return t
+}
+
+// lostTurnKind is the condition that takes the bearer's turn, or "".
+func lostTurnKind(cs Conditions) string {
+	for _, k := range allKinds {
+		if (k == CondStunned || condRules[k].LosesTurn) && cs.Has(k) {
+			return k
+		}
+	}
+	return ""
 }
 
 // EndCharacterTurn ticks c's conditions down at the end of their turn:
@@ -405,13 +511,13 @@ func EndCharacterTurn(r *dice.Roller, c *Character) ConditionTick {
 	var t ConditionTick
 	keep := c.Conditions[:0]
 	for _, cond := range c.Conditions {
-		if cond.Kind == CondProne || condRules[cond.Kind].EndsAtStart {
+		if cond.Kind == CondProne || condRules[cond.Kind].EndsAtStart || condRules[cond.Kind].NoTick {
 			keep = append(keep, cond) // ends at their next turn (standing up, or the stance lapsing)
 			continue
 		}
 		cond.Rounds--
 		if cond.Rounds <= 0 {
-			t.Changes = append(t.Changes, fmt.Sprintf("%s is no longer %s", c.Name, cond.Kind))
+			t.Changes = append(t.Changes, fmt.Sprintf("%s is no longer %s", c.Name, condName(cond.Kind)))
 			continue
 		}
 		if condRules[cond.Kind].SaveEnds && cond.SaveDC > 0 {
@@ -434,9 +540,9 @@ func EndCharacterTurn(r *dice.Roller, c *Character) ConditionTick {
 func startEnemyTurn(e *Enemy) (ConditionTick, bool) {
 	var t ConditionTick
 	canMove := true
-	if e.Conditions.Has(CondStunned) {
+	if k := lostTurnKind(e.Conditions); k != "" {
 		t.LostTurn = true
-		t.Changes = append(t.Changes, fmt.Sprintf("%s is stunned and loses its turn", e.Display()))
+		t.Changes = append(t.Changes, fmt.Sprintf("%s is %s and loses its turn", e.Display(), condName(k)))
 		return t, false
 	}
 	if e.Conditions.Has(CondProne) && !e.Conditions.Has(CondRestrained) {
@@ -460,7 +566,7 @@ func endEnemyTurn(r *dice.Roller, e *Enemy) ConditionTick {
 		}
 		cond.Rounds--
 		if cond.Rounds <= 0 {
-			t.Changes = append(t.Changes, fmt.Sprintf("%s is no longer %s", e.Display(), cond.Kind))
+			t.Changes = append(t.Changes, fmt.Sprintf("%s is no longer %s", e.Display(), condName(cond.Kind)))
 			continue
 		}
 		if condRules[cond.Kind].SaveEnds && cond.SaveDC > 0 {
@@ -488,15 +594,35 @@ func ClearFightConditions(w *World) {
 			}
 		}
 		c.Conditions = keep
+		c.Conc = nil
 	}
 }
 
-// ClearAllConditions is what rest and a setback do.
+// ClearAllConditions is what a long rest and a setback do.
 func ClearAllConditions(w *World) {
 	for _, c := range w.Characters {
 		c.Conditions = nil
+		c.Conc = nil
+		c.TempHP = 0
 	}
 }
+
+// clearShortRest drops everything but the effects that last hours.
+func clearShortRest(w *World) {
+	for _, c := range w.Characters {
+		keep := c.Conditions[:0]
+		for _, cond := range c.Conditions {
+			if condRules[cond.Kind].NoTick {
+				keep = append(keep, cond)
+			}
+		}
+		c.Conditions = keep
+		c.Conc = nil
+	}
+}
+
+// condName is a condition for display ("mage armor").
+func condName(kind string) string { return strings.ReplaceAll(kind, "_", " ") }
 
 // NormalizeInflict validates an authored on-hit condition for a location
 // of the given danger, returning "" (with a note) if it isn't allowed.

@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Solvely-Colin/aidnd/internal/dice"
 )
@@ -91,10 +92,9 @@ func hide(ctx *Ctx, c *Character, st *Step) error {
 		dc = max(dc, EnemyPassive(e))
 	}
 	sk, _ := SkillByKey("stealth")
-	ed, why := checkEdge(c.Conditions)
-	ch := ctx.R.D20Edge(c.SkillMod(sk), dc, ed)
+	ch, parts, why := charCheck(ctx.R, c, DEX, SkillParts(c, sk), dc)
 	st.Rolls = append(st.Rolls, Roll{Label: c.Name + " Stealth check to hide", Kind: "check", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc,
-		Tier: ch.Tier, Parts: SkillParts(c, sk), Against: "DC", Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: why})
+		Tier: ch.Tier, Parts: parts, Against: "DC", Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: why})
 	st.Tier = ch.Tier
 	c.Conditions.remove(CondHelped)
 	if !ch.Tier.Succeeded() {
@@ -257,11 +257,12 @@ func opportunityAttacks(ctx *Ctx, c *Character, st *Step) bool {
 			st.Changes = append(st.Changes, fmt.Sprintf("%s takes a swing at %s as they move away and misses (opportunity attack)", e.Display(), c.Name))
 			continue
 		}
-		dmg := out.Damage.Total
-		c.HP = max(0, c.HP-dmg)
+		dmg, extra := HurtCharacter(w, ctx.R, c, out.Damage.Total, e, true)
 		line := fmt.Sprintf("%s catches %s with an opportunity attack for %d damage (%d/%d HP)", e.Display(), c.Name, dmg, c.HP, c.MaxHP)
+		if len(extra) > 0 {
+			line += "; " + strings.Join(extra, "; ")
+		}
 		if c.HP == 0 {
-			KnockOut(w, c)
 			line += fmt.Sprintf("; %s goes down", c.Name)
 			st.Changes = append(st.Changes, line)
 			st.Changes = append(st.Changes, releaseGrapples(w, c)...)

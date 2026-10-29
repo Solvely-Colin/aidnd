@@ -110,12 +110,7 @@ func (c *Character) HasSkill(key string) bool {
 }
 
 func (c *Character) hasExpertise(key string) bool {
-	for _, s := range c.Expertise {
-		if s == key {
-			return true
-		}
-	}
-	return false
+	return containsStr(c.Expertise, key) || containsStr(c.Picks["expertise"], key) || containsStr(c.Picks["scholar"], key)
 }
 
 // SkillParts breaks a skill check's modifier into parts: the ability,
@@ -131,6 +126,8 @@ func SkillParts(c *Character, sk Skill) []RollPart {
 	case c.IsProficient(sk.Ability):
 		// sheets from before skills were proficient in whole abilities
 		ps = append(ps, RollPart{Label: "Proficiency", Value: ProficiencyBonus(c.Level)})
+	case c.HasFeature("jack_of_all_trades"):
+		ps = append(ps, RollPart{Label: "Jack of All Trades", Value: ProficiencyBonus(c.Level) / 2})
 	}
 	return ps
 }
@@ -181,10 +178,21 @@ func EnemyPassive(e *Enemy) int { return 10 + e.AttackBonus/2 }
 // SkillList is the character's skills; sheets made before skills existed
 // know their kit's.
 func (c *Character) SkillList() []string {
-	if len(c.Skills) == 0 {
-		return kitSkills[c.Kit]
+	base := c.Skills
+	if len(base) == 0 {
+		base = kitSkills[c.Kit]
 	}
-	return c.Skills
+	extra := append(append(append([]string{}, c.Picks["skillful"]...), c.Picks["skilled"]...), c.Picks["lore_skills"]...)
+	if len(extra) == 0 {
+		return base
+	}
+	out := append([]string(nil), base...)
+	for _, s := range extra {
+		if !containsStr(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // purposeSkill is the default skill for an ability_check purpose.
