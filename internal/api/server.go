@@ -21,6 +21,7 @@ import (
 
 	"github.com/Solvely-Colin/aidnd/internal/game"
 	"github.com/Solvely-Colin/aidnd/internal/gm"
+	"github.com/Solvely-Colin/aidnd/internal/saga"
 	"github.com/Solvely-Colin/aidnd/internal/store"
 )
 
@@ -351,6 +352,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"xp_table": game.XPTable, "max_level": game.MaxLevel, "dcs": []int{5, 10, 15, 20, 25}, "catalog": catalog,
 		"service_mode": s.ServiceMode(), "ruleset": rulesetView(firstNonEmpty(game.NormSetting(r.URL.Query().Get("setting")), game.SettingFantasy)),
 		"magic": magicView(firstNonEmpty(game.NormSetting(r.URL.Query().Get("setting")), game.SettingFantasy)),
+		"sagas": saga.List(),
 	})
 }
 
@@ -380,12 +382,21 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Premise   string `json:"premise"`
 		Lethality string `json:"lethality"` // standard (default) | story
+		// Saga starts a hand-written campaign (see GET /meta sagas) instead
+		// of authoring one from the premise.
+		Saga string `json:"saga"`
 	}
 	if err := decode(r, &body); err != nil {
 		s.fail(w, err)
 		return
 	}
-	wld, err := s.gm.CreateCampaign(r.Context(), body.Premise)
+	var wld *game.World
+	var err error
+	if body.Saga != "" {
+		wld, err = s.gm.CreateSaga(r.Context(), body.Saga)
+	} else {
+		wld, err = s.gm.CreateCampaign(r.Context(), body.Premise)
+	}
 	if err != nil {
 		s.fail(w, err)
 		return

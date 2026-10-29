@@ -180,6 +180,38 @@ Engine state on characters and enemies (`Conditions`), never set by the model di
   marks later events `undone` (hidden from feed and model), and drops later
   snapshots.
 
+## Sagas: hand-written campaigns (2026-10-29)
+
+The first saga is *The Long Dark Below* (Lovecraftian, 1931-1935, five acts,
+levels 1-20). Plan: https://claude.ai/artifact/LWUoM8J2WtWrpZ8LvD8MJL. Act I
+(Innsmouth, levels 1-4) is built; acts II-V come with the level 6-20 rules.
+
+- **`internal/saga`** holds the campaign bible as Go data and `Build`s a world
+  from one act. Every name must resolve (places, people, items, objective
+  targets, beat targets, gates); a typo fails the build and the tests, never
+  a quietly unwinnable quest. Anchor places with a written description are
+  not stubs, so the author never rewrites them; zones are laid out on arrival.
+- **Secrets are gated.** `Lore.Gate` names an objective or quest id; the
+  narrator and the author's canon line only see lore whose gate is done
+  (`game.LoreOpen`). A missing gate stays shut.
+- **Milestones.** `Campaign.Milestones` maps objective ids to levels;
+  completing one lifts every character to at least that level
+  (`game.RaiseToLevel`). Act I: objective 2 → level 2, objective 4 → 3, the
+  boss → 4. The story sets the pace; nobody has to grind.
+- **Protected NPCs** (`NPC.Protected`): people a saga's story needs. The
+  narrator can't turn them into foes; players can still pick that fight.
+- **Hand-written bosses.** `BossSpec.Phases` renames the three default phases
+  and their lines; `Minion`/`MinionHorror` set what answers the boss's call.
+- **Dread and strain** (`Campaign.Dread`, set by sagas; `game/strain.go`).
+  Strain 0..6 per character. A failed WIS save against a horror (DC 10 +
+  rank 1..3) adds 1, a natural 1 adds 2. At 2+ disadvantage on saves against
+  fear; reaching 4 = frightened for a moment; reaching 6 = a lasting scar
+  (d8 table, never twice) and strain back to 3. A long rest at a safe place
+  takes 1 off. Sources: an enemy's horror rank on first sight of its kind
+  (once per character per kind, at the start of the enemies' turns) and the
+  narrator's `hazard` tool with condition `horror`. Scars are played by the
+  narrator; "Hears whispers" also lowers passive Perception by 2.
+
 ## Changes from the live play-test (deepseek-v4.1-flash)
 
 - Quests stay completable whatever the author names: an obtain/deliver item that exists

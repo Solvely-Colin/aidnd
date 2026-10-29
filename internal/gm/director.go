@@ -420,6 +420,9 @@ func selectLore(w *game.World, recent string, budget int) []*game.Lore {
 	}
 	var cs []cand
 	for i, l := range w.Lore {
+		if !game.LoreOpen(w, l) {
+			continue // a secret players haven't uncovered yet
+		}
 		prio := -1
 		switch {
 		case l.AlwaysOn:

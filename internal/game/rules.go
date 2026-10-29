@@ -85,6 +85,16 @@ func AwardXP(c *Character, xp int) []string {
 	return changes
 }
 
+// RaiseToLevel awards the XP that brings a character to at least lvl, so
+// a story milestone sets the pace and nobody has to grind.
+func RaiseToLevel(c *Character, lvl int) []string {
+	lvl = clamp(lvl, 1, MaxLevel)
+	if need := XPTable[lvl-1]; c.XP < need {
+		return AwardXP(c, need-c.XP)
+	}
+	return nil
+}
+
 // BestAbility is the highest score, ties broken by sheet order.
 func BestAbility(c *Character) Ability {
 	best := Abilities[0]

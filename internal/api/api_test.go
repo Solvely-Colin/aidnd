@@ -656,3 +656,35 @@ func TestDMConsoleRewindAndActions(t *testing.T) {
 		t.Fatalf("unknown snapshot %d", r.code)
 	}
 }
+
+func TestStartSagaCampaign(t *testing.T) {
+	e := newEnv(t, "")
+	meta := e.do("GET", "/meta", nil, "", "").json(t)
+	sagas, _ := meta["sagas"].([]any)
+	if len(sagas) == 0 || sagas[0].(map[string]any)["key"] != "long-dark" {
+		t.Fatalf("meta sagas: %v", meta["sagas"])
+	}
+	r := e.do("POST", "/campaigns", map[string]string{"saga": "long-dark"}, "", "")
+	if r.code != 201 {
+		t.Fatalf("create saga %d %s", r.code, r.body)
+	}
+	v := r.json(t)
+	if v["saga"] != "long-dark" || v["act"] != float64(1) || v["dread"] != true || v["setting"] != "pulp" {
+		t.Fatalf("saga view: saga=%v act=%v dread=%v setting=%v", v["saga"], v["act"], v["dread"], v["setting"])
+	}
+	id := v["id"].(string)
+	j := e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "", "")
+	tok := j.json(t)["token"].(string)
+	if r := e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet}, tok, ""); r.code != 201 {
+		t.Fatalf("sheet %d %s", r.code, r.body)
+	}
+	got := e.do("GET", "/campaigns/"+id, nil, tok, "").json(t)
+	party := got["party"].([]any)
+	st, ok := party[0].(map[string]any)["strain"].(map[string]any)
+	if !ok || st["max"] != float64(6) {
+		t.Fatalf("strain on the sheet: %v", party[0].(map[string]any)["strain"])
+	}
+	if r := e.do("POST", "/campaigns", map[string]string{"saga": "nope"}, "", ""); r.code < 400 {
+		t.Fatalf("unknown saga should fail, got %d", r.code)
+	}
+}

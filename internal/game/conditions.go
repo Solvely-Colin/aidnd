@@ -263,6 +263,9 @@ type SaveOutcome struct {
 // species traits give advantage; bless and inspiration add their dice.
 func CharacterSave(r *dice.Roller, c *Character, a Ability, dc int, why string) Roll {
 	adv, dis := saveEdge(c, a, why), checkDis(c.Conditions)
+	if c.Strain >= StrainShaken && strings.Contains(why, "fright") {
+		dis = append(dis, "strain")
+	}
 	edge, reason := edge(adv, dis)
 	parts := []RollPart{{Label: string(a), Value: c.Mod(a)}}
 	if c.SaveProficient(a) {

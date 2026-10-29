@@ -203,3 +203,23 @@ func (w *World) FactsAbout(npcID string) []*ChronicleEntry {
 	}
 	return out
 }
+
+// LoreOpen reports whether a lore entry may be shown to the narrator: its
+// gate (an objective or quest id) must be done. A gate that no longer
+// exists stays shut, so a secret is never spilled by a missing id.
+func LoreOpen(w *World, l *Lore) bool {
+	if l.Gate == "" {
+		return true
+	}
+	for _, q := range w.Quests {
+		if q.ID == l.Gate {
+			return q.Status == QuestCompleted || q.Status == QuestTurnedIn
+		}
+		for _, o := range q.Objectives {
+			if o.ID == l.Gate {
+				return o.Done
+			}
+		}
+	}
+	return false
+}

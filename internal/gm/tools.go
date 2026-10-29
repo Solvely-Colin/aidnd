@@ -260,9 +260,9 @@ func directiveTools() []llm.Tool {
 			"outcome":    enum("result", game.PromiseKept, game.PromiseBroken),
 			"note":       str("what happened, one short sentence")}, "promise_id", "outcome")),
 		tool(DirAdjustTension, "Raise or lower the scene's tension.", obj(map[string]any{"delta": num("-2..2", -2, 2)}, "delta")),
-		tool(DirHazard, "A danger in the scene threatens one character with a condition (a trap's poison needle, a collapsing floor knocking them prone, a snare, a horror that frightens). The engine rolls their save and decides; never narrate the outcome before the result. At most once per narration, never stunned.", obj(map[string]any{
+		tool(DirHazard, "A danger in the scene threatens one character with a condition (a trap's poison needle, a collapsing floor knocking them prone, a snare, a horror that frightens). Use the condition horror for something unnatural seen or understood: the engine rolls a Wisdom save against mental strain. The engine rolls their save and decides; never narrate the outcome before the result. At most once per narration, never stunned.", obj(map[string]any{
 			"target":    str("character id"),
-			"condition": enum("condition threatened", game.CondPoisoned, game.CondProne, game.CondRestrained, game.CondFrightened, game.CondBlinded),
+			"condition": enum("condition threatened", game.CondPoisoned, game.CondProne, game.CondRestrained, game.CondFrightened, game.CondBlinded, "horror"),
 			"cause":     str("what causes it, a few words")}, "target", "condition", "cause")),
 		tool(DirEndEncounter, "Remaining enemies flee or surrender, ending the fight (no rewards).", obj(map[string]any{"reason": str("why")}, "reason")),
 	}

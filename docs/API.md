@@ -104,7 +104,7 @@ they/them, and drafts fill it from the concept.
 | `GET /meta?setting=` | anyone | Abilities, standard array, kits with items (fantasy), `settings` (each with its own kits), item catalog, XP table, DCs, `service_mode`, and `ruleset`: every class, species, background, feat, invocation and spell named for `setting` (`rules_name` is the SRD name). |
 | `GET /campaigns` | any caller | All campaigns: `{campaigns: [{id, title, pitch, status, players, max_players, updated_at}]}` |
 | `GET /me/campaigns` | player | Campaigns this player has joined. |
-| `POST /campaigns` | any caller | `{premise, lethality?}` → 201 campaign view. `lethality` is `standard` (three failed death saves kill) or `story` (they leave you stable). |
+| `POST /campaigns` | any caller | `{premise, lethality?}` → 201 campaign view. `lethality` is `standard` (three failed death saves kill) or `story` (they leave you stable). `{saga: "long-dark"}` instead starts act 1 of a hand-written saga (listed in `GET /meta` as `sagas`); no model call, and the view carries `saga`, `act` and `dread`. In dread campaigns each character view has `strain: {value, max, shaken, scars: [{key, name, text}]}`. |
 | `GET /campaigns/{id}` | any caller | Campaign view, personalised by `you` when a player id is known. |
 | `POST /campaigns/{id}/players` | player | `{name}` → `{player, created, token?}` (201 when new). |
 | `POST /campaigns/{id}/characters/draft` | joined player | `{concept}` → `{character: spec}` |
