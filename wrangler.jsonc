@@ -19,6 +19,7 @@
 			"class_name": "GameServer",
 			"image": "./Dockerfile",
 			"instance_type": "lite",
+			"scheduling_policy": "durable_object",
 			"max_instances": 2
 		}
 	],
