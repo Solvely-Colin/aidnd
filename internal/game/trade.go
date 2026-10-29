@@ -140,7 +140,7 @@ func Give(w *World, c *Character, itemRef, toRef string) (string, error) {
 	}
 	unequip(c, it.ID)
 	it.Owner = Owner{Kind: OwnerNPC, ID: n.ID}
-	n.Remember(fmt.Sprintf("%s gave me %s", c.Name, it.Name))
+	n.Keep(fmt.Sprintf("day %d: %s gave me %s", w.Campaign.Scene.Day, c.Name, it.Name))
 	return fmt.Sprintf("%s gives %s to %s", c.Name, it.Name, n.Name), nil
 }
 

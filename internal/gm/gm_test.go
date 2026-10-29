@@ -841,8 +841,16 @@ func TestQuestLoopThroughPipeline(t *testing.T) {
 	if w.Quest(q.ID).Status != game.QuestTurnedIn || w.Characters[0].Gold != gold+30 {
 		t.Fatalf("turn in: %s gold %d", w.Quest(q.ID).Status, w.Characters[0].Gold)
 	}
-	if len(w.NPC("Tamsin Hale").Memory) == 0 {
+	if len(w.NPC("Tamsin Hale").Recall()) == 0 {
 		t.Fatal("Tamsin doesn't remember")
+	}
+	// the promise made on accepting survives a reload and is now kept
+	kept := false
+	for _, c := range w.Chronicle {
+		kept = kept || (c.QuestID == q.ID && c.Status == game.PromiseKept && len(c.NPCIDs) == 1)
+	}
+	if !kept {
+		t.Fatalf("quest promise not kept in the chronicle: %+v", w.Chronicle)
 	}
 }
 
@@ -1142,5 +1150,58 @@ func TestCreateCampaignKeepsGearInTheSetting(t *testing.T) {
 	}
 	if p := lastUser(r.f.Tagged("author_character")[0]); !strings.Contains(p, "Gumshoe") || !strings.Contains(p, "Setting: Pulp") {
 		t.Fatalf("draft prompt lacks the setting's kits: %s", p)
+	}
+}
+
+func TestWorldRemembersPromisesAcrossTurns(t *testing.T) {
+	r := newRig(t, 1, 1)
+	r.start(t)
+	corbin := r.world(t).NPC("Elder Corbin")
+	// the narrator records the promise the player makes
+	r.f.On("narrate", func(llm.Request) (llm.Response, error) {
+		return llm.Response{Content: "Corbin nods slowly.", ToolCalls: []llm.ToolCall{
+			llm.Call(DirRecordLore, map[string]any{"text": "Ewan promised Corbin to ring the bell again", "kind": "promise", "npc_ids": []string{corbin.ID}}),
+			llm.Call(DirAdjustDisp, map[string]any{"npc_id": corbin.ID, "delta": 1, "reason": "offered to help with the bell"}),
+		}}, nil
+	})
+	r.act(t, "u1", "I'll ring your bell again, I swear it", llm.Call("talk_to", map[string]any{"npc": "Elder Corbin", "text": "I swear it"}))
+	w := r.world(t)
+	p := w.OpenPromises()
+	if len(p) != 1 || p[0].NPCIDs[0] != corbin.ID || p[0].Day == 0 {
+		t.Fatalf("promise not stored: %+v", w.Chronicle)
+	}
+	if !strings.Contains(strings.Join(w.NPC(corbin.ID).Recall(), "|"), "warmed to the party: offered to help") {
+		t.Fatalf("Corbin forgot why: %v", w.NPC(corbin.ID).Recall())
+	}
+	// on the next turn the narrator is shown the open promise and settles it
+	r.f.On("narrate", llm.Calls(llm.Call(DirResolvePromise, map[string]any{"promise_id": p[0].ID, "outcome": "kept", "note": "the bell rang"})))
+	before := w.NPC(corbin.ID).Disposition
+	seen := len(r.f.Tagged("narrate"))
+	r.act(t, "u1", "I tell Corbin the bell is ringing", llm.Call("talk_to", map[string]any{"npc": "Elder Corbin", "text": "done"}))
+	u := lastUser(r.f.Tagged("narrate")[seen])
+	if !strings.Contains(u, "WORLD MEMORY") || !strings.Contains(u, "["+p[0].ID+"] day") || !strings.Contains(u, "ring the bell again") {
+		t.Fatalf("narrator not shown the promise:\n%s", u)
+	}
+	w = r.world(t)
+	if len(w.OpenPromises()) != 0 || w.Fact(p[0].ID).Status != game.PromiseKept {
+		t.Fatalf("promise not kept: %+v", w.Fact(p[0].ID))
+	}
+	n := w.NPC(corbin.ID)
+	if n.Disposition != clampInt(before+1, -3, 3) || len(n.Keeps) == 0 {
+		t.Fatalf("Corbin disposition %d keeps %v", n.Disposition, n.Keeps)
+	}
+}
+
+func TestRecordLoreRejectsPromiseToNobody(t *testing.T) {
+	r := newRig(t, 1, 1)
+	w := r.start(t)
+	if _, err := r.g.applyDirective(bg, w, llm.Call(DirRecordLore, map[string]any{"text": "Ewan swore an oath", "kind": "promise"})); err == nil {
+		t.Fatal("promise without anyone to keep it to")
+	}
+	if _, err := r.g.applyDirective(bg, w, llm.Call(DirRecordLore, map[string]any{"text": "They say the lake has no bottom", "kind": "rumor"})); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(worldMemory(w, w.Characters[0]), "rumor: They say") {
+		t.Fatalf("memory %q", worldMemory(w, w.Characters[0]))
 	}
 }

@@ -60,6 +60,9 @@ func richWorld(t *testing.T) *game.World {
 	w.Lore = []*game.Lore{{ID: "lore1", Title: "Vex's plan", Text: "He wants the bell.", Keywords: []string{"bell"}, AlwaysOn: true, LastTrigger: -100}}
 	w.Beats = []*game.Beat{{ID: "beat1", Title: "Crows", Text: "Crows gather.", Trigger: game.TriggerEnterLocation, Target: wood.ID, Effects: []string{game.EffectAmbush}}}
 	w.AddChronicle("The bell tolled at midnight.")
+	smith.Keep("day 1: the party paid in full")
+	w.Record(game.ChronicleEntry{Kind: game.FactPromise, Text: "Aria swore to find the smith's lost hammer", NPCIDs: []string{smith.ID}, Source: game.SourceGM})
+	w.Here().LastDay = 2
 	w.Defeats = []game.DefeatRecord{{Name: "Rat", LocationID: hub.ID, Turn: 0}}
 	w.Campaign.Scene = game.Scene{Day: 2, Time: 3, Tension: 6, Goal: "find the trail", Turns: 4, Quiet: 1}
 	w.Campaign.Summary = "So far..."

@@ -78,8 +78,9 @@ func interpreterTools() []llm.Tool {
 			"item":   str("item id from INVENTORY"),
 			"target": str("optional party member id or exit id")}, "item")),
 		tool(game.ActTalkTo, "ACTION in combat, FREE otherwise. Have a conversation with an NPC (ask, persuade, haggle, ask for work).", obj(map[string]any{
-			"npc":  str("NPC id from NPCS"),
-			"text": str("what the character says or asks")}, "npc")),
+			"npc":     str("NPC id from NPCS"),
+			"text":    str("what the character says or asks"),
+			"promise": str("only if the character gives their word (a promise, oath, deal or debt): what they promised, in a few words")}, "npc")),
 		tool(game.ActBuy, "ACTION in combat, FREE otherwise. Buy an item from a merchant here.", obj(map[string]any{"npc": str("merchant NPC id"), "item": str("item id from the merchant's STOCK")}, "npc", "item")),
 		tool(game.ActSell, "ACTION in combat, FREE otherwise. Sell a carried item to a merchant here.", obj(map[string]any{"npc": str("merchant NPC id"), "item": str("item id from INVENTORY")}, "npc", "item")),
 		tool(game.ActAcceptQuest, "FREE. Accept a quest an NPC here has offered.", obj(map[string]any{"quest": str("quest id from QUESTS ON OFFER")}, "quest")),
@@ -94,8 +95,8 @@ func interpreterTools() []llm.Tool {
 // toAction converts an interpreter tool call to an engine action.
 func toAction(tc llm.ToolCall) (game.Action, error) {
 	var a struct {
-		Target, Weapon, Method, Ability, Purpose, Text, Item, Exit, Zone, Destination, NPC, Quest, To string
-		DC                                                                                            int
+		Target, Weapon, Method, Ability, Purpose, Text, Item, Exit, Zone, Destination, NPC, Quest, To, Promise string
+		DC                                                                                                     int
 	}
 	if err := tc.Decode(&a); err != nil {
 		return game.Action{}, err
@@ -122,7 +123,7 @@ func toAction(tc llm.ToolCall) (game.Action, error) {
 	case game.ActUseItem:
 		act.Item, act.Target = a.Item, a.Target
 	case game.ActTalkTo:
-		act.Target = firstOf(a.NPC, a.Target)
+		act.Target, act.Promise = firstOf(a.NPC, a.Target), a.Promise
 	case game.ActBuy, game.ActSell:
 		act.Target, act.Item = firstOf(a.NPC, a.Target), a.Item
 	case game.ActAcceptQuest, game.ActTurnInQuest:
@@ -154,6 +155,7 @@ const (
 	DirAdjustDisp     = "adjust_disposition"
 	DirNPCGivesItem   = "npc_gives_item"
 	DirRecordLore     = "record_lore"
+	DirResolvePromise = "resolve_promise"
 	DirAdjustTension  = "adjust_tension"
 	DirEndEncounter   = "end_encounter"
 )
@@ -203,13 +205,21 @@ func directiveTools() []llm.Tool {
 			"key": str("catalog key, or empty"), "name": str("name if not a catalog item"), "kind": str("item kind"), "desc": str("short description"), "value": num("value", 0, 100)})),
 		tool(DirStockMerchant, "Add catalog items to a merchant's stock here.", obj(map[string]any{
 			"npc_id": str("merchant id"), "keys": arr(str("catalog key"), "1-4 catalog keys")}, "npc_id", "keys")),
-		tool(DirNPCNote, "Record a short memory for an NPC about the party (what they did/said).", obj(map[string]any{
-			"npc_id": str("npc id"), "note": str("under 20 words")}, "npc_id", "note")),
+		tool(DirNPCNote, "Record a short memory for an NPC about the party (what they did/said, what the NPC told them).", obj(map[string]any{
+			"npc_id": str("npc id"), "note": str("under 20 words"),
+			"important": boolean("true for something they will never forget: a threat, a kindness, a secret shared")}, "npc_id", "note")),
 		tool(DirAdjustDisp, "Shift an NPC's attitude by one step after how the party treated them.", obj(map[string]any{
-			"npc_id": str("npc id"), "delta": num("-1 or +1", -1, 1)}, "npc_id", "delta")),
+			"npc_id": str("npc id"), "delta": num("-1 or +1", -1, 1), "reason": str("what the party did, under 15 words")}, "npc_id", "delta", "reason")),
 		tool(DirNPCGivesItem, "An NPC here hands one of their own items to a character as a gift.", obj(map[string]any{
 			"npc_id": str("npc id"), "item_id": str("item id owned by that npc"), "to": str("character id")}, "npc_id", "item_id", "to")),
-		tool(DirRecordLore, "Record a fact established in play for the party's journal.", obj(map[string]any{"text": str("one sentence")}, "text")),
+		tool(DirRecordLore, "Record a fact established in play, for the party's journal and the world's memory. Use kind promise when a character gives their word to someone (a promise, a deal, a debt), deed for something the party did that people will talk about, rumor for hearsay.", obj(map[string]any{
+			"text":    str("one sentence, naming who and what"),
+			"kind":    enum("kind of fact", game.FactKinds...),
+			"npc_ids": arr(str("npc id"), "the NPCs this is about or was promised to")}, "text")),
+		tool(DirResolvePromise, "Settle one of the party's open promises (WORLD MEMORY) once the party clearly kept or broke it.", obj(map[string]any{
+			"promise_id": str("id from PARTY'S OPEN PROMISES, e.g. fact3"),
+			"outcome":    enum("result", game.PromiseKept, game.PromiseBroken),
+			"note":       str("what happened, one short sentence")}, "promise_id", "outcome")),
 		tool(DirAdjustTension, "Raise or lower the scene's tension.", obj(map[string]any{"delta": num("-2..2", -2, 2)}, "delta")),
 		tool(DirEndEncounter, "Remaining enemies flee or surrender, ending the fight (no rewards).", obj(map[string]any{"reason": str("why")}, "reason")),
 	}
