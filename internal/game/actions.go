@@ -277,7 +277,17 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	switch a.Kind {
 	case ActLook:
-		st.Info = append(st.Info, Look(w, c, a.Target)...)
+		facts := Look(w, c, a.Target)
+		if len(facts) == 0 && a.Target != "" {
+			// answer about the thing asked for, not the whole place
+			st.Info = append(st.Info, fmt.Sprintf("%s looks for %s but finds nothing like it here", c.Name, trimTo(a.Target, 60)))
+			return nil
+		}
+		st.Info = append(st.Info, facts...)
+		// examining someone counts as meeting them (talk_to_npc objectives)
+		if n := w.NPC(a.Target); n != nil && n.Alive && n.LocationID == w.Campaign.LocationID {
+			n.LastTalked = w.Campaign.Turn
+		}
 		return nil
 	case ActSay:
 		if strings.TrimSpace(a.Text) == "" {
@@ -389,6 +399,9 @@ func Look(w *World, c *Character, target string) []string {
 		if x := w.FindExit(l.ID, target); x != nil {
 			return []string{fmt.Sprintf("Exit %s leads to %s (%s). %s", x.Label, x.To.Name, x.Edge.State, x.To.Hint)}
 		}
+		if !lookAround(target) && !NameMatch(l.Name, target) {
+			return nil // nothing by that name is here
+		}
 	}
 	facts := []string{fmt.Sprintf("%s: %s", l.Name, l.Description)}
 	if z := l.Zone(c.ZoneID); z != nil {
@@ -409,6 +422,17 @@ func Look(w *World, c *Character, target string) []string {
 		}
 	}
 	return facts
+}
+
+// lookAround reports whether a look target just means the surroundings.
+func lookAround(target string) bool {
+	t := strings.ToLower(strings.TrimSpace(target))
+	t = strings.TrimPrefix(strings.TrimPrefix(t, "the "), "my ")
+	switch t {
+	case "", "around", "here", "room", "area", "place", "surroundings", "everything", "everyone", "scene", "location", "town", "street", "it all":
+		return true
+	}
+	return false
 }
 
 func talkTo(w *World, c *Character, a Action, st *Step) error {

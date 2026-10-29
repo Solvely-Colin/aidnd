@@ -33,7 +33,13 @@ type CampaignSpec struct {
 		Description string `json:"description"`
 	} `json:"hub"`
 	HubNPCs []game.NPCSpec `json:"hub_npcs"`
-	Places  []struct {
+	// Cast are the people, creatures and remains that objectives and lore
+	// talk about, placed so the engine knows where they are.
+	Cast []struct {
+		game.NPCSpec
+		At string `json:"at"`
+	} `json:"cast"`
+	Places []struct {
 		Name       string `json:"name"`
 		Hint       string `json:"hint"`
 		Kind       string `json:"kind"`
@@ -71,6 +77,12 @@ type CampaignSpec struct {
 		Target  string   `json:"target"`
 		Value   int      `json:"value"`
 		Effects []string `json:"effects"`
+		Figure  *struct {
+			Name    string `json:"name"`
+			Role    string `json:"role"`
+			Desc    string `json:"desc"`
+			Hostile bool   `json:"hostile"`
+		} `json:"figure"`
 	} `json:"beats"`
 }
 
@@ -85,10 +97,13 @@ func createCampaignTool() llm.Tool {
 		"antagonist": obj(map[string]any{"name": str("name"), "role": str("what they are"), "desc": str("public description"), "motive": str("SECRET: their plan")}, "name", "role", "motive"),
 		"hub":        obj(map[string]any{"name": str("starting town or base"), "kind": enum("kind", game.KindTown, game.KindBuilding), "description": str("2-3 sentences")}, "name", "description"),
 		"hub_npcs":   arr(npc, "2-4 NPCs at the hub; include one merchant and one quest giver"),
-		"places":     arr(place, "3-5 places around the hub, revealed as stubs"),
-		"lair":       obj(map[string]any{"name": str("antagonist's lair"), "hint": str("rumour"), "connects_to": str("name of a place (not the hub)")}, "name", "connects_to"),
+		"cast": arr(obj(map[string]any{"name": str("name, e.g. The Returned Fishermen"), "role": str("what they are"), "desc": str("one sentence"),
+			"disposition": num("-3..3", -3, 3), "at": str("hub or place name where they are")}, "name", "role", "at"),
+			"every other person, group, creature or body that the objectives, beats or lore say the party can find, talk to or examine (0-4). Anything not listed here or in hub_npcs does not exist in the game"),
+		"places": arr(place, "3-5 places around the hub, revealed as stubs"),
+		"lair":   obj(map[string]any{"name": str("antagonist's lair"), "hint": str("rumour"), "connects_to": str("name of a place (not the hub)")}, "name", "connects_to"),
 		"main_quest": obj(map[string]any{"title": str("storyline title"), "summary": str("summary"),
-			"objectives": arr(objectiveSchema, "3-5 ordered objectives; use reach_location/talk_to_npc/obtain_item/defeat_enemy with targets naming places/NPCs above; the last must be defeat_enemy targeting the antagonist")}, "title", "objectives"),
+			"objectives": arr(objectiveSchema, "3-5 ordered objectives; use reach_location/talk_to_npc/obtain_item/defeat_enemy with targets naming places/NPCs/cast above; the first should be talk_to_npc with the hub's quest giver, worded as hearing their request; the last must be defeat_enemy targeting the antagonist")}, "title", "objectives"),
 		"side_quest": obj(map[string]any{"title": str("title"), "summary": str("summary"), "giver": str("hub NPC name"),
 			"objectives": arr(objectiveSchema, "1-2 objectives"), "reward_gold": num("gold", 0, 80), "reward_xp": num("xp", 0, 150)}, "title", "giver", "objectives"),
 		"lore": arr(obj(map[string]any{"title": str("title"), "text": str("SECRET canon truth, 1-3 sentences"),
@@ -97,7 +112,9 @@ func createCampaignTool() llm.Tool {
 			"trigger": enum("trigger", game.TriggerEnterLocation, game.TriggerObjectiveDone, game.TriggerStalled, game.TriggerTension, game.TriggerTurn),
 			"target":  str("place name (enter_location) or main objective number (objective_done)"),
 			"value":   num("threshold for stalled/tension/turn", 0, 100),
-			"effects": arr(enum("effect", game.EffectAmbush, game.EffectRevealExit, game.EffectBringNPC), "optional effects")}, "title", "text", "trigger"), "3-6 story beats"),
+			"effects": arr(enum("effect", game.EffectAmbush, game.EffectRevealExit, game.EffectBringNPC), "optional effects"),
+			"figure":  obj(map[string]any{"name": str("name"), "role": str("what it is"), "desc": str("one sentence"), "hostile": boolean("attacks on arrival")}, "name", "role"),
+		}, "title", "text", "trigger"), "3-6 story beats. A beat in which someone or something new shows up (e.g. drowned figures wading ashore) must name it as figure, so it becomes real when the beat plays"),
 	}, "title", "antagonist", "hub", "hub_npcs", "places", "lair", "main_quest", "lore", "beats"))
 }
 
@@ -233,6 +250,16 @@ func (g *GM) buildCampaign(id, premise string, spec CampaignSpec) (*game.World, 
 	if !w.Connected() {
 		return nil, []string{"places do not form a connected map"}
 	}
+	for i, cs := range spec.Cast {
+		if i >= 4 || strings.TrimSpace(cs.Name) == "" || w.NPC(cs.Name) != nil {
+			continue
+		}
+		at := w.Location(cs.At)
+		if at == nil || at.IsLair || game.NameContains(cs.At, spec.Hub.Name) {
+			at = hub
+		}
+		game.AddNPC(w, at.ID, game.NPCSpec{Name: cs.Name, Role: cs.Role, Desc: cs.Desc, Disposition: cs.Disposition})
+	}
 	ant := game.AddNPC(w, lair.ID, game.NPCSpec{Name: spec.Antagonist.Name, Role: firstOf(spec.Antagonist.Role, "villain"), Desc: spec.Antagonist.Desc, Disposition: -3})
 	ant.Antagonist = true
 	ant.Stats = &game.StatBlock{MaxHP: 45, AC: 15, AttackBonus: 6, Damage: "2d6+3"}
@@ -328,8 +355,23 @@ func (g *GM) buildCampaign(id, premise string, spec CampaignSpec) (*game.World, 
 			continue
 		}
 		for _, e := range b.Effects {
-			if e == game.EffectAmbush || e == game.EffectRevealExit || e == game.EffectBringNPC {
+			if e == game.EffectAmbush || e == game.EffectRevealExit || (e == game.EffectBringNPC && b.Figure != nil) {
 				beat.Effects = append(beat.Effects, e)
+			}
+		}
+		if f := b.Figure; f != nil && strings.TrimSpace(f.Name) != "" {
+			// the figure waits offstage until the beat brings it in
+			n := w.NPC(f.Name)
+			if n == nil || !game.NameMatch(n.Name, f.Name) {
+				n = game.AddNPC(w, "", game.NPCSpec{Name: f.Name, Role: firstOf(f.Role, "stranger"), Desc: f.Desc})
+			}
+			if !n.Antagonist {
+				beat.EffectTarget = n.ID
+				beat.Effects = withEffect(beat.Effects, game.EffectBringNPC)
+				if f.Hostile {
+					n.Disposition = -3
+					beat.Effects = withEffect(beat.Effects, game.EffectAmbush)
+				}
 			}
 		}
 		w.Beats = append(w.Beats, beat)
@@ -338,6 +380,20 @@ func (g *GM) buildCampaign(id, premise string, spec CampaignSpec) (*game.World, 
 	w.Beats = append(w.Beats, &game.Beat{ID: w.NewID("beat"), Title: "The confrontation", Trigger: game.TriggerEnterLocation, Target: lair.ID,
 		Text: ant.Name + " is here and confronts the party. Make the stakes plain.", Effects: []string{game.EffectAmbush}, EffectTarget: ant.ID})
 	return w, nil
+}
+
+// withEffect adds e once, keeping bring_npc ahead of ambush so a figure
+// is on the scene before it attacks.
+func withEffect(es []string, e string) []string {
+	for _, x := range es {
+		if x == e {
+			return es
+		}
+	}
+	if e == game.EffectBringNPC {
+		return append([]string{e}, es...)
+	}
+	return append(es, e)
 }
 
 func connectedToHub(w *game.World, loc string) bool {

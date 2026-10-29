@@ -116,7 +116,7 @@ func (g *GM) direct(ctx context.Context, w *game.World, res *game.Resolution, re
 		if b := pickBeat(w, res); b != nil {
 			b.Fired, b.FiredTurn = true, w.Campaign.Turn
 			d.Beat = b
-			d.BeatChanges = g.applyBeat(ctx, w, b)
+			d.BeatChanges = g.applyBeat(ctx, w, b, w.Character(res.ActorID))
 			sc.Quiet = 0
 			if len(d.BeatChanges) > 0 {
 				d.ForceProgress = false // the beat itself moved the story
@@ -256,7 +256,7 @@ func safeHere(w *game.World) bool {
 	return l != nil && l.IsHub && l.Danger == 0
 }
 
-func (g *GM) applyBeat(ctx context.Context, w *game.World, b *game.Beat) []string {
+func (g *GM) applyBeat(ctx context.Context, w *game.World, b *game.Beat, actor *game.Character) []string {
 	var changes []string
 	l := w.Here()
 	for _, e := range b.Effects {
@@ -300,7 +300,10 @@ func (g *GM) applyBeat(ctx context.Context, w *game.World, b *game.Beat) []strin
 				continue
 			}
 			n.LocationID = l.ID
-			if len(l.Zones) > 0 {
+			switch {
+			case actor != nil && l.Zone(actor.ZoneID) != nil:
+				n.ZoneID = actor.ZoneID // they arrive where the scene is
+			case len(l.Zones) > 0:
 				n.ZoneID = l.Zones[0].ID
 			}
 			changes = append(changes, fmt.Sprintf("%s arrives", n.Name))

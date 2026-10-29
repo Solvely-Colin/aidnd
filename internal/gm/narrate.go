@@ -3,6 +3,7 @@ package gm
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Solvely-Colin/aidnd/internal/game"
@@ -19,12 +20,13 @@ Rules:
 - Enemies act only through engine-resolved lines. Do not invent enemy movement, attacks or hits.
 - Do not end with a question or a menu of options ("What do you do? A, B or C"). End on the situation.
 - Do not hand the spotlight to the next player or say whose turn it is.
+- Write as a storyteller, never as the engine: no game words (zone, exit, NPC, attitude, disposition, HP, AC, budget, action, step, engine, state) and no lists of who is where. Say "across the green" or "down by the steps", not "one zone off".
 - 40-100 words, plain language, lead with what happened. Second person plural or character names; present tense.
 - You may change the world only through the provided directive tools; code validates them. You cannot change player HP or gold.
 - Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.`
 
 const quickSystem = `You are the narrator of a fantasy tabletop game. The player took only free actions (looking, a remark, readying gear).
-Answer briefly in at most 60 words using only the facts given. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
+Answer briefly in at most 60 words using only the facts given, as a storyteller: no game words (zone, exit, NPC, attitude, HP, budget, action, engine) and no lists of who is where; answer the question asked, not everything in the state. If what they look for is not there, say so plainly. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
 
 // narration is the narrator's output for one turn.
 type narration struct {
@@ -63,6 +65,8 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		}
 		if out.Text == "" {
 			out.Text = fallbackNarration(res)
+		} else {
+			out.Text = g.dejargon(ctx, out.Text)
 		}
 		return out
 	}
@@ -162,8 +166,28 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		if len(out.Changes) > 0 {
 			textOut += " " + strings.Join(out.Changes, ". ") + "."
 		}
+	} else {
+		textOut = g.dejargon(ctx, textOut)
 	}
 	out.Text = textOut
+	return out
+}
+
+var jargonRe = regexp.MustCompile(`(?i)\b(zones?|npcs?|disposition|hit points|HP|the engine)\b`)
+
+// dejargon rewrites narration that slipped into game terms. It keeps the
+// original when the rewrite fails or still reads like the engine.
+func (g *GM) dejargon(ctx context.Context, text string) string {
+	if !jargonRe.MatchString(text) {
+		return text
+	}
+	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "dejargon", Temperature: 0.3, MaxTokens: 300, Messages: []llm.Message{
+		llm.System("Rewrite the passage as a storyteller would say it. Keep every fact, name and number. Replace game terms (zone, NPC, disposition, HP, engine) with natural description, e.g. \"one zone off\" becomes \"across the green\". Same length or shorter. No questions."),
+		llm.User(text)}})
+	out := strings.TrimSpace(resp.Content)
+	if err != nil || out == "" || jargonRe.MatchString(out) {
+		return text
+	}
 	return out
 }
 

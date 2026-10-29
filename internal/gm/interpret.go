@@ -256,9 +256,8 @@ func validateAction(w *game.World, c *game.Character, a *game.Action) string {
 	}
 	switch a.Kind {
 	case game.ActLook:
-		if a.Target != "" && len(game.Look(w, c, a.Target)) == 0 {
-			a.Target = ""
-		}
+		// an unknown target stays, so the engine can say it is not here
+		// instead of describing the whole place
 	case game.ActSay:
 		if strings.TrimSpace(a.Text) == "" {
 			return "text is required"

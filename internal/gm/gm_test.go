@@ -983,3 +983,88 @@ func TestCharacterNamesStayUnique(t *testing.T) {
 		t.Fatalf("draft reused a party name: %q", d.Name)
 	}
 }
+
+func TestCastAndBeatFiguresBecomeRealNPCs(t *testing.T) {
+	r := newRig(t, 0, 1)
+	spec := fallbackSpec("")
+	spec.Cast = append(spec.Cast, struct {
+		game.NPCSpec
+		At string `json:"at"`
+	}{game.NPCSpec{Name: "The Returned Fishermen", Role: "three gilled fishermen"}, "Harrowmere"},
+		struct {
+			game.NPCSpec
+			At string `json:"at"`
+		}{game.NPCSpec{Name: "Old Hermit", Role: "marsh hermit"}, "Reedmarsh"})
+	spec.MainQuest.Objectives = append([]game.ObjectiveSpec{{Kind: game.ObjTalkToNPC, Text: "Examine the returned fishermen", Target: "The Returned Fishermen"}}, spec.MainQuest.Objectives...)
+	spec.Beats[0].Figure = &struct {
+		Name    string `json:"name"`
+		Role    string `json:"role"`
+		Desc    string `json:"desc"`
+		Hostile bool   `json:"hostile"`
+	}{Name: "Drowned Choir", Role: "singing dead", Hostile: false}
+	w, p := r.g.buildCampaign("c9", "premise", spec)
+	if len(p) > 0 {
+		t.Fatal(p)
+	}
+	fish, hermit, choir := w.NPC("The Returned Fishermen"), w.NPC("Old Hermit"), w.NPC("Drowned Choir")
+	if fish == nil || fish.LocationID != w.Campaign.HubID {
+		t.Fatalf("fishermen not at the hub: %+v", fish)
+	}
+	if hermit == nil || hermit.LocationID != w.Location("Reedmarsh").ID {
+		t.Fatalf("hermit not in the marsh: %+v", hermit)
+	}
+	if o := w.MainQuest().Objectives[0]; o.Target != fish.ID {
+		t.Fatalf("objective not tied to the fishermen: %+v", o)
+	}
+	b := w.Beats[0]
+	if choir == nil || choir.LocationID != "" || b.EffectTarget != choir.ID || b.Effects[0] != game.EffectBringNPC {
+		t.Fatalf("figure not waiting offstage for its beat: %+v %+v", choir, b)
+	}
+}
+
+func TestBeatFigureArrivesInTheActorsZone(t *testing.T) {
+	r := newRig(t, 1, 1)
+	w := r.start(t)
+	l := w.Here()
+	actor := w.ActiveCharacter()
+	actor.ZoneID = l.Zones[len(l.Zones)-1].ID
+	choir := game.AddNPC(w, "", game.NPCSpec{Name: "Drowned Choir", Role: "singing dead"})
+	b := &game.Beat{ID: "b9", Title: "Ashore", Text: "The Drowned Choir wades out of the fog.", Effects: []string{game.EffectBringNPC}, EffectTarget: choir.ID}
+	ch := r.g.applyBeat(bg, w, b, actor)
+	if choir.LocationID != l.ID || choir.ZoneID != actor.ZoneID || len(ch) == 0 {
+		t.Fatalf("choir at %s/%s, changes %v", choir.LocationID, choir.ZoneID, ch)
+	}
+}
+
+func TestLookAtSomethingAbsentOrSomeone(t *testing.T) {
+	r := newRig(t, 1, 1)
+	w := r.start(t)
+	r.f.Default("narrate_quick", llm.Text("Nothing like that here."))
+	res := r.act(t, "u1", "I examine the gills", llm.Call("look", map[string]any{"target": "gills"}))
+	info := strings.Join(res.Resolution.Steps[0].Info, " | ")
+	if !strings.Contains(info, "finds nothing like it here") || strings.Contains(info, w.Here().Description) {
+		t.Fatalf("absent look described the place: %s", info)
+	}
+	corbin := w.NPC("Elder Corbin")
+	q, err := game.AddQuest(w, game.QuestSpec{Title: "See him", GiverID: "Tamsin Hale", Objectives: []game.ObjectiveSpec{{Kind: game.ObjTalkToNPC, Text: "Examine Corbin", Target: corbin.ID}}}, false)
+	must(t, err)
+	_, err = game.AcceptQuest(w, q.ID)
+	must(t, err)
+	_, err = r.g.Store.Save(bg, w)
+	must(t, err)
+	r.act(t, "u1", "I study the elder", llm.Call("look", map[string]any{"target": corbin.ID}))
+	if !r.world(t).Quest(q.ID).Objectives[0].Done {
+		t.Fatal("examining the NPC did not complete the talk_to_npc objective")
+	}
+}
+
+func TestNarrationLosesEngineWords(t *testing.T) {
+	r := newRig(t, 1, 1)
+	r.start(t)
+	r.f.Default("narrate_quick", llm.Text("Brim stands with the elder. Tamsin is one zone off."))
+	r.f.On("dejargon", llm.Text("Brim stands with the elder. Tamsin works across the square."))
+	res := r.act(t, "u1", "where is everyone?", llm.Call("look", map[string]any{}))
+	if strings.Contains(res.Narration, "zone") || !strings.Contains(res.Narration, "across the square") {
+		t.Fatalf("narration kept engine words: %q", res.Narration)
+	}
+}

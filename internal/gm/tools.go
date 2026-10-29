@@ -174,8 +174,8 @@ var enemySchema = obj(map[string]any{
 
 var objectiveSchema = obj(map[string]any{
 	"kind":       enum("objective type", game.ObjectiveKinds...),
-	"text":       str("short player-facing description"),
-	"target":     str("location id/name, enemy name, item name, or npc id/name depending on kind"),
+	"text":       str("short player-facing description of exactly the one action that completes it, e.g. \"Ask Constable Vane about the drownings\" for talk_to_npc; never two actions in one objective"),
+	"target":     str("location id/name, enemy name, item name, or npc id/name depending on kind; talk_to_npc is done by talking to or examining that NPC"),
 	"deliver_to": str("npc id/name for deliver_item"),
 }, "kind", "text")
 
