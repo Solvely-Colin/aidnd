@@ -71,11 +71,16 @@ type Roll struct {
 	Against string     `json:"against,omitempty"` // "AC" or "DC" for d20 rolls
 	Cover   int        `json:"cover,omitempty"`   // cover bonus included in Target
 	Crit    bool       `json:"crit,omitempty"`    // damage dice were doubled
+	// Edge is advantage or disadvantage, Naturals both d20s, EdgeWhy the
+	// conditions behind it.
+	Edge     string `json:"edge,omitempty"`
+	Naturals []int  `json:"naturals,omitempty"`
+	EdgeWhy  string `json:"edge_why,omitempty"`
 }
 
 func checkRoll(kind string, c CheckRoll) Roll {
 	return Roll{Label: c.Label, Kind: kind, Natural: c.Natural, Mod: c.Mod, Total: c.Total, Target: c.Target, Tier: c.Tier,
-		Parts: c.Parts, Against: c.Against, Cover: c.Cover}
+		Parts: c.Parts, Against: c.Against, Cover: c.Cover, Edge: c.Edge, Naturals: c.Naturals, EdgeWhy: c.EdgeWhy}
 }
 
 func dmgRoll(label, kind string, r dice.Result) Roll {
@@ -534,6 +539,12 @@ func reposition(w *World, c *Character, zoneRef string, st *Step) error {
 	if ZoneDistance(l, c.ZoneID, z.ID) < 0 && c.ZoneID != "" {
 		return fmt.Errorf("can't reach %s from here", z.Name)
 	}
+	if err := CanMove(c.Conditions); err != nil {
+		return fmt.Errorf("%s is %v", c.Name, err)
+	}
+	if fz, ok := frightOf(w, c.Conditions); ok && ZoneDistance(l, z.ID, fz) < ZoneDistance(l, c.ZoneID, fz) {
+		return fmt.Errorf("%s is too frightened to move closer to %s", c.Name, c.Conditions.Get(CondFrightened).Source)
+	}
 	c.ZoneID = z.ID
 	line := fmt.Sprintf("%s moves to %s", c.Name, z.Name)
 	if st.Slot == SlotDash {
@@ -551,6 +562,9 @@ func moveThrough(ctx *Ctx, c *Character, ref string, st *Step) error {
 		return fmt.Errorf("no exit %q here", ref)
 	}
 	e := x.Edge
+	if err := CanMove(c.Conditions); err != nil {
+		return fmt.Errorf("%s is %v", c.Name, err)
+	}
 	if e.State == EdgeLocked {
 		if KeyFits(w, c, e) {
 			e.State = EdgeKnown
@@ -567,6 +581,7 @@ func moveThrough(ctx *Ctx, c *Character, ref string, st *Step) error {
 		}
 		st.Changes = append(st.Changes, fmt.Sprintf("%s leads the party in a retreat to %s", c.Name, x.To.Name))
 		w.Encounter = nil
+		ClearFightConditions(w)
 		AdjustTension(w, -1)
 	}
 	arrive(ctx, x.To, e, st)
@@ -670,6 +685,11 @@ func travel(ctx *Ctx, c *Character, ref string, st *Step) error {
 	if dest == nil {
 		return fmt.Errorf("unknown destination %q", ref)
 	}
+	for _, ch := range w.Party() {
+		if err := CanMove(ch.Conditions); err != nil {
+			return fmt.Errorf("%s is %v", ch.Name, err)
+		}
+	}
 	path, err := w.TravelPath(w.Campaign.LocationID, dest.ID)
 	if err != nil {
 		return err
@@ -729,12 +749,13 @@ func npcAsEnemy(w *World, n *NPC) *Enemy {
 		sb = *n.Stats
 	}
 	ClampStatBlock(&sb, CapsFor(max(1, w.Here().Danger), w.PartyLevel()))
+	sb.Inflicts, _ = NormalizeInflict(sb.Inflicts, w.Here().Danger)
 	if w.InCombat() {
 		e := &Enemy{ID: w.NewID("foe"), Name: n.Name, NPCID: n.ID, StatBlock: sb, HP: sb.MaxHP, ZoneID: n.ZoneID}
 		w.Encounter.Enemies = append(w.Encounter.Enemies, e)
 		return e
 	}
-	enc, _, err := StartEncounter(w, []EnemySpec{{Name: n.Name, NPCID: n.ID, HP: sb.MaxHP, AC: sb.AC, AttackBonus: sb.AttackBonus, Damage: sb.Damage, Ranged: sb.Ranged}})
+	enc, _, err := StartEncounter(w, []EnemySpec{{Name: n.Name, NPCID: n.ID, HP: sb.MaxHP, AC: sb.AC, AttackBonus: sb.AttackBonus, Damage: sb.Damage, Ranged: sb.Ranged, Inflicts: sb.Inflicts}})
 	if err != nil {
 		return nil
 	}
@@ -797,7 +818,8 @@ func attack(ctx *Ctx, c *Character, a Action, st *Step) error {
 	}
 	toHit, _ := AttackMod(c, wpn)
 	cover := CoverBonus(l, c.ZoneID, e.ZoneID)
-	out := Attack(ctx.R, fmt.Sprintf("%s attacks %s with %s", c.Name, e.Display(), wpn.Name), toHit, e.AC+cover, wpn.Damage)
+	edge, why := AttackEdge(c.Conditions, e.Conditions, d)
+	out := AttackWithEdge(ctx.R, fmt.Sprintf("%s attacks %s with %s", c.Name, e.Display(), wpn.Name), toHit, e.AC+cover, wpn.Damage, edge, why)
 	out.Roll.Parts, out.Roll.Cover = AttackParts(c, wpn), cover
 	st.Rolls = append(st.Rolls, checkRoll("attack", out.Roll))
 	st.Tier = out.Roll.Tier
@@ -844,9 +866,14 @@ func subdue(ctx *Ctx, c *Character, a Action, st *Step) error {
 		return fmt.Errorf("%s is %s away; get closer to %s it", e.Display(), zonesWord(d), strings.ReplaceAll(method, "_", " "))
 	}
 	dc := SubdueDC(e)
-	ch := ctx.R.D20(c.CheckMod(ab), dc)
+	if e.Conditions.Has(CondStunned) || e.Conditions.Has(CondRestrained) {
+		dc -= 2 // easier to pin or talk down a foe that can't fight back
+	}
+	edge, why := checkEdge(c.Conditions)
+	ch := ctx.R.D20Edge(c.CheckMod(ab), dc, edge)
 	st.Rolls = append(st.Rolls, Roll{Label: fmt.Sprintf("%s tries to %s %s (%s)", c.Name, strings.ReplaceAll(method, "_", " "), e.Display(), ab),
-		Kind: "subdue", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: CheckParts(c, ab), Against: "DC"})
+		Kind: "subdue", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: CheckParts(c, ab), Against: "DC",
+		Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: why})
 	st.Tier = ch.Tier
 	if !ch.Tier.Succeeded() {
 		st.Changes = append(st.Changes, fmt.Sprintf("%s fails to subdue %s", c.Name, e.Display()))
@@ -907,6 +934,7 @@ func endEncounter(w *World) []string {
 		danger = max(1, l.Danger)
 	}
 	w.Encounter = nil
+	ClearFightConditions(w)
 	changes := []string{"The fight is won"}
 	for _, c := range w.Characters {
 		changes = append(changes, AwardXP(c, XPPerDanger*danger)...)
@@ -922,6 +950,7 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	purpose := strings.ToLower(a.Purpose)
 	ab, ok := ParseAbility(a.Ability)
 	var lockEdge *Edge
+	escapeDC := 0
 	switch purpose {
 	case "unlock", "force", "open":
 		x := w.FindExit(l.ID, a.Target)
@@ -948,6 +977,18 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 				ab = STR
 			}
 		}
+	case "escape":
+		r := c.Conditions.Get(CondRestrained)
+		if r == nil {
+			return fmt.Errorf("%s isn't restrained", c.Name)
+		}
+		if !ok || (ab != STR && ab != DEX) {
+			ab = STR
+			if c.Mod(DEX) > c.Mod(STR) {
+				ab = DEX
+			}
+		}
+		escapeDC = max(10, r.SaveDC)
 	case "search":
 		if !ok {
 			ab = WIS
@@ -975,11 +1016,19 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 			label += " with thieves' tools"
 		}
 	}
+	if escapeDC > 0 {
+		dc = escapeDC
+		if a.Text == "" {
+			a.Text = "break free"
+		}
+	}
 	if a.Text != "" {
 		label += " to " + trimTo(a.Text, 60)
 	}
-	ch := ctx.R.D20(mod, dc)
-	st.Rolls = append(st.Rolls, Roll{Label: label, Kind: "check", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: parts, Against: "DC"})
+	edge, why := checkEdge(c.Conditions)
+	ch := ctx.R.D20Edge(mod, dc, edge)
+	st.Rolls = append(st.Rolls, Roll{Label: label, Kind: "check", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: parts, Against: "DC",
+		Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: why})
 	st.Tier = ch.Tier
 	switch ch.Tier {
 	case dice.CritFailure:
@@ -990,6 +1039,11 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 		return nil
 	}
 	st.Changes = append(st.Changes, fmt.Sprintf("%s's %s check succeeds (%d vs DC %d)", c.Name, ab, ch.Total, dc))
+	if escapeDC > 0 {
+		c.Conditions.remove(CondRestrained)
+		st.Changes = append(st.Changes, fmt.Sprintf("%s breaks free", c.Name))
+		return nil
+	}
 	if lockEdge != nil {
 		lockEdge.State = EdgeKnown
 		st.Changes = append(st.Changes, fmt.Sprintf("The way to %s is open", w.Location(lockEdge.Other(l.ID)).Name))
@@ -1054,6 +1108,9 @@ func useItem(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if wasDown {
 		line += fmt.Sprintf("; %s is back on their feet", target.Name)
 	}
+	if strings.Contains(it.Effect, "revive") && target.Conditions.remove(CondPoisoned) {
+		line += fmt.Sprintf("; %s is no longer poisoned", target.Name)
+	}
 	st.Changes = append(st.Changes, line)
 	if it.Kind == ItemConsumable {
 		removeItem(w, it.ID)
@@ -1079,6 +1136,7 @@ func rest(ctx *Ctx, c *Character, st *Step) error {
 		return fmt.Errorf("you can't rest during a fight")
 	}
 	l := w.Here()
+	ClearAllConditions(w)
 	if l.Danger == 0 {
 		for _, ch := range w.Characters {
 			ch.HP = ch.MaxHP

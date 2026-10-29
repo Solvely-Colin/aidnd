@@ -106,12 +106,12 @@ func TestAttackHitMissCrit(t *testing.T) {
 func TestLevelUps(t *testing.T) {
 	f := newFixture(t)
 	a := f.aria
-	ch := AwardXP(a, 400)
+	ch := AwardXP(a, 800)
 	if a.Level != 3 || len(ch) != 3 {
 		t.Fatalf("level %d changes %v", a.Level, ch)
 	}
 	hp := a.MaxHP
-	AwardXP(a, 400) // 800 -> level 4, +2 STR
+	AwardXP(a, 800) // 1600 -> level 4, +2 STR
 	if a.Level != 4 || a.Scores[STR] != 17 || a.MaxHP <= hp {
 		t.Fatalf("level 4: lvl %d STR %d", a.Level, a.Scores[STR])
 	}
@@ -202,5 +202,27 @@ func TestArmorClassParts(t *testing.T) {
 	f.aria.Armor = ""
 	if p := ArmorClassParts(f.w, f.aria); p[0].Label != "Base" || p[0].Value != 10 {
 		t.Fatalf("unarmored %v", p)
+	}
+}
+
+// TestLevelPacing walks a typical opening leg of a campaign (the first
+// two main objectives, a side quest with its objectives, a few small
+// fights) and checks the party is still level 1 at the end of it, as the
+// 2026-10-29 play-test was already level 3 by then. One more leg of the
+// same size earns level 2; level 3 needs most of the main quest.
+func TestLevelPacing(t *testing.T) {
+	leg := 2*XPMainObjective + 2*XPSideObjective + XPSideQuest + 3*XPPerDanger*1
+	if LevelForXP(leg) != 1 {
+		t.Fatalf("one leg (%d XP) reaches level %d", leg, LevelForXP(leg))
+	}
+	if LevelForXP(2*leg) != 2 {
+		t.Fatalf("two legs (%d XP) reach level %d", 2*leg, LevelForXP(2*leg))
+	}
+	// a modest full campaign: the main quest (5 objectives), three side
+	// quests at the cap and
+	// a dozen danger-2 fights. Longer campaigns reach 4.
+	campaign := 5*XPMainObjective + 3*RewardCapsFor(2, 2, false).XP + 6*XPSideObjective + 12*XPPerDanger*2
+	if l := LevelForXP(campaign); l != 3 {
+		t.Fatalf("a full campaign (%d XP) reaches level %d, want 3", campaign, l)
 	}
 }

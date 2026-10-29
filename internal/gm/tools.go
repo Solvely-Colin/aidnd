@@ -71,7 +71,7 @@ func interpreterTools() []llm.Tool {
 		tool(game.ActCheck, "ACTION. An ability check for anything risky or uncertain: searching (finds hidden exits), picking or forcing a lock, climbing, sneaking, persuading, recalling lore under pressure.", obj(map[string]any{
 			"ability": abilityEnum,
 			"dc":      intEnum("difficulty: 5 trivial, 10 easy, 15 medium, 20 hard, 25 very hard", 5, 10, 15, 20, 25),
-			"purpose": enum("search reveals hidden exits; unlock/force targets a locked exit", "search", "unlock", "force", "other"),
+			"purpose": enum("search reveals hidden exits; unlock/force targets a locked exit; escape breaks free when the character is restrained (the engine sets that DC)", "search", "unlock", "force", "escape", "other"),
 			"target":  str("optional exit id for unlock/force"),
 			"text":    str("what the check is for, in a few words")}, "ability", "dc", "purpose", "text")),
 		tool(game.ActUseItem, "ACTION. Use an item: drink a potion, apply a healer's kit (can revive a downed ally), use a key or tools on a locked exit.", obj(map[string]any{
@@ -158,6 +158,7 @@ const (
 	DirResolvePromise = "resolve_promise"
 	DirAdjustTension  = "adjust_tension"
 	DirEndEncounter   = "end_encounter"
+	DirHazard         = "hazard"
 )
 
 // progressDirectives are the only tools offered when pacing forces progress.
@@ -171,6 +172,7 @@ var enemySchema = obj(map[string]any{
 	"attack_bonus": num("to-hit bonus", 0, 8),
 	"damage":       str("damage dice, e.g. 1d6+1"),
 	"ranged":       boolean("attacks from range"),
+	"inflicts":     enum("optional: a condition its hits force a save against (venom poisons, a charge knocks prone, webs or nets restrain, a dread wail frightens, a flash or spray blinds, a crushing blow stuns; stunned only where danger is 3+). Leave empty for ordinary foes", game.ConditionKinds...),
 	"npc_id":       str("optional: id of an NPC present who turns hostile"),
 }, "name", "hp", "ac", "attack_bonus", "damage")
 
@@ -187,7 +189,7 @@ var questSchema = map[string]any{
 	"giver_id":     str("id of the NPC offering it (must be present)"),
 	"objectives":   arr(objectiveSchema, "1-4 objectives"),
 	"reward_gold":  num("gold paid at turn-in", 0, 500),
-	"reward_xp":    num("xp at turn-in", 0, 300),
+	"reward_xp":    num("xp at turn-in (a level takes several hundred; 30-80 is typical)", 0, 150),
 	"reward_items": arr(obj(map[string]any{"key": str("catalog key, or empty"), "name": str("name for a custom item"), "kind": str("item kind"), "value": num("value in gold", 0, 500)}), "0-2 items held by the giver until turn-in"),
 }
 
@@ -221,6 +223,10 @@ func directiveTools() []llm.Tool {
 			"outcome":    enum("result", game.PromiseKept, game.PromiseBroken),
 			"note":       str("what happened, one short sentence")}, "promise_id", "outcome")),
 		tool(DirAdjustTension, "Raise or lower the scene's tension.", obj(map[string]any{"delta": num("-2..2", -2, 2)}, "delta")),
+		tool(DirHazard, "A danger in the scene threatens one character with a condition (a trap's poison needle, a collapsing floor knocking them prone, a snare, a horror that frightens). The engine rolls their save and decides; never narrate the outcome before the result. At most once per narration, never stunned.", obj(map[string]any{
+			"target":    str("character id"),
+			"condition": enum("condition threatened", game.CondPoisoned, game.CondProne, game.CondRestrained, game.CondFrightened, game.CondBlinded),
+			"cause":     str("what causes it, a few words")}, "target", "condition", "cause")),
 		tool(DirEndEncounter, "Remaining enemies flee or surrender, ending the fight (no rewards).", obj(map[string]any{"reason": str("why")}, "reason")),
 	}
 }

@@ -89,6 +89,9 @@ type Character struct {
 	Weapon     string    `json:"weapon,omitempty"` // equipped item id
 	Armor      string    `json:"armor,omitempty"`  // equipped item id
 	ZoneID     string    `json:"zone_id,omitempty"`
+	// Conditions are status effects (poisoned, prone...). Only the engine
+	// adds them: enemy attacks, validated hazards, and their own ticks.
+	Conditions Conditions `json:"conditions,omitempty"`
 }
 
 // Down reports whether the character is at 0 HP.
@@ -279,6 +282,9 @@ type StatBlock struct {
 	AttackBonus int    `json:"attack_bonus"`
 	Damage      string `json:"damage"` // dice notation
 	Ranged      bool   `json:"ranged,omitempty"`
+	// Inflicts is a condition a hit forces a save against (see
+	// NormalizeInflict); "" for none.
+	Inflicts string `json:"inflicts,omitempty"`
 }
 
 // Enemy is a combatant in the current encounter.
@@ -292,7 +298,8 @@ type Enemy struct {
 	ZoneID  string `json:"zone_id"`
 	Subdued bool   `json:"subdued,omitempty"`
 	// ActedRound is the last round this enemy took its turn in.
-	ActedRound int `json:"acted_round,omitempty"`
+	ActedRound int        `json:"acted_round,omitempty"`
+	Conditions Conditions `json:"conditions,omitempty"`
 }
 
 // Defeated reports whether the enemy is out of the fight.

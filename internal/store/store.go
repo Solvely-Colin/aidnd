@@ -264,9 +264,9 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 	}
 	for i, ch := range w.Characters {
 		if err := insert(ctx, tx, "characters", []string{"campaign_id", "id", "ord", "player_id", "name", "concept", "class", "kit", "backstory", "pronouns",
-			"scores", "proficient", "level", "xp", "hp", "max_hp", "gold", "weapon", "armor", "zone_id"},
+			"scores", "proficient", "level", "xp", "hp", "max_hp", "gold", "weapon", "armor", "zone_id", "conditions"},
 			id, ch.ID, i, ch.PlayerID, ch.Name, ch.Concept, ch.Class, ch.Kit, ch.Backstory, ch.Pronouns,
-			js(ch.Scores), js(nonNil(ch.Proficient)), ch.Level, ch.XP, ch.HP, ch.MaxHP, ch.Gold, ch.Weapon, ch.Armor, ch.ZoneID); err != nil {
+			js(ch.Scores), js(nonNil(ch.Proficient)), ch.Level, ch.XP, ch.HP, ch.MaxHP, ch.Gold, ch.Weapon, ch.Armor, ch.ZoneID, js(nonNil(ch.Conditions))); err != nil {
 			return err
 		}
 	}
@@ -305,8 +305,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 			return err
 		}
 		for i, e := range enc.Enemies {
-			if err := insert(ctx, tx, "enemies", []string{"campaign_id", "id", "ord", "name", "tag", "npc_id", "max_hp", "ac", "attack_bonus", "damage", "ranged", "hp", "zone_id", "subdued", "acted_round"},
-				id, e.ID, i, e.Name, e.Tag, e.NPCID, e.MaxHP, e.AC, e.AttackBonus, e.Damage, e.Ranged, e.HP, e.ZoneID, e.Subdued, e.ActedRound); err != nil {
+			if err := insert(ctx, tx, "enemies", []string{"campaign_id", "id", "ord", "name", "tag", "npc_id", "max_hp", "ac", "attack_bonus", "damage", "ranged", "hp", "zone_id", "subdued", "acted_round", "inflicts", "conditions"},
+				id, e.ID, i, e.Name, e.Tag, e.NPCID, e.MaxHP, e.AC, e.AttackBonus, e.Damage, e.Ranged, e.HP, e.ZoneID, e.Subdued, e.ActedRound, e.Inflicts, js(nonNil(e.Conditions))); err != nil {
 				return err
 			}
 		}
@@ -391,16 +391,16 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Players = append(w.Players, p)
 			return r.Scan(&p.ID, &p.Name, &p.CharacterID, &p.Token, &p.JoinedTurn)
 		}),
-		q(`SELECT id, player_id, name, concept, class, kit, backstory, pronouns, scores, proficient, level, xp, hp, max_hp, gold, weapon, armor, zone_id
+		q(`SELECT id, player_id, name, concept, class, kit, backstory, pronouns, scores, proficient, level, xp, hp, max_hp, gold, weapon, armor, zone_id, conditions
 			FROM characters WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			ch := &game.Character{}
-			var scores, prof string
+			var scores, prof, conds string
 			if err := r.Scan(&ch.ID, &ch.PlayerID, &ch.Name, &ch.Concept, &ch.Class, &ch.Kit, &ch.Backstory, &ch.Pronouns, &scores, &prof,
-				&ch.Level, &ch.XP, &ch.HP, &ch.MaxHP, &ch.Gold, &ch.Weapon, &ch.Armor, &ch.ZoneID); err != nil {
+				&ch.Level, &ch.XP, &ch.HP, &ch.MaxHP, &ch.Gold, &ch.Weapon, &ch.Armor, &ch.ZoneID, &conds); err != nil {
 				return err
 			}
 			w.Characters = append(w.Characters, ch)
-			return errors.Join(unjs(scores, &ch.Scores), unjs(prof, &ch.Proficient))
+			return errors.Join(unjs(scores, &ch.Scores), unjs(prof, &ch.Proficient), unjs(conds, &ch.Conditions))
 		}),
 		q(`SELECT id, name, kind, hint, description, danger, stub, visited, is_hub, is_lair, zones, last_day FROM locations WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			l := &game.Location{}
@@ -457,15 +457,16 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Encounter = &game.Encounter{}
 			return r.Scan(&w.Encounter.ID, &w.Encounter.LocationID, &w.Encounter.Round)
 		}),
-		q(`SELECT id, name, tag, npc_id, max_hp, ac, attack_bonus, damage, ranged, hp, zone_id, subdued, acted_round FROM enemies WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
+		q(`SELECT id, name, tag, npc_id, max_hp, ac, attack_bonus, damage, ranged, hp, zone_id, subdued, acted_round, inflicts, conditions FROM enemies WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			e := &game.Enemy{}
-			if err := r.Scan(&e.ID, &e.Name, &e.Tag, &e.NPCID, &e.MaxHP, &e.AC, &e.AttackBonus, &e.Damage, &e.Ranged, &e.HP, &e.ZoneID, &e.Subdued, &e.ActedRound); err != nil {
+			var conds string
+			if err := r.Scan(&e.ID, &e.Name, &e.Tag, &e.NPCID, &e.MaxHP, &e.AC, &e.AttackBonus, &e.Damage, &e.Ranged, &e.HP, &e.ZoneID, &e.Subdued, &e.ActedRound, &e.Inflicts, &conds); err != nil {
 				return err
 			}
 			if w.Encounter != nil {
 				w.Encounter.Enemies = append(w.Encounter.Enemies, e)
 			}
-			return nil
+			return unjs(conds, &e.Conditions)
 		}),
 		q(`SELECT id, title, text, keywords, entity_ids, always_on, last_trigger FROM lore WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			l := &game.Lore{}

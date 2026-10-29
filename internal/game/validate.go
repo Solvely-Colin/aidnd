@@ -147,7 +147,7 @@ type RewardCaps struct {
 func RewardCapsFor(danger, partyLevel int, main bool) RewardCaps {
 	d := clamp(danger, 1, 5)
 	l := clamp(partyLevel, 1, MaxLevel)
-	c := RewardCaps{Gold: 30*d + 20*l, XP: 100 + 25*d, Items: 2, ItemValue: 60 * (d + l)}
+	c := RewardCaps{Gold: 30*d + 20*l, XP: 40 + 15*d, Items: 2, ItemValue: 60 * (d + l)}
 	if main {
 		c.Gold *= 3
 		c.XP *= 2
@@ -215,8 +215,11 @@ func ValidateQuest(w *World, spec *QuestSpec, main bool) Problems {
 	if spec.RewardGold < 0 || spec.RewardGold > caps.Gold {
 		p = append(p, fmt.Sprintf("reward_gold must be 0..%d", caps.Gold))
 	}
-	if spec.RewardXP < 0 || spec.RewardXP > caps.XP {
+	switch {
+	case spec.RewardXP < 0 || spec.RewardXP > 2*caps.XP:
 		p = append(p, fmt.Sprintf("reward_xp must be 0..%d", caps.XP))
+	case spec.RewardXP > caps.XP:
+		spec.RewardXP = caps.XP // a little generous: trim rather than lose the quest
 	}
 	if len(spec.RewardItems) > caps.Items {
 		p = append(p, fmt.Sprintf("at most %d reward items", caps.Items))

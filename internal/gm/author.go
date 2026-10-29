@@ -108,7 +108,7 @@ func createCampaignTool() llm.Tool {
 		"main_quest": obj(map[string]any{"title": str("storyline title"), "summary": str("summary"),
 			"objectives": arr(objectiveSchema, "3-5 ordered objectives; use reach_location/talk_to_npc/obtain_item/defeat_enemy with targets naming places/NPCs/cast above; the first should be talk_to_npc with the hub's quest giver, worded as hearing their request; the last must be defeat_enemy targeting the antagonist")}, "title", "objectives"),
 		"side_quest": obj(map[string]any{"title": str("title"), "summary": str("summary"), "giver": str("hub NPC name"),
-			"objectives": arr(objectiveSchema, "1-2 objectives"), "reward_gold": num("gold", 0, 80), "reward_xp": num("xp", 0, 150)}, "title", "giver", "objectives"),
+			"objectives": arr(objectiveSchema, "1-2 objectives"), "reward_gold": num("gold", 0, 80), "reward_xp": num("xp (30-80 typical)", 0, 80)}, "title", "giver", "objectives"),
 		"lore": arr(obj(map[string]any{"title": str("title"), "text": str("SECRET canon truth, 1-3 sentences"),
 			"keywords": arr(str("keyword"), "words that make this relevant"), "always_on": boolean("always relevant (use for 1-2 core truths)")}, "title", "text"), "4-8 secret canon entries: the antagonist's plan, NPC motives, place history"),
 		"beats": arr(obj(map[string]any{"title": str("title"), "text": str("what happens, for the narrator"),

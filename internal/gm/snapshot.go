@@ -49,6 +49,9 @@ func sheetLine(w *game.World, c *game.Character) string {
 	if c.Down() {
 		st = " DOWN"
 	}
+	if cs := c.Conditions.String(); cs != "" {
+		st += " (" + cs + ")"
+	}
 	return fmt.Sprintf("%s [%s] (%s) %s L%d, HP %d/%d%s, AC %d, gold %d", c.Name, c.ID, game.NormPronouns(c.Pronouns), c.Class, c.Level, c.HP, c.MaxHP, st, game.ArmorClass(w, c), c.Gold)
 }
 
@@ -174,6 +177,12 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 			kind := "melee"
 			if e.Ranged {
 				kind = "ranged"
+			}
+			if e.Inflicts != "" {
+				kind += ", hits can leave targets " + e.Inflicts
+			}
+			if cs := e.Conditions.String(); cs != "" {
+				kind += ", currently " + cs
 			}
 			es = append(es, fmt.Sprintf("%s [%s] HP %d/%d, AC %d, %s, in %s%s", e.Display(), e.ID, e.HP, e.MaxHP, e.AC, kind, game.ZoneName(l, e.ZoneID), d))
 		}

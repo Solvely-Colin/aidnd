@@ -1264,3 +1264,52 @@ func TestTakeActionPublishesProgressBeforeSaving(t *testing.T) {
 		t.Fatalf("%d progress events were saved", n)
 	}
 }
+
+func TestHazardDirectiveRollsASaveAndRenarrates(t *testing.T) {
+	r := newRig(t, 1, 1)
+	r.start(t)
+	w := r.world(t)
+	ch := w.Characters[0]
+	r.g.Dice = dice.FromSource(dice.NewScripted(12, 2)) // the search roll, then a failed CON save
+	r.f.On("narrate", func(req llm.Request) (llm.Response, error) {
+		return llm.Response{Content: "A needle pricks your thumb.", ToolCalls: []llm.ToolCall{
+			llm.Call(DirHazard, map[string]any{"target": ch.ID, "condition": "poisoned", "cause": "a needle trap"}),
+			llm.Call(DirHazard, map[string]any{"target": ch.ID, "condition": "prone", "cause": "a second trap"}),
+		}}, nil
+	}, llm.Text("The needle's venom burns; Aria's hand goes numb."))
+	res := r.act(t, "u1", "I search the chest", llm.Call("ability_check", map[string]any{"ability": "WIS", "dc": 10, "purpose": "search", "text": "search the chest"}))
+	w = r.world(t)
+	if !w.Characters[0].Conditions.Has(game.CondPoisoned) || w.Characters[0].Conditions.Has(game.CondProne) {
+		t.Fatalf("conditions %v (only one hazard per narration)", w.Characters[0].Conditions)
+	}
+	if len(res.WorldRolls) != 1 || res.WorldRolls[0].Kind != "save" {
+		t.Fatalf("world rolls %+v", res.WorldRolls)
+	}
+	if res.Narration != "The needle's venom burns; Aria's hand goes numb." {
+		t.Fatalf("narration not rewritten after the save: %q", res.Narration)
+	}
+	if !strings.Contains(strings.Join(res.WorldChanges, "|"), "is poisoned") {
+		t.Fatalf("world changes %v", res.WorldChanges)
+	}
+}
+
+func TestStunnedCharacterLosesTheirTurn(t *testing.T) {
+	r := fightRig(t, 3, game.EnemySpec{Name: "Marsh Ghoul", HP: 30, AC: 25, AttackBonus: 0, Damage: "1d2"})
+	w := r.world(t)
+	w.Characters[1].Conditions = game.Conditions{{Kind: game.CondStunned, Rounds: 1}}
+	_, err := r.g.Store.Save(bg, w)
+	must(t, err)
+	res := r.act(t, "u1", "I wait", llm.Call("end_turn", map[string]any{}))
+	if res.NextActor == nil || res.NextActor.PlayerID != "u1" {
+		t.Fatalf("stunned Bram should be skipped: next %+v", res.NextActor)
+	}
+	if !strings.Contains(strings.Join(res.Conditions, "|"), "Bram is stunned and loses the turn") {
+		t.Fatalf("conditions %v", res.Conditions)
+	}
+	if w = r.world(t); w.Characters[1].Conditions.Has(game.CondStunned) {
+		t.Fatal("stun did not wear off")
+	}
+	if len(r.events(t, "conditions")) == 0 {
+		t.Fatal("conditions event")
+	}
+}

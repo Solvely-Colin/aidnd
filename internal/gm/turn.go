@@ -30,9 +30,12 @@ type TurnResult struct {
 	Narration      string           `json:"narration"`
 	Quick          bool             `json:"quick"`
 	WorldChanges   []string         `json:"world_changes,omitempty"`
+	WorldRolls     []game.Roll      `json:"world_rolls,omitempty"` // saves against a narrated hazard
 	EnemyTurns     []game.EnemyTurn `json:"enemy_turns,omitempty"`
 	EnemyNarration string           `json:"enemy_narration,omitempty"`
 	Setback        []string         `json:"setback,omitempty"`
+	Conditions     []string         `json:"conditions,omitempty"`      // condition changes at turn boundaries
+	ConditionRolls []game.Roll      `json:"condition_rolls,omitempty"` // saves made at turn boundaries
 	TurnEnded      bool             `json:"turn_ended"`
 	Budget         *game.Budget     `json:"budget,omitempty"`
 	Skipped        []game.Step      `json:"skipped,omitempty"`
@@ -164,10 +167,11 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	nar := g.narrate(ctx, w, actor, text, res, dir, recent, quick)
 	out.Narration = nar.Text
 	out.WorldChanges = append(append(out.WorldChanges, dir.BeatChanges...), nar.Changes...)
+	out.WorldRolls = nar.Rolls
 
 	evs := []store.Event{
 		store.NewEvent("player_action", playerID, map[string]any{"character_id": actor.ID, "character": actor.Name, "text": text, "hints": hints}),
-		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": res.Rolls(), "world_changes": out.WorldChanges}),
+		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": append(res.Rolls(), nar.Rolls...), "world_changes": out.WorldChanges}),
 		store.NewEvent("narration", "", map[string]any{"text": nar.Text, "quick": quick, "skipped": res.Skipped, "character_id": actor.ID}),
 	}
 	quests := append([]game.QuestUpdate{}, res.Quests...)
@@ -217,37 +221,61 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 // ErrBadRequest marks invalid input.
 var ErrBadRequest = fmt.Errorf("bad request")
 
-// endTurn runs enemy turns if in combat, handles a wipe, and advances to
-// the next actor.
+// endTurn ticks the actor's conditions, runs enemy turns if in combat,
+// handles a wipe, and advances to the next actor. A stunned character's
+// turn passes straight away (enemies act again before the next one).
 func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []store.Event {
 	var evs []store.Event
-	if w.InCombat() {
-		turns, _ := game.RunEnemyTurns(w, g.Dice)
-		if len(turns) > 0 {
-			out.EnemyTurns = turns
-			out.EnemyNarration = g.narrateEnemies(ctx, w, turns, out.Narration)
-			evs = append(evs, store.NewEvent("enemy_turns", "", map[string]any{"turns": turns, "narration": out.EnemyNarration}))
-		}
+	if actor := w.ActiveCharacter(); actor != nil {
+		evs = append(evs, conditionEvents(out, game.EndCharacterTurn(g.Dice, actor))...)
 	}
-	if game.AllDown(w) {
-		out.Setback = game.Setback(w)
-		evs = append(evs, store.NewEvent("narration", "", map[string]any{"text": strings.Join(out.Setback, " "), "setback": true}))
-		if w.Campaign.Status == game.StatusFailed {
+	for passes := 0; ; passes++ {
+		if w.InCombat() {
+			turns, _ := game.RunEnemyTurns(w, g.Dice)
+			if len(turns) > 0 {
+				out.EnemyTurns = append(out.EnemyTurns, turns...)
+				nar := g.narrateEnemies(ctx, w, turns, out.Narration)
+				out.EnemyNarration = strings.TrimSpace(out.EnemyNarration + "\n\n" + nar)
+				evs = append(evs, store.NewEvent("enemy_turns", "", map[string]any{"turns": turns, "narration": nar}))
+			}
+		}
+		if game.AllDown(w) {
+			out.Setback = game.Setback(w)
+			evs = append(evs, store.NewEvent("narration", "", map[string]any{"text": strings.Join(out.Setback, " "), "setback": true}))
+			if w.Campaign.Status == game.StatusFailed {
+				return evs
+			}
+			hub := w.Here()
+			evs = append(evs, store.NewEvent("location_changed", "", map[string]any{"location_id": hub.ID, "name": hub.Name}))
+		}
+		next := game.EndTurn(w, g.Now())
+		if next == nil {
+			out.Setback = append(out.Setback, game.Setback(w)...)
+			next = game.EndTurn(w, g.Now())
+		}
+		if next == nil {
 			return evs
 		}
-		hub := w.Here()
-		evs = append(evs, store.NewEvent("location_changed", "", map[string]any{"location_id": hub.ID, "name": hub.Name}))
+		tick := game.StartCharacterTurn(next, &w.Campaign.Turns.Budget)
+		evs = append(evs, conditionEvents(out, tick)...)
+		if !tick.LostTurn || passes >= len(w.Campaign.Turns.Order) {
+			out.NextActor = actorOf(next)
+			evs = append(evs, store.NewEvent("turn_started", next.PlayerID, map[string]any{"character_id": next.ID, "player_id": next.PlayerID, "name": next.Name, "budget": w.Campaign.Turns.Budget}))
+			return evs
+		}
+		// the stunned character's turn passes; their stun runs down now
+		evs = append(evs, conditionEvents(out, game.EndCharacterTurn(g.Dice, next))...)
 	}
-	next := game.EndTurn(w, g.Now())
-	if next == nil {
-		out.Setback = append(out.Setback, game.Setback(w)...)
-		next = game.EndTurn(w, g.Now())
+}
+
+// conditionEvents records condition changes on the result and as an event.
+func conditionEvents(out *TurnResult, t game.ConditionTick) []store.Event {
+	if len(t.Changes) == 0 {
+		return nil
 	}
-	if next != nil {
-		out.NextActor = actorOf(next)
-		evs = append(evs, store.NewEvent("turn_started", next.PlayerID, map[string]any{"character_id": next.ID, "player_id": next.PlayerID, "name": next.Name, "budget": w.Campaign.Turns.Budget}))
-	}
-	return evs
+	out.Conditions = append(out.Conditions, t.Changes...)
+	out.ConditionRolls = append(out.ConditionRolls, t.Rolls...)
+	return []store.Event{store.NewEvent("conditions", "", map[string]any{"changes": t.Changes, "rolls": t.Rolls, "lost_turn": t.LostTurn})}
 }
 
 // SkipMode says who is asking to skip.

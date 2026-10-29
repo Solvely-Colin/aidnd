@@ -96,3 +96,16 @@ func TestScriptedClampsAndRepeats(t *testing.T) {
 		t.Fatalf("repeat: %d", v)
 	}
 }
+
+func TestD20Edge(t *testing.T) {
+	r := FromSource(NewScripted(4, 17, 4, 17, 9))
+	if c := r.D20Edge(2, 15, 1); c.Natural != 17 || c.Total != 19 || c.Edge != Advantage || len(c.Naturals) != 2 || !c.Tier.Succeeded() {
+		t.Fatalf("advantage %+v", c)
+	}
+	if c := r.D20Edge(2, 15, -1); c.Natural != 4 || c.Edge != Disadvantage || c.Tier.Succeeded() {
+		t.Fatalf("disadvantage %+v", c)
+	}
+	if c := r.D20Edge(0, 10, 0); c.Natural != 9 || c.Edge != "" || c.Naturals != nil {
+		t.Fatalf("straight %+v", c)
+	}
+}
