@@ -1,5 +1,5 @@
-// Generated art: one cover per story (a place, never the party) and one
-// portrait per character. Images are made once with Workers AI and kept in
+// Generated art: one cover per story (a place, never the party), one
+// portrait per character and one picture per place the party reaches. Images are made once with Workers AI and kept in
 // R2. A request for an image that doesn't exist yet starts the generation
 // in the background and answers 202, and the UI keeps showing its drawn
 // fallback until the picture is ready.
@@ -25,6 +25,14 @@ export type CampaignInfo = {
 	premise?: string;
 	setting?: string; // fantasy, gaslight, pulp, modern or future
 	party?: CharacterInfo[];
+	location?: PlaceInfo;
+};
+
+export type PlaceInfo = {
+	id: string;
+	name?: string;
+	kind?: string;
+	description?: string;
 };
 
 export type CharacterInfo = {
@@ -36,22 +44,25 @@ export type CharacterInfo = {
 	backstory?: string;
 };
 
-export type ArtTarget = { campaign: string; kind: "cover" } | { campaign: string; kind: "char"; id: string };
+export type ArtTarget =
+	| { campaign: string; kind: "cover" }
+	| { campaign: string; kind: "char" | "place"; id: string };
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-// parseArtPath reads /img/<campaign>/cover and /img/<campaign>/char/<id>.
+// parseArtPath reads /img/<campaign>/cover, /img/<campaign>/char/<id> and
+// /img/<campaign>/place/<id>.
 export function parseArtPath(pathname: string): ArtTarget | null {
 	const parts = pathname.split("/").slice(2);
 	if (parts.length === 2 && parts[1] === "cover" && ID.test(parts[0])) return { campaign: parts[0], kind: "cover" };
-	if (parts.length === 3 && parts[1] === "char" && ID.test(parts[0]) && ID.test(parts[2])) {
-		return { campaign: parts[0], kind: "char", id: parts[2] };
+	if (parts.length === 3 && (parts[1] === "char" || parts[1] === "place") && ID.test(parts[0]) && ID.test(parts[2])) {
+		return { campaign: parts[0], kind: parts[1], id: parts[2] };
 	}
 	return null;
 }
 
 export function artKey(t: ArtTarget): string {
-	return t.kind === "cover" ? `art/${t.campaign}/cover` : `art/${t.campaign}/char/${t.id}`;
+	return t.kind === "cover" ? `art/${t.campaign}/cover` : `art/${t.campaign}/${t.kind}/${t.id}`;
 }
 
 const clip = (s: string | undefined, n: number) => {
@@ -83,6 +94,17 @@ export function coverPrompt(c: CampaignInfo): string {
 		"No people, no characters, no figures, no faces.",
 		`The story: ${clip(c.pitch || c.premise, 400)}`,
 		style(c.setting),
+	]
+		.filter(Boolean)
+		.join(" ");
+}
+
+export function placePrompt(p: PlaceInfo, setting?: string): string {
+	return [
+		`A wide view of one place in a ${era(setting).genre}: ${clip(p.name, 80)}${p.kind ? `, a ${clip(p.kind, 40)}` : ""}.`,
+		p.description ? clip(p.description, 400) : "",
+		"No people, no characters, no figures, no faces.",
+		style(setting),
 	]
 		.filter(Boolean)
 		.join(" ");
@@ -181,10 +203,15 @@ export async function serveArt(
 	if (t.kind === "cover") {
 		if (!c.title && !c.pitch && !c.premise) return new Response(null, { status: 404 });
 		[prompt, w, h] = [coverPrompt(c), 1024, 576];
-	} else {
+	} else if (t.kind === "char") {
 		const ch = c.party?.find((p) => p.id === t.id);
 		if (!ch) return new Response(null, { status: 404 });
 		[prompt, w, h] = [portraitPrompt(ch, c.setting), 640, 640];
+	} else {
+		// Only the place the party stands in is in the view, so a place is
+		// painted the first time someone looks while the party is there.
+		if (c.location?.id !== t.id) return new Response(null, { status: 404 });
+		[prompt, w, h] = [placePrompt(c.location, c.setting), 1024, 576];
 	}
 	if (!(await takeQuota(env, now))) return new Response(null, { status: 404, headers: { "X-Art": "daily limit" } });
 

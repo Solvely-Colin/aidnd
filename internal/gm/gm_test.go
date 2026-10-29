@@ -2,6 +2,7 @@ package gm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -1203,5 +1204,33 @@ func TestRecordLoreRejectsPromiseToNobody(t *testing.T) {
 	}
 	if !strings.Contains(worldMemory(w, w.Characters[0]), "rumor: They say") {
 		t.Fatalf("memory %q", worldMemory(w, w.Characters[0]))
+	}
+}
+
+func TestTakeActionPublishesProgressBeforeSaving(t *testing.T) {
+	r := newRig(t, 1, 1)
+	r.start(t)
+	var types []string
+	r.g.Publish = func(_ string, evs []store.Event) {
+		for _, e := range evs {
+			if e.Type == "progress" {
+				var d map[string]any
+				must(t, json.Unmarshal(e.Data, &d))
+				types = append(types, "progress:"+d["stage"].(string))
+				if e.ID != 0 {
+					t.Fatalf("progress event has id %d", e.ID)
+				}
+				continue
+			}
+			types = append(types, e.Type)
+		}
+	}
+	r.act(t, "u1", "I look around carefully")
+	got := strings.Join(types, ",")
+	if !strings.HasPrefix(got, "progress:reading,progress:narrating,player_action,") {
+		t.Fatalf("publish order %s", got)
+	}
+	if n := len(r.events(t, "progress")); n != 0 {
+		t.Fatalf("%d progress events were saved", n)
 	}
 }

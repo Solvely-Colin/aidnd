@@ -136,6 +136,7 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 		return nil, fmt.Errorf("%w: text is required", ErrBadRequest)
 	}
 	recent := g.recent(ctx, w)
+	g.progress(campaignID, "reading", map[string]any{"character_id": actor.ID, "character": actor.Name, "text": text})
 
 	// 1. interpret
 	actions := g.interpret(ctx, w, actor, text, hints, recent)
@@ -145,6 +146,7 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	res := game.Resolve(&game.Ctx{W: w, R: g.Dice, Now: g.Now(), OnArrive: onArrive, Ambush: ambush}, actor, actions)
 	noteSceneTurn(w, res)
 	quick := res.AllFree && !res.TurnEnded
+	g.progress(campaignID, "narrating", map[string]any{"character_id": actor.ID, "rolls": res.Rolls()})
 	out := &TurnResult{Resolution: res, Quick: quick, Skipped: res.Skipped}
 	// 3. direct
 	recentText := strings.Join(append(append([]string{}, recent...), actor.Name+": "+text), "\n") + "\n" + strings.Join(res.Changes, "\n")
@@ -286,4 +288,15 @@ func (g *GM) Skip(ctx context.Context, campaignID, playerID string, mode SkipMod
 		return nil, err
 	}
 	return out, nil
+}
+
+// progress tells stream listeners how far an action has got, so players see
+// the dice before the narration is written. These events are not saved and
+// have no id; the committed events that follow replace them.
+func (g *GM) progress(campaignID, stage string, data map[string]any) {
+	if g.Publish == nil {
+		return
+	}
+	data["stage"] = stage
+	g.Publish(campaignID, []store.Event{store.NewEvent("progress", "", data)})
 }
