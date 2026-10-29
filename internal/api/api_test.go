@@ -134,6 +134,7 @@ func TestOpenModeFlow(t *testing.T) {
 	if you["joined"] != true || you["your_turn"] != true || v["location"] == nil || v["budget"] == nil {
 		t.Fatalf("view %s", e.do("GET", "/campaigns/"+id, nil, t1, "").body)
 	}
+	checkSheets(t, v)
 	if r := e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "hi"}, t2, ""); r.code != 409 {
 		t.Fatalf("not your turn: %d", r.code)
 	}
@@ -397,5 +398,139 @@ func TestMeta(t *testing.T) {
 		if gum["name"] != "Gumshoe" || gum["weapon"] != "pulp_crossbow" {
 			t.Fatalf("pulp skirmisher %v", gum)
 		}
+	}
+}
+
+// checkSheets: every party member's full sheet is in the view, so players
+// can read each other's sheets.
+func checkSheets(t *testing.T, v map[string]any) {
+	t.Helper()
+	party := v["party"].([]any)
+	if len(party) != 2 {
+		t.Fatalf("party %d", len(party))
+	}
+	active := v["active"].(map[string]any)["character_id"]
+	for _, p := range party {
+		c := p.(map[string]any)
+		sum := 0.0
+		for _, part := range c["ac_parts"].([]any) {
+			sum += part.(map[string]any)["value"].(float64)
+		}
+		if sum != c["ac"].(float64) {
+			t.Errorf("%s: ac parts %v != ac %v", c["name"], sum, c["ac"])
+		}
+		atk := c["attack"].(map[string]any)
+		if atk["weapon"] == "" || atk["damage"] == "" || atk["bonus"].(float64) < 2 {
+			t.Errorf("%s: attack %v", c["name"], atk)
+		}
+		if lu := c["level_up"].(map[string]any); lu["level"].(float64) != 2 || lu["hp"].(float64) < 1 {
+			t.Errorf("%s: level_up %v", c["name"], lu)
+		}
+		if c["armor"] == nil || c["zone_name"] == "" {
+			t.Errorf("%s: armor %v zone %v", c["name"], c["armor"], c["zone_name"])
+		}
+		acting := false
+		for _, cd := range c["conditions"].([]any) {
+			if cd.(map[string]any)["key"] == "acting" {
+				acting = true
+			}
+		}
+		if acting != (c["id"] == active) {
+			t.Errorf("%s: acting condition %v, active %v", c["name"], acting, active)
+		}
+		weapons := 0
+		for _, it := range c["inventory"].([]any) {
+			it := it.(map[string]any)
+			if it["kind"] == "weapon" {
+				weapons++
+				if _, ok := it["to_hit"]; !ok {
+					t.Errorf("%s: %s has no to_hit", c["name"], it["name"])
+				}
+			}
+		}
+		if weapons == 0 {
+			t.Errorf("%s: no weapons carried", c["name"])
+		}
+	}
+}
+
+func TestJournalPeopleAndPlaces(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/start", nil, "k", "")
+	e.fake.On("interpret", llm.Calls(llm.Call("talk_to", map[string]any{"npc": "Tamsin Hale", "text": "hello"})))
+	e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "hello Tamsin"}, "k", "u1")
+	w, _ := e.g.Store.Load(t.Context(), id)
+	antagonist := w.NPC(w.Campaign.AntagonistID).Name
+
+	var j JournalView
+	if err := json.Unmarshal(e.do("GET", "/campaigns/"+id+"/journal", nil, "k", "u1").body, &j); err != nil {
+		t.Fatal(err)
+	}
+	var tamsin *JournalPerson
+	for i, p := range j.People {
+		if p.Name == antagonist {
+			t.Errorf("journal lists the antagonist %q away from the lair", antagonist)
+		}
+		if p.Name == "Tamsin Hale" {
+			tamsin = &j.People[i]
+		}
+	}
+	if tamsin == nil || !tamsin.Met || !tamsin.Here || tamsin.LocationName == "" {
+		t.Fatalf("tamsin %+v in %+v", tamsin, j.People)
+	}
+	if len(j.Places) < 2 || !j.Places[0].Here || j.Places[0].ID != w.Campaign.HubID || j.Places[0].Description == "" {
+		t.Fatalf("places %+v", j.Places)
+	}
+	for _, p := range j.Places {
+		if !p.Visited && p.Description != "" {
+			t.Errorf("unvisited %s shows its description", p.Name)
+		}
+	}
+}
+
+func TestNotesArePrivate(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ben"}, "k", "u2")
+	base := "/campaigns/" + id + "/notes"
+	if r := e.do("POST", base, map[string]string{"text": "hi"}, "k", "u3"); r.code != 403 {
+		t.Fatalf("outsider wrote a note: %d", r.code)
+	}
+	if r := e.do("POST", base, map[string]string{"text": "  "}, "k", "u1"); r.code != 400 {
+		t.Fatalf("empty note %d", r.code)
+	}
+	r := e.do("POST", base, map[string]string{"text": "Tamsin flinched at the bell"}, "k", "u1")
+	if r.code != 201 {
+		t.Fatalf("add %d %s", r.code, r.body)
+	}
+	nid := r.json(t)["id"].(string)
+	if n := e.do("GET", base, nil, "k", "u2").json(t)["notes"].([]any); len(n) != 0 {
+		t.Fatalf("u2 sees %v", n)
+	}
+	if r := e.do("POST", base+"/"+nid, map[string]string{"text": "mine now"}, "k", "u2"); r.code != 404 {
+		t.Fatalf("u2 edited u1's note: %d", r.code)
+	}
+	if r := e.do("POST", base+"/"+nid, map[string]string{"text": "Tamsin flinched twice"}, "k", "u1"); r.code != 200 {
+		t.Fatalf("edit %d", r.code)
+	}
+	n := e.do("GET", base, nil, "k", "u1").json(t)["notes"].([]any)
+	if len(n) != 1 || n[0].(map[string]any)["text"] != "Tamsin flinched twice" {
+		t.Fatalf("notes %v", n)
+	}
+	if r := e.do("DELETE", base+"/"+nid, nil, "k", "u1"); r.code != 200 {
+		t.Fatalf("delete %d", r.code)
+	}
+	if r := e.do("DELETE", base+"/"+nid, nil, "k", "u1"); r.code != 404 {
+		t.Fatalf("second delete %d", r.code)
+	}
+	// the narrator never sees notes: nothing about them reaches the world
+	e.do("POST", base, map[string]string{"text": "PRIVATENOTE"}, "k", "u1")
+	w, _ := e.g.Store.Load(t.Context(), id)
+	if b, _ := json.Marshal(w); strings.Contains(string(b), "PRIVATENOTE") {
+		t.Fatal("a note leaked into the world")
 	}
 }

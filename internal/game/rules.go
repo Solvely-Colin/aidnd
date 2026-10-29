@@ -90,26 +90,45 @@ func BestAbility(c *Character) Ability {
 // StartingHP is 10 + CON modifier.
 func StartingHP(s Scores) int { return 10 + Mod(s[CON]) }
 
+// ACPart is one term of a character's armor class, for the sheet.
+type ACPart struct {
+	Label string `json:"label"`
+	Value int    `json:"value"`
+}
+
 // ArmorClass computes AC from equipped armor plus any shield held.
 func ArmorClass(w *World, c *Character) int {
-	ac := 10 + c.Mod(DEX)
+	ac := 0
+	for _, p := range ArmorClassParts(w, c) {
+		ac += p.Value
+	}
+	return ac
+}
+
+// ArmorClassParts breaks ArmorClass into its terms: the armor (or a base
+// of 10), the DEX modifier after any cap, and the first shield carried.
+func ArmorClassParts(w *World, c *Character) []ACPart {
+	parts := []ACPart{{Label: "Base", Value: 10}}
+	dex := c.Mod(DEX)
 	if a := w.Item(c.Armor); a != nil && a.Owner.ID == c.ID && a.Kind == ItemArmor {
-		dex := c.Mod(DEX)
 		switch {
 		case a.DexCap == 0:
 			dex = 0
 		case a.DexCap > 0 && dex > a.DexCap:
 			dex = a.DexCap
 		}
-		ac = a.AC + dex
+		parts[0] = ACPart{Label: a.Name, Value: a.AC}
+	}
+	if dex != 0 {
+		parts = append(parts, ACPart{Label: string(DEX), Value: dex})
 	}
 	for _, it := range w.ItemsOf(OwnerCharacter, c.ID) {
 		if it.Kind == ItemShield {
-			ac += it.AC
+			parts = append(parts, ACPart{Label: it.Name, Value: it.AC})
 			break
 		}
 	}
-	return ac
+	return parts
 }
 
 // IsEquipped reports whether it is worn or wielded by c. A carried shield

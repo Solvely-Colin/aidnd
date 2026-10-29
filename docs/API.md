@@ -96,10 +96,32 @@ they/them, and drafts fill it from the concept.
 | `GET /campaigns/{id}/locations/{lid}` | any caller | A visited or known location; 404 otherwise. |
 | `GET /campaigns/{id}/npcs/{nid}` | any caller | Public NPC view and merchant stock. |
 | `GET /campaigns/{id}/quests` | any caller | `{quests: [...]}` |
-| `GET /campaigns/{id}/journal` | any caller | `{summary, chronicle: [{turn, text}], quests, setbacks}` |
+| `GET /campaigns/{id}/journal` | any caller | `{summary, chronicle: [{id, turn, day, kind, text, location_id, npc_ids, source, quest_id, status, outcome}], quests, setbacks, people, places}`; `kind` is fact, deed, death, promise or rumor; promises have `status` open, kept or broken. See Journal. |
+| `GET /campaigns/{id}/notes` | joined player | `{notes: [{id, text, turn, day, time, created_at, updated_at}]}`, the caller's own notes, oldest first. |
+| `POST /campaigns/{id}/notes` | joined player | `{text}` → 201 note, stamped with the current turn, day and time of day. |
+| `POST /campaigns/{id}/notes/{nid}` | note's author | `{text}` replaces the text. 404 for anyone else's note. |
+| `DELETE /campaigns/{id}/notes/{nid}` | note's author | Deletes the note. |
 | `POST /campaigns/{id}/stream-token` | any caller | `{token, expires_at}` for the event stream. |
 | `GET /campaigns/{id}/events` | see SSE | Server-sent events. |
 | `GET /campaigns/{id}/log?after=&limit=` | any caller | Same events as JSON pages: `{events, last_id}`. |
+
+### Journal
+
+The journal is built from the world record, never from model output, so it
+only lists what the engine knows the party has come across.
+
+- `people`: NPCs at places the party has visited (the antagonist only while
+  the party is in the same place). Each has the NPC brief fields plus
+  `location_name`, `met` (the party has spoken with them), `here`, and
+  `quests` (titles of visible quests they gave). Nearby people come first,
+  then the most recently spoken to.
+- `places`: known locations with `name, kind, hint, danger, visited, here,
+  is_hub, people`; `description` only once visited. Here first, then
+  visited, then places only seen from a path.
+
+Notes are private to the player who wrote them (up to 200 per campaign,
+4000 characters each). They are stored apart from the world, so neither
+the narrator nor other players see them.
 
 "Any caller" means authenticated: the API key in service mode, anything in
 open mode.
@@ -137,12 +159,17 @@ and the main quest only shows objectives up to the first one not yet done.
     "items": [{"id", "name", "kind", ...}]           // on the ground
   },
   "party": [{
-    "id", "player_id", "name", "class", "kit", "level", "xp", "next_level_xp",
-    "hp", "max_hp", "down", "ac", "gold", "zone_id", "proficiency_bonus",
-    "scores": {"STR": 15}, "modifiers": {"STR": 2}, "proficient": ["STR", "CON"],
-    "weapon": {"name", "damage": "1d8", "reach": "melee | ranged"},
-    "inventory": [{"id", "name", "kind", "equipped", "effect", ...}]
-  }],
+    "id", "player_id", "name", "class", "kit", "level", "xp", "level_xp", "next_level_xp",
+    "hp", "max_hp", "down", "ac", "gold", "zone_id", "zone_name", "proficiency_bonus",
+    "scores": {"STR": 15}, "modifiers": {"STR": 2}, "proficient": ["STR", "CON"],  // modifiers include proficiency
+    "weapon": {"name", "damage": "1d8", "reach": "melee | ranged", "to_hit": 4},
+    "armor": {"name", "ac": 16},                       // omitted when unarmored
+    "attack": {"weapon", "bonus": 4, "ability": "STR", "damage": "1d8", "reach"},
+    "ac_parts": [{"label": "Chain Mail", "value": 16}, {"label": "Shield", "value": 2}],  // sums to ac
+    "level_up": {"level": 2, "hp": 8, "proficiency_bonus": 2},  // omitted at max level
+    "conditions": [{"key": "down | bloodied | cover | acting", "label", "note"}],  // derived, not stored
+    "inventory": [{"id", "name", "kind", "equipped", "effect", "to_hit", ...}]
+  }],                                                  // every member's full sheet, so players can read each other's
   "players": [{"id", "name", "character_id"}],
   "encounter": {"round": 2, "enemies": [{"id", "display", "hp", "max_hp", "zone_id", "ranged"}]},
   "quests": [{"id", "title", "summary", "is_main", "status", "giver_name",

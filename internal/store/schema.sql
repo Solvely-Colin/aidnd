@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS locations (
     is_hub      INTEGER NOT NULL DEFAULT 0,
     is_lair     INTEGER NOT NULL DEFAULT 0,
     zones       TEXT NOT NULL DEFAULT '[]',
+    last_day    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (campaign_id, id)
 );
 
@@ -121,6 +122,7 @@ CREATE TABLE IF NOT EXISTS npcs (
     alive       INTEGER NOT NULL DEFAULT 1,
     antagonist  INTEGER NOT NULL DEFAULT 0,
     memory      TEXT NOT NULL DEFAULT '[]',
+    keeps       TEXT NOT NULL DEFAULT '[]',
     last_talked INTEGER NOT NULL DEFAULT -1,
     stats       TEXT NOT NULL DEFAULT 'null',
     PRIMARY KEY (campaign_id, id)
@@ -225,6 +227,15 @@ CREATE TABLE IF NOT EXISTS chronicle (
     ord         INTEGER NOT NULL,
     turn        INTEGER NOT NULL DEFAULT 0,
     text        TEXT NOT NULL DEFAULT '',
+    id          TEXT NOT NULL DEFAULT '',
+    day         INTEGER NOT NULL DEFAULT 0,
+    kind        TEXT NOT NULL DEFAULT '',
+    location_id TEXT NOT NULL DEFAULT '',
+    npc_ids     TEXT NOT NULL DEFAULT '[]',
+    source      TEXT NOT NULL DEFAULT '',
+    quest_id    TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT '',
+    outcome     TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (campaign_id, ord)
 );
 
@@ -249,3 +260,19 @@ CREATE TABLE IF NOT EXISTS events (
     created_at  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS events_by_campaign ON events(campaign_id, id);
+
+-- Free-form notes a player keeps for themselves. Not part of the world, so
+-- Save never rewrites them, and only their author can read them.
+CREATE TABLE IF NOT EXISTS notes (
+    campaign_id TEXT NOT NULL,
+    id          TEXT NOT NULL,
+    player_id   TEXT NOT NULL DEFAULT '',
+    text        TEXT NOT NULL DEFAULT '',
+    turn        INTEGER NOT NULL DEFAULT 0,
+    day         INTEGER NOT NULL DEFAULT 0,
+    time        TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL DEFAULT 0,
+    updated_at  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (campaign_id, id)
+);
+CREATE INDEX IF NOT EXISTS notes_by_player ON notes(campaign_id, player_id, created_at);

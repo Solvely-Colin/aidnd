@@ -1,6 +1,8 @@
 package api
 
 import (
+	"sort"
+
 	"github.com/Solvely-Colin/aidnd/internal/game"
 	"github.com/Solvely-Colin/aidnd/internal/gm"
 )
@@ -53,6 +55,7 @@ type ItemView struct {
 	AC       int    `json:"ac,omitempty"`
 	Effect   string `json:"effect,omitempty"`
 	Equipped bool   `json:"equipped,omitempty"`
+	ToHit    *int   `json:"to_hit,omitempty"` // weapons on a character sheet
 }
 
 type LocationView struct {
@@ -88,29 +91,60 @@ type EncounterView struct {
 }
 
 type CharacterView struct {
-	ID         string         `json:"id"`
-	PlayerID   string         `json:"player_id"`
-	Name       string         `json:"name"`
-	Concept    string         `json:"concept,omitempty"`
-	Class      string         `json:"class"`
-	Kit        string         `json:"kit"`
-	Backstory  string         `json:"backstory,omitempty"`
-	Pronouns   string         `json:"pronouns"`
-	Scores     game.Scores    `json:"scores"`
-	Modifiers  map[string]int `json:"modifiers"`
-	Proficient []game.Ability `json:"proficient"`
-	ProfBonus  int            `json:"proficiency_bonus"`
-	Level      int            `json:"level"`
-	XP         int            `json:"xp"`
-	NextLevel  int            `json:"next_level_xp,omitempty"`
-	HP         int            `json:"hp"`
-	MaxHP      int            `json:"max_hp"`
-	Down       bool           `json:"down"`
-	AC         int            `json:"ac"`
-	Gold       int            `json:"gold"`
-	Weapon     *ItemView      `json:"weapon,omitempty"`
-	ZoneID     string         `json:"zone_id,omitempty"`
-	Inventory  []ItemView     `json:"inventory"`
+	ID         string          `json:"id"`
+	PlayerID   string          `json:"player_id"`
+	Name       string          `json:"name"`
+	Concept    string          `json:"concept,omitempty"`
+	Class      string          `json:"class"`
+	Kit        string          `json:"kit"`
+	Backstory  string          `json:"backstory,omitempty"`
+	Pronouns   string          `json:"pronouns"`
+	Scores     game.Scores     `json:"scores"`
+	Modifiers  map[string]int  `json:"modifiers"`
+	Proficient []game.Ability  `json:"proficient"`
+	ProfBonus  int             `json:"proficiency_bonus"`
+	Level      int             `json:"level"`
+	XP         int             `json:"xp"`
+	LevelXP    int             `json:"level_xp"` // XP the current level began at
+	NextLevel  int             `json:"next_level_xp,omitempty"`
+	HP         int             `json:"hp"`
+	MaxHP      int             `json:"max_hp"`
+	Down       bool            `json:"down"`
+	AC         int             `json:"ac"`
+	Gold       int             `json:"gold"`
+	Weapon     *ItemView       `json:"weapon,omitempty"`
+	Armor      *ItemView       `json:"armor,omitempty"`
+	Attack     AttackView      `json:"attack"`
+	ACParts    []game.ACPart   `json:"ac_parts"`
+	LevelUp    *LevelUpView    `json:"level_up,omitempty"`
+	Conditions []ConditionView `json:"conditions"`
+	ZoneID     string          `json:"zone_id,omitempty"`
+	ZoneName   string          `json:"zone_name,omitempty"`
+	Inventory  []ItemView      `json:"inventory"`
+}
+
+// AttackView is the equipped weapon's attack line.
+type AttackView struct {
+	Weapon  string       `json:"weapon"`
+	Bonus   int          `json:"bonus"`
+	Ability game.Ability `json:"ability"`
+	Damage  string       `json:"damage"`
+	Reach   string       `json:"reach"`
+}
+
+// LevelUpView is what the next level grants.
+type LevelUpView struct {
+	Level     int `json:"level"`
+	HP        int `json:"hp"`
+	ProfBonus int `json:"proficiency_bonus"`
+}
+
+// ConditionView is a state derived from the rules: the engine has no
+// status effects, so these are facts like 0 HP or standing in cover.
+type ConditionView struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Note  string `json:"note"`
 }
 
 type ObjectiveView struct {
@@ -185,6 +219,10 @@ func itemView(w *game.World, it *game.Item, c *game.Character, n *game.NPC) Item
 	if game.IsEquipped(w, c, it) {
 		v.Equipped = true
 	}
+	if c != nil && it.Kind == game.ItemWeapon {
+		hit, _ := game.AttackMod(c, it)
+		v.ToHit = &hit
+	}
 	if n != nil {
 		v.Price = game.BuyPrice(it, n)
 	}
@@ -195,9 +233,10 @@ func characterView(w *game.World, c *game.Character) CharacterView {
 	v := CharacterView{ID: c.ID, PlayerID: c.PlayerID, Name: c.Name, Concept: c.Concept, Class: c.Class, Kit: c.Kit, Backstory: c.Backstory, Pronouns: game.NormPronouns(c.Pronouns),
 		Scores: c.Scores, Modifiers: map[string]int{}, Proficient: c.Proficient, ProfBonus: game.ProficiencyBonus(c.Level),
 		Level: c.Level, XP: c.XP, HP: c.HP, MaxHP: c.MaxHP, Down: c.Down(), AC: game.ArmorClass(w, c), Gold: c.Gold, ZoneID: c.ZoneID,
-		Inventory: []ItemView{}}
+		LevelXP: game.XPTable[max(c.Level, 1)-1], ACParts: game.ArmorClassParts(w, c), Conditions: conditions(w, c), Inventory: []ItemView{}}
 	if c.Level < game.MaxLevel {
 		v.NextLevel = game.XPTable[c.Level]
+		v.LevelUp = &LevelUpView{Level: c.Level + 1, HP: game.HPPerLevel(c), ProfBonus: game.ProficiencyBonus(c.Level + 1)}
 	}
 	for _, a := range game.Abilities {
 		v.Modifiers[string(a)] = c.CheckMod(a)
@@ -205,10 +244,40 @@ func characterView(w *game.World, c *game.Character) CharacterView {
 	wpn := game.Weapon(w, c)
 	wv := itemView(w, wpn, c, nil)
 	v.Weapon = &wv
+	bonus, ab := game.AttackMod(c, wpn)
+	v.Attack = AttackView{Weapon: wpn.Name, Bonus: bonus, Ability: ab, Damage: wpn.Damage, Reach: wv.Reach}
+	if a := w.Item(c.Armor); a != nil && a.Owner.ID == c.ID && a.Kind == game.ItemArmor {
+		av := itemView(w, a, c, nil)
+		v.Armor = &av
+	}
+	if l := w.Here(); l != nil && c.ZoneID != "" {
+		v.ZoneName = game.ZoneName(l, c.ZoneID)
+	}
 	for _, it := range w.ItemsOf(game.OwnerCharacter, c.ID) {
 		v.Inventory = append(v.Inventory, itemView(w, it, c, nil))
 	}
 	return v
+}
+
+func conditions(w *game.World, c *game.Character) []ConditionView {
+	out := []ConditionView{}
+	switch {
+	case c.Down():
+		out = append(out, ConditionView{"down", "Down", "At 0 HP. A healer's kit can bring them back."})
+	case c.HP*2 <= c.MaxHP:
+		out = append(out, ConditionView{"bloodied", "Bloodied", "At half health or less."})
+	}
+	if l := w.Here(); l != nil && w.Campaign.Status == game.StatusActive {
+		if z := l.Zone(c.ZoneID); z != nil && z.Cover {
+			out = append(out, ConditionView{"cover", "In cover", "+2 AC against attacks from other zones."})
+		}
+	}
+	if w.Campaign.Status == game.StatusActive {
+		if a := w.ActiveCharacter(); a != nil && a.ID == c.ID {
+			out = append(out, ConditionView{"acting", "Acting", "It is their turn."})
+		}
+	}
+	return out
 }
 
 func npcBrief(n *game.NPC) NPCBrief {
@@ -429,4 +498,100 @@ type JournalView struct {
 	Chronicle []game.ChronicleEntry `json:"chronicle"`
 	Quests    []QuestView           `json:"quests"`
 	Setbacks  int                   `json:"setbacks"`
+	People    []JournalPerson       `json:"people"`
+	Places    []JournalPlace        `json:"places"`
+}
+
+// JournalPerson is someone the party has come across. Everything comes
+// from the world record, so the journal never lists a person the engine
+// does not know about.
+type JournalPerson struct {
+	NPCBrief
+	LocationName string   `json:"location_name"`
+	Met          bool     `json:"met"`  // the party has spoken with them
+	Here         bool     `json:"here"` // in the party's location now
+	Quests       []string `json:"quests,omitempty"`
+}
+
+// JournalPlace is a location the party has been to or has seen a way to.
+type JournalPlace struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Kind        string   `json:"kind"`
+	Hint        string   `json:"hint,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Danger      int      `json:"danger"`
+	Visited     bool     `json:"visited"`
+	Here        bool     `json:"here"`
+	IsHub       bool     `json:"is_hub,omitempty"`
+	People      []string `json:"people,omitempty"`
+}
+
+// journalPeople lists the NPCs a player may see: those at visited places,
+// with the antagonist only while the party faces them (as in npcView).
+// People nearby come first, then the most recently spoken to.
+func journalPeople(w *game.World) []JournalPerson {
+	gave := map[string][]string{}
+	for _, q := range w.Quests {
+		if q.GiverID != "" && questVisible(w, q) {
+			gave[q.GiverID] = append(gave[q.GiverID], q.Title)
+		}
+	}
+	out := []JournalPerson{}
+	for _, n := range w.NPCs {
+		v, ok := npcView(w, n)
+		if !ok {
+			continue
+		}
+		out = append(out, JournalPerson{NPCBrief: v.NPCBrief, LocationName: v.LocationName, Met: n.LastTalked >= 0,
+			Here: n.LocationID == w.Campaign.LocationID, Quests: gave[n.ID]})
+	}
+	talked := map[string]int{}
+	for _, n := range w.NPCs {
+		talked[n.ID] = n.LastTalked
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Here != b.Here {
+			return a.Here
+		}
+		if a.Alive != b.Alive {
+			return a.Alive
+		}
+		return talked[a.ID] > talked[b.ID]
+	})
+	return out
+}
+
+// journalPlaces lists known locations: where the party is, then places
+// visited, then places only seen from a path.
+func journalPlaces(w *game.World) []JournalPlace {
+	out := []JournalPlace{}
+	for _, l := range w.Locations {
+		if !locationKnown(w, l) {
+			continue
+		}
+		lv := locationView(w, l, false)
+		p := JournalPlace{ID: l.ID, Name: l.Name, Kind: l.Kind, Hint: l.Hint, Description: lv.Description, Danger: l.Danger,
+			Visited: l.Visited, Here: l.ID == w.Campaign.LocationID, IsHub: l.IsHub}
+		if l.Visited {
+			for _, n := range w.NPCsAt(l.ID) {
+				if !n.Antagonist {
+					p.People = append(p.People, n.Name)
+				}
+			}
+		}
+		out = append(out, p)
+	}
+	rank := func(p JournalPlace) int {
+		switch {
+		case p.Here:
+			return 0
+		case p.Visited:
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	return out
 }
