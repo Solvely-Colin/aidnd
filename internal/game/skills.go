@@ -156,7 +156,11 @@ func (c *Character) SkillModByKey(key string) int {
 // PassivePerception is 10 plus the Perception modifier.
 func (c *Character) PassivePerception() int {
 	sk, _ := SkillByKey("perception")
-	return 10 + c.SkillMod(sk)
+	pp := 10 + c.SkillMod(sk)
+	if c.HasScar("whispers") {
+		pp -= 2
+	}
+	return pp
 }
 
 // BestPassive returns the most perceptive conscious character.

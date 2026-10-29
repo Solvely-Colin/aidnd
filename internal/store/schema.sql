@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS npcs (
     keeps       TEXT NOT NULL DEFAULT '[]',
     last_talked INTEGER NOT NULL DEFAULT -1,
     stats       TEXT NOT NULL DEFAULT 'null',
+    extra       TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (campaign_id, id)
 );
 
@@ -212,6 +213,7 @@ CREATE TABLE IF NOT EXISTS lore (
     entity_ids   TEXT NOT NULL DEFAULT '[]',
     always_on    INTEGER NOT NULL DEFAULT 0,
     last_trigger INTEGER NOT NULL DEFAULT -100,
+    extra        TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (campaign_id, id)
 );
 

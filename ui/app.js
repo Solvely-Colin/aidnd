@@ -226,7 +226,12 @@ const SETTING_WORD = { fantasy: "Fantasy", gaslight: "Gaslight", pulp: "1930s pu
 
 async function renderHome() {
   S.writing = 0;
-  if (!S.meta) api("GET", "/meta").then(m => { S.meta = m; if (!S.route && !S.writing && $("#eras")) $("#eras").outerHTML = erasHTML(); }).catch(() => {});
+  if (!S.meta) api("GET", "/meta").then(m => {
+    S.meta = m;
+    if (S.route || S.writing) return;
+    if ($("#eras")) $("#eras").outerHTML = erasHTML();
+    if ($("#sagas")) $("#sagas").innerHTML = sagasHTML();
+  }).catch(() => {});
   app.innerHTML = `<div class="scrollpage" id="home"><div class="home-body top"><section><div class="shelf">${`<div class="book skeleton"><div class="cov"></div></div>`.repeat(3)}</div></section></div></div>`;
   let mine, all;
   try {
@@ -253,6 +258,7 @@ async function renderHome() {
     <div class="home-body">
       ${rest.length ? `<section><span class="mono-k">Your other stories</span><div class="shelf">${rest.map(bookHTML).join("")}</div></section>` : ""}
       ${open.length ? `<section><span class="mono-k">Open tables</span><div class="shelf">${open.map(bookHTML).join("")}</div></section>` : ""}
+      <section id="sagas">${sagasHTML()}</section>
       <section id="new">${newStoryHTML()}</section>
     </div>`;
 }
@@ -270,6 +276,43 @@ function erasHTML() {
 function deathHTML() {
   const opts = [["standard", "Characters can die"], ["story", "Heroes never die"]];
   return `<div class="eras" id="death">${opts.map(([k, l]) => `<button class="${(S.lethality || "standard") === k ? "on" : ""}" data-lethal="${k}">${l}</button>`).join("")}</div>`;
+}
+
+// Strain is the horror track: six marks, a breakdown at four, a scar at six.
+function strainHTML(st) {
+  const pips = Array.from({ length: st.max }, (_, i) => `<i class="${i < st.value ? "on" : ""}${i >= 3 ? " hi" : ""}"></i>`).join("");
+  return `<div class="strain"><div class="hp-k"><span class="mono-k">Strain</span><b>${st.value} / ${st.max}</b></div>
+    <div class="strain-track">${pips}</div>
+    <span class="small-note">${st.shaken ? "Shaken: disadvantage on saves against fear. " : ""}At 4 you break down; at 6 it leaves a scar. Rest somewhere safe to recover.</span>
+    ${st.scars?.length ? `<div class="scars">${st.scars.map(s => `<div><b>${esc(s.name)}</b><span>${esc(s.text)}</span></div>`).join("")}</div>` : ""}</div>`;
+}
+
+// Sagas are hand-written long campaigns. Each act opens as the last one
+// ends, so the card only promises what is playable now.
+function sagasHTML() {
+  const list = S.meta?.sagas || [];
+  if (!list.length) return "";
+  return `<span class="mono-k">A long campaign</span>${list.map(s => `<div class="saga">
+      <div class="saga-art"><div class="art">${drawn("saga-" + s.key)}</div></div>
+      <div class="saga-txt">
+        <span class="eyebrow-acc">${esc(SETTING_WORD[s.setting] || s.setting)} · act one open · levels ${esc(s.levels.replace("-", " to "))}</span>
+        <h2 class="title-l">${esc(s.title)}</h2>
+        <p class="pitch">${esc(s.pitch)}</p>
+        <div class="saga-foot"><button class="btn primary" data-saga="${esc(s.key)}">Begin the campaign</button>
+          <span class="help">Written ahead, played over weeks. Go solo or bring friends. Horror leaves marks: watch your strain.</span></div>
+      </div></div>`).join("")}`;
+}
+
+async function startSaga(key) {
+  S.writing = Date.now();
+  const box = $("#sagas");
+  if (box) box.innerHTML = `<div class="writing"><h3>Opening the first act</h3><span class="help">Laying out the town and its people…</span></div>`;
+  try {
+    const c = await api("POST", "/campaigns", { saga: key, lethality: S.lethality || "standard" });
+    await api("POST", `/campaigns/${c.id}/players`, { name: S.me.name });
+    go(`#/c/${c.id}`);
+  } catch (e) { toast(e.message); renderHome(); }
+  finally { S.writing = 0; }
 }
 
 function newStoryHTML() {
@@ -1668,6 +1711,7 @@ function sheetHTML(inRail) {
       ${c.conditions?.length ? `<span class="conds">${c.conditions.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note || "")}">${esc(k.label)}</span>`).join("")}</span>` : ""}
     </div></div>
     <div><div class="hp-k"><span class="mono-k">Hit points</span><b>${c.hp} / ${c.max_hp}</b></div><div class="bar5"><i class="${c.hp / c.max_hp <= .34 ? "low" : ""}" style="width:${hpPct(c)}%"></i></div>${c.build?.temp_hp ? `<span class="small-note">+${c.build.temp_hp} temporary HP</span>` : ""}</div>
+    ${c.strain ? strainHTML(c.strain) : ""}
     <div><div class="vit4">
       <div><span>ARMOR</span><b>${c.ac}</b></div><div><span>GOLD</span><b>${c.gold}</b></div>
       <div><span>LEVEL</span><b>${c.level}</b></div><div><span>XP</span><b>${c.xp}${c.next_level_xp ? `<small>/${c.next_level_xp}</small>` : ""}</b></div></div>
@@ -1986,10 +2030,11 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto]");
+  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-saga],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto]");
   if (!t || t.disabled) return;
   const ds = t.dataset, act = ds.act;
   if (ds.open) return go(`#/c/${ds.open}`);
+  if (ds.saga) return startSaga(ds.saga);
   if (ds.premise) { $("#premise").value = ds.premise[0].toUpperCase() + ds.premise.slice(1); return; }
   if (ds.era != null && !act) { S.era = ds.era; $("#eras").outerHTML = erasHTML(); return; }
   if (ds.lethal) { S.lethality = ds.lethal; $("#death").outerHTML = deathHTML(); return; }

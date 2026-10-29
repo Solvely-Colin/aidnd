@@ -292,16 +292,27 @@ func (g *GM) applyHazard(w *game.World, c llm.ToolCall) (string, *game.Roll, err
 	if ch == nil || ch.Down() {
 		return "", nil, fmt.Errorf("hazard target must be a conscious party member")
 	}
+	cause := trim(strings.TrimSpace(a.Cause), 60)
+	if cause == "" {
+		cause = "a hazard"
+	}
+	if strings.EqualFold(strings.TrimSpace(a.Condition), "horror") {
+		if !w.Campaign.Dread {
+			a.Condition = game.CondFrightened
+		} else {
+			so := game.FaceHorror(g.Dice, ch, max(1, min(3, w.Here().Danger)), cause)
+			if so == nil {
+				return "", nil, fmt.Errorf("%s is unaffected", ch.Name)
+			}
+			return strings.Join(so.Lines, "; "), &so.Roll, nil
+		}
+	}
 	kind, ok := game.ParseCondition(a.Condition)
 	if !ok || kind == game.CondStunned {
 		return "", nil, fmt.Errorf("unknown or disallowed condition %q", a.Condition)
 	}
 	if ch.Conditions.Has(kind) {
 		return "", nil, fmt.Errorf("%s is already %s", ch.Name, kind)
-	}
-	cause := trim(strings.TrimSpace(a.Cause), 60)
-	if cause == "" {
-		cause = "a hazard"
 	}
 	so := game.InflictOnCharacter(g.Dice, ch, kind, game.HazardDC(w.Here().Danger), cause, "")
 	if so == nil {
@@ -331,7 +342,9 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			a.Enemies = a.Enemies[:3]
 		}
 		for i := range a.Enemies {
-			if n := w.NPC(a.Enemies[i].NPCID); n == nil || n.LocationID != l.ID || n.Antagonist {
+			// the narrator can't turn the antagonist or a saga's protected
+			// people into foes; players can still pick that fight
+			if n := w.NPC(a.Enemies[i].NPCID); n == nil || n.LocationID != l.ID || n.Antagonist || n.Protected {
 				a.Enemies[i].NPCID = ""
 			}
 		}

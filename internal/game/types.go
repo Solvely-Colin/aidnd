@@ -136,6 +136,12 @@ type CharExtra struct {
 	Conc *Concentration `json:"conc,omitempty"`
 	// Once records the turn a once-per-turn feature was last used.
 	Once map[string]int `json:"once,omitempty"`
+
+	// Dread campaigns (see strain.go): mental strain 0..6, the lasting
+	// scars it leaves, and the horrors this character has already faced.
+	Strain int      `json:"strain,omitempty"`
+	Scars  []string `json:"scars,omitempty"`
+	Faced  []string `json:"faced,omitempty"`
 }
 
 // Concentration is a spell being held.
@@ -306,6 +312,15 @@ type NPC struct {
 	LastTalked  int      `json:"last_talked"`      // campaign turn, -1 never
 	// Combat stats used if the NPC becomes an enemy.
 	Stats *StatBlock `json:"stats,omitempty"`
+	NPCExtra
+}
+
+// NPCExtra holds NPC state added after the first schema, stored as one
+// JSON column.
+type NPCExtra struct {
+	// Protected NPCs are ones a saga's story needs: the narrator and the
+	// world may not kill, remove or turn them (players still can, in a fight).
+	Protected bool `json:"protected,omitempty"`
 }
 
 // MaxNPCMemory is how many memory notes an NPC keeps.
@@ -338,6 +353,9 @@ type StatBlock struct {
 	Inflicts string `json:"inflicts,omitempty"`
 	// Boss makes an NPC fight as a boss (the antagonist always does).
 	AsBoss *BossSpec `json:"as_boss,omitempty"`
+	// HorrorRank (1..3) makes first sight of it test the party's nerve in
+	// dread campaigns.
+	HorrorRank int `json:"horror,omitempty"`
 }
 
 // Enemy is a combatant in the current encounter.
@@ -363,6 +381,10 @@ type EnemyExtra struct {
 	ReactedRound int `json:"reacted_round,omitempty"`
 	// Boss is set for a boss: phases, signature move, legendary resistance.
 	Boss *Boss `json:"boss,omitempty"`
+	// Horror is its horror rank (see StatBlock.HorrorRank); Faced is set
+	// once the party has made its strain saves against it.
+	Horror int  `json:"horror_rank,omitempty"`
+	Faced  bool `json:"faced,omitempty"`
 }
 
 // Defeated reports whether the enemy is out of the fight.
@@ -509,6 +531,15 @@ type Lore struct {
 	EntityIDs   []string `json:"entity_ids,omitempty"`
 	AlwaysOn    bool     `json:"always_on,omitempty"`
 	LastTrigger int      `json:"last_trigger"` // campaign turn, -100 never
+	LoreExtra
+}
+
+// LoreExtra holds lore fields added after the first schema, stored as one
+// JSON column.
+type LoreExtra struct {
+	// Gate keeps a secret from the narrator until players uncover it: the
+	// id of an objective or quest that must be done first ("" = open).
+	Gate string `json:"gate,omitempty"`
 }
 
 // Beat trigger kinds.
@@ -639,6 +670,15 @@ type CampaignExtra struct {
 	Lethality string `json:"lethality,omitempty"` // "" is standard
 	// Pending holds turns waiting for their player to roll, by character id.
 	Pending map[string]*PendingAction `json:"pending,omitempty"`
+	// Saga is the hand-written campaign this world was built from ("" for
+	// an authored one-shot), and Act is the act being played.
+	Saga string `json:"saga,omitempty"`
+	Act  int    `json:"act,omitempty"`
+	// Dread turns on strain, scars and horror saves (see strain.go).
+	Dread bool `json:"dread,omitempty"`
+	// Milestones lift every character to at least a level when an
+	// objective is done: objective id -> level.
+	Milestones map[string]int `json:"milestones,omitempty"`
 }
 
 // Deadly reports whether characters can die in this campaign.

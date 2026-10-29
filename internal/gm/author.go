@@ -10,6 +10,7 @@ import (
 
 	"github.com/Solvely-Colin/aidnd/internal/game"
 	"github.com/Solvely-Colin/aidnd/internal/llm"
+	"github.com/Solvely-Colin/aidnd/internal/saga"
 	"github.com/Solvely-Colin/aidnd/internal/store"
 )
 
@@ -171,6 +172,24 @@ func (g *GM) CreateCampaign(ctx context.Context, premise string) (*game.World, e
 	defer g.lock(id)()
 	_, err = g.commit(ctx, built, store.NewEvent("campaign_created", "", map[string]any{"id": id, "title": built.Campaign.Title, "pitch": built.Campaign.Pitch}))
 	return built, err
+}
+
+// CreateSaga starts act 1 of a hand-written saga and saves it. Nothing
+// is authored by the model up front; places fill in zones as they are
+// reached, inside the saga's canon.
+func (g *GM) CreateSaga(ctx context.Context, key string) (*game.World, error) {
+	s := saga.Get(key)
+	if s == nil {
+		return nil, fmt.Errorf("unknown saga %q", key)
+	}
+	id := g.NewID()
+	w, err := saga.Build(s, 1, id, saga.Options{MaxSetbacks: g.Cfg.MaxSetbacks, MaxPlayers: g.Cfg.MaxPlayers, Now: g.Now().Unix()})
+	if err != nil {
+		return nil, err
+	}
+	defer g.lock(id)()
+	_, err = g.commit(ctx, w, store.NewEvent("campaign_created", "", map[string]any{"id": id, "title": w.Campaign.Title, "pitch": w.Campaign.Pitch, "saga": key}))
+	return w, err
 }
 
 // buildCampaign turns a spec into a world, reporting problems.
@@ -720,7 +739,7 @@ func (g *GM) canonContext(w *game.World) string {
 		fmt.Fprintf(&b, "Antagonist: %s (%s).\n", ant.Name, ant.Role)
 	}
 	for _, l := range w.Lore {
-		if l.AlwaysOn {
+		if l.AlwaysOn && game.LoreOpen(w, l) {
 			fmt.Fprintf(&b, "Canon: %s\n", l.Text)
 		}
 	}

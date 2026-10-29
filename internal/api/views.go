@@ -171,6 +171,36 @@ type CharacterView struct {
 	DeathSaves *game.DeathSaves `json:"death_saves,omitempty"`
 	Readied    bool             `json:"readied,omitempty"`
 	Build      BuildView        `json:"build"`
+	// Strain is set in dread campaigns (see game/strain.go).
+	Strain *StrainView `json:"strain,omitempty"`
+}
+
+// StrainView is a character's mental strain and the scars it left.
+type StrainView struct {
+	Value  int        `json:"value"`
+	Max    int        `json:"max"`
+	Shaken bool       `json:"shaken"` // disadvantage on saves against fear
+	Scars  []ScarView `json:"scars"`
+}
+
+// ScarView is one lasting scar.
+type ScarView struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+	Text string `json:"text"`
+}
+
+func strainView(w *game.World, c *game.Character) *StrainView {
+	if !w.Campaign.Dread {
+		return nil
+	}
+	v := &StrainView{Value: c.Strain, Max: game.MaxStrain, Shaken: c.Strain >= game.StrainShaken, Scars: []ScarView{}}
+	for _, k := range c.Scars {
+		if s, ok := game.ScarByKey(k); ok {
+			v.Scars = append(v.Scars, ScarView{Key: s.Key, Name: s.Name, Text: s.Text})
+		}
+	}
+	return v
 }
 
 // SkillView is one skill line on the sheet.
@@ -284,6 +314,11 @@ type CampaignView struct {
 	FreeRoam  bool          `json:"free_roam"`
 	Pending   []PendingView `json:"pending"`
 	Lethality string        `json:"lethality"`
+	// Saga and Act are set for a hand-written campaign; Dread turns on
+	// strain and scars.
+	Saga  string `json:"saga,omitempty"`
+	Act   int    `json:"act,omitempty"`
+	Dread bool   `json:"dread,omitempty"`
 }
 
 func itemView(w *game.World, it *game.Item, c *game.Character, n *game.NPC) ItemView {
@@ -313,7 +348,8 @@ func characterView(w *game.World, c *game.Character) CharacterView {
 	v := CharacterView{ID: c.ID, PlayerID: c.PlayerID, Name: c.Name, Concept: c.Concept, Class: c.Class, Kit: c.Kit, Backstory: c.Backstory, Pronouns: game.NormPronouns(c.Pronouns),
 		Scores: c.Scores, Modifiers: map[string]int{}, Proficient: c.Proficient, ProfBonus: game.ProficiencyBonus(c.Level),
 		Level: c.Level, XP: c.XP, HP: c.HP, MaxHP: c.MaxHP, Down: c.Down(), AC: game.ArmorClass(w, c), Gold: c.Gold, ZoneID: c.ZoneID,
-		LevelXP: game.XPTable[max(c.Level, 1)-1], ACParts: game.ArmorClassParts(w, c), Conditions: conditions(w, c), Inventory: []ItemView{}}
+		LevelXP: game.XPTable[max(c.Level, 1)-1], ACParts: game.ArmorClassParts(w, c), Conditions: conditions(w, c), Inventory: []ItemView{},
+		Strain: strainView(w, c)}
 	if c.Level < game.MaxLevel {
 		v.NextLevel = game.XPTable[c.Level]
 		v.LevelUp = &LevelUpView{Level: c.Level + 1, HP: game.HPPerLevel(c), ProfBonus: game.ProficiencyBonus(c.Level + 1)}
@@ -537,6 +573,7 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	for _, p := range w.Players {
 		v.Players = append(v.Players, PlayerView{ID: p.ID, Name: p.Name, CharacterID: p.CharacterID})
 	}
+	v.Saga, v.Act, v.Dread = c.Saga, c.Act, c.Dread
 	v.Lethality = c.Lethality
 	if v.Lethality == "" {
 		v.Lethality = game.LethalityStandard

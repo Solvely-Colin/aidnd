@@ -24,6 +24,10 @@ type Boss struct {
 	// start of the boss's next turn on whoever is still in the zone.
 	Charging *Telegraph `json:"charging,omitempty"`
 	Cooldown int        `json:"cooldown"` // turns until it can announce again
+	// Minion names what its summons are (default "Servant of <boss>"), and
+	// MinionHorror is their horror rank.
+	Minion       string `json:"minion,omitempty"`
+	MinionHorror int    `json:"minion_horror,omitempty"`
 }
 
 // BossPhase starts once the boss's HP falls to At percent or below.
@@ -56,6 +60,12 @@ type Telegraph struct {
 // BossSpec is how an author or the narrator asks for a boss.
 type BossSpec struct {
 	Move string `json:"move,omitempty"` // the signature move's name
+	// Phases optionally renames the three default phases and their lines
+	// (a saga's hand-written boss); the numbers stay the engine's.
+	Phases []BossPhase `json:"phases,omitempty"`
+	// Minion and MinionHorror set what answers its call (see Boss).
+	Minion       string `json:"minion,omitempty"`
+	MinionHorror int    `json:"minion_horror,omitempty"`
 }
 
 // makeBoss turns e into a boss for this location and party: the stat caps
@@ -97,6 +107,17 @@ func makeBoss(w *World, e *Enemy, spec BossSpec) {
 			{At: 50, Name: "Enraged", Line: e.Name + " is bloodied and fights harder: +1 to hit, +2 damage", Attack: 1, Damage: 2},
 			{At: 25, Name: "Desperate", Line: e.Name + " calls for help and strikes again each turn", Extra: 1, Summon: max(1, size/2)},
 		},
+	}
+	e.Boss.Minion, e.Boss.MinionHorror = trimTo(spec.Minion, 40), clamp(spec.MinionHorror, 0, 3)
+	for i, p := range spec.Phases {
+		if i < len(e.Boss.Phases) {
+			if p.Name != "" {
+				e.Boss.Phases[i].Name = trimTo(p.Name, 40)
+			}
+			if p.Line != "" {
+				e.Boss.Phases[i].Line = trimTo(p.Line, 200)
+			}
+		}
 	}
 }
 
@@ -142,10 +163,17 @@ func bossPhase(w *World, e *Enemy) []string {
 func summonMinions(w *World, boss *Enemy, n int) []string {
 	var names []string
 	for i := 0; i < n; i++ {
-		m := &Enemy{ID: w.NewID("foe"), Name: "Servant of " + boss.Name, Tag: fmt.Sprintf("summoned %d", i+1),
+		name := "Servant of " + boss.Name
+		if boss.Boss != nil && boss.Boss.Minion != "" {
+			name = boss.Boss.Minion
+		}
+		m := &Enemy{ID: w.NewID("foe"), Name: name, Tag: fmt.Sprintf("summoned %d", i+1),
 			StatBlock: StatBlock{MaxHP: max(4, boss.MaxHP/10), AC: max(10, boss.AC-3), AttackBonus: max(2, boss.AttackBonus-3), Damage: "1d6"},
 			ZoneID:    boss.ZoneID}
 		m.HP = m.MaxHP
+		if boss.Boss != nil {
+			m.Horror = boss.Boss.MinionHorror
+		}
 		// they act from next round
 		m.ActedRound = w.Encounter.Round
 		w.Encounter.Enemies = append(w.Encounter.Enemies, m)

@@ -283,8 +283,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, n := range w.NPCs {
-		if err := insert(ctx, tx, "npcs", []string{"campaign_id", "id", "ord", "name", "role", "description", "location_id", "zone_id", "disposition", "merchant", "alive", "antagonist", "memory", "last_talked", "stats", "keeps"},
-			id, n.ID, i, n.Name, n.Role, n.Desc, n.LocationID, n.ZoneID, n.Disposition, n.Merchant, n.Alive, n.Antagonist, js(nonNil(n.Memory)), n.LastTalked, js(n.Stats), js(nonNil(n.Keeps))); err != nil {
+		if err := insert(ctx, tx, "npcs", []string{"campaign_id", "id", "ord", "name", "role", "description", "location_id", "zone_id", "disposition", "merchant", "alive", "antagonist", "memory", "last_talked", "stats", "keeps", "extra"},
+			id, n.ID, i, n.Name, n.Role, n.Desc, n.LocationID, n.ZoneID, n.Disposition, n.Merchant, n.Alive, n.Antagonist, js(nonNil(n.Memory)), n.LastTalked, js(n.Stats), js(nonNil(n.Keeps)), js(n.NPCExtra)); err != nil {
 			return err
 		}
 	}
@@ -312,8 +312,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, l := range w.Lore {
-		if err := insert(ctx, tx, "lore", []string{"campaign_id", "id", "ord", "title", "text", "keywords", "entity_ids", "always_on", "last_trigger"},
-			id, l.ID, i, l.Title, l.Text, js(nonNil(l.Keywords)), js(nonNil(l.EntityIDs)), l.AlwaysOn, l.LastTrigger); err != nil {
+		if err := insert(ctx, tx, "lore", []string{"campaign_id", "id", "ord", "title", "text", "keywords", "entity_ids", "always_on", "last_trigger", "extra"},
+			id, l.ID, i, l.Title, l.Text, js(nonNil(l.Keywords)), js(nonNil(l.EntityIDs)), l.AlwaysOn, l.LastTrigger, js(l.LoreExtra)); err != nil {
 			return err
 		}
 	}
@@ -421,15 +421,15 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Edges = append(w.Edges, e)
 			return nil
 		}),
-		q(`SELECT id, name, role, description, location_id, zone_id, disposition, merchant, alive, antagonist, memory, last_talked, stats, keeps
+		q(`SELECT id, name, role, description, location_id, zone_id, disposition, merchant, alive, antagonist, memory, last_talked, stats, keeps, extra
 			FROM npcs WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			n := &game.NPC{}
-			var mem, stats, keeps string
-			if err := r.Scan(&n.ID, &n.Name, &n.Role, &n.Desc, &n.LocationID, &n.ZoneID, &n.Disposition, &n.Merchant, &n.Alive, &n.Antagonist, &mem, &n.LastTalked, &stats, &keeps); err != nil {
+			var mem, stats, keeps, extra string
+			if err := r.Scan(&n.ID, &n.Name, &n.Role, &n.Desc, &n.LocationID, &n.ZoneID, &n.Disposition, &n.Merchant, &n.Alive, &n.Antagonist, &mem, &n.LastTalked, &stats, &keeps, &extra); err != nil {
 				return err
 			}
 			w.NPCs = append(w.NPCs, n)
-			return errors.Join(unjs(mem, &n.Memory), unjs(stats, &n.Stats), unjs(keeps, &n.Keeps))
+			return errors.Join(unjs(mem, &n.Memory), unjs(stats, &n.Stats), unjs(keeps, &n.Keeps), unjs(extra, &n.NPCExtra))
 		}),
 		q(`SELECT id, key, name, kind, description, value, damage, ability, finesse, reach, ac, dex_cap, effect, owner_kind, owner_id, extra
 			FROM items WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
@@ -468,14 +468,14 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			}
 			return errors.Join(unjs(conds, &e.Conditions), unjs(extra, &e.EnemyExtra))
 		}),
-		q(`SELECT id, title, text, keywords, entity_ids, always_on, last_trigger FROM lore WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
+		q(`SELECT id, title, text, keywords, entity_ids, always_on, last_trigger, extra FROM lore WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			l := &game.Lore{}
-			var kw, ents string
-			if err := r.Scan(&l.ID, &l.Title, &l.Text, &kw, &ents, &l.AlwaysOn, &l.LastTrigger); err != nil {
+			var kw, ents, extra string
+			if err := r.Scan(&l.ID, &l.Title, &l.Text, &kw, &ents, &l.AlwaysOn, &l.LastTrigger, &extra); err != nil {
 				return err
 			}
 			w.Lore = append(w.Lore, l)
-			return errors.Join(unjs(kw, &l.Keywords), unjs(ents, &l.EntityIDs))
+			return errors.Join(unjs(kw, &l.Keywords), unjs(ents, &l.EntityIDs), unjs(extra, &l.LoreExtra))
 		}),
 		q(`SELECT id, title, text, trigger_kind, target, value, effects, effect_target, fired, fired_turn FROM beats WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			b := &game.Beat{}

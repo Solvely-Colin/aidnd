@@ -150,6 +150,11 @@ func completeObjective(w *World, q *Quest, o *Objective) ([]QuestUpdate, []strin
 	for _, c := range w.Characters {
 		changes = append(changes, AwardXP(c, xp)...)
 	}
+	if lvl := w.Campaign.Milestones[o.ID]; lvl > 0 {
+		for _, c := range w.Characters {
+			changes = append(changes, RaiseToLevel(c, lvl)...)
+		}
+	}
 	all := true
 	for _, ob := range q.Objectives {
 		all = all && ob.Done

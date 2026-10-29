@@ -880,13 +880,14 @@ func npcAsEnemy(w *World, n *NPC) *Enemy {
 	sb.AsBoss = nil
 	if w.InCombat() {
 		e := &Enemy{ID: w.NewID("foe"), Name: n.Name, NPCID: n.ID, StatBlock: sb, HP: sb.MaxHP, ZoneID: n.ZoneID}
+		e.Horror = sb.HorrorRank
 		if boss != nil && !hasBoss(w) {
 			makeBoss(w, e, *boss)
 		}
 		w.Encounter.Enemies = append(w.Encounter.Enemies, e)
 		return e
 	}
-	enc, _, err := StartEncounter(w, []EnemySpec{{Name: n.Name, NPCID: n.ID, HP: sb.MaxHP, AC: sb.AC, AttackBonus: sb.AttackBonus, Damage: sb.Damage, Ranged: sb.Ranged, Inflicts: sb.Inflicts, Boss: boss}})
+	enc, _, err := StartEncounter(w, []EnemySpec{{Name: n.Name, NPCID: n.ID, HP: sb.MaxHP, AC: sb.AC, AttackBonus: sb.AttackBonus, Damage: sb.Damage, Ranged: sb.Ranged, Inflicts: sb.Inflicts, Boss: boss, Horror: sb.HorrorRank}})
 	if err != nil {
 		return nil
 	}
@@ -1339,6 +1340,7 @@ func rest(ctx *Ctx, c *Character, st *Step) error {
 		for _, ch := range w.Characters {
 			LongRest(ch)
 			SetHP(ch, ch.MaxHP)
+			RecoverStrain(ch, 1)
 		}
 		s := &w.Campaign.Scene
 		s.Day++

@@ -235,6 +235,8 @@ type EnemySpec struct {
 	Inflicts string `json:"inflicts,omitempty"`
 	// Boss asks for one boss (dangerous places only, one per fight).
 	Boss *BossSpec `json:"boss,omitempty"`
+	// Horror (1..3) tests the party's nerve on first sight (dread campaigns).
+	Horror int `json:"horror,omitempty"`
 }
 
 // StartEncounter creates a fight here from specs, capping stat blocks by
@@ -297,6 +299,7 @@ func StartEncounter(w *World, specs []EnemySpec) (*Encounter, []string, error) {
 			name = "Foe"
 		}
 		e := &Enemy{ID: w.NewID("foe"), Name: name, Tag: trimTo(s.Tag, 30), StatBlock: b, HP: b.MaxHP}
+		e.Horror = clamp(s.Horror, 0, 3)
 		if n := w.NPC(s.NPCID); n != nil && n.LocationID == l.ID {
 			e.NPCID = n.ID
 		}
@@ -439,7 +442,7 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 	}
 	l := w.Here()
 	var out []EnemyTurn
-	var changes []string
+	changes := FaceEnemyHorrors(w, r)
 	w.RefreshMagic()
 	for _, e := range enemiesActingNow(w) {
 		var targets, hidden []*Character
