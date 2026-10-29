@@ -304,19 +304,90 @@ a { color: var(--accent); }
 .ev-act.you .avatar { background: var(--accent); color: var(--accent-ink); }
 .ev-act .by { font-size: 12px; font-weight: 700; color: var(--text-3); }
 .ev-act p { margin: 0; }
-.rolls { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
-.die-card { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-md); }
-.die-card .face {
-  width: 40px; height: 40px; flex: none; display: grid; place-items: center; font: 700 17px var(--mono);
-  background: var(--card-2); border-radius: var(--r-sm);
+/* rolls: die, then the sum, then the margin against AC/DC */
+.rolls { display: grid; gap: 8px; }
+.roll {
+  --tone: var(--text-3);
+  display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; align-items: start;
+  padding: 12px 14px 12px 12px; border: 1px solid var(--line); border-left: 3px solid var(--tone);
+  border-radius: var(--r-sm); background: var(--card);
 }
-.die-card .face.d20 { clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); border-radius: 0; }
-.die-card .what { display: grid; font-size: 13.5px; font-weight: 600; line-height: 1.3; }
-.die-card small { font: 500 11.5px var(--mono); color: var(--text-3); }
-.die-card.success .face, .die-card.critical_success .face { background: var(--accent); color: var(--accent-ink); }
-.die-card.failure .face, .die-card.critical_failure .face { background: var(--bad); color: #fff; }
-.die-card.damage .face { background: color-mix(in srgb, var(--bad) 25%, var(--card-2)); color: var(--bad); }
-.die-card.heal .face { background: var(--accent-soft); color: var(--accent); }
+.roll.ok { --tone: var(--accent); }
+.roll.no { --tone: var(--bad); }
+.roll.foe.ok { --tone: var(--bad); }       /* an enemy landing a blow is bad news */
+.roll.foe.no { --tone: var(--text-3); }
+.roll.solo { grid-template-columns: minmax(0, 1fr); }
+.roll.heal { --tone: var(--accent); }
+.roll.damage { --tone: var(--bad); }
+.roll .die { position: relative; width: 48px; height: 53px; display: grid; place-items: center; color: var(--tone); }
+.roll .die svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.roll .die svg path { fill: color-mix(in srgb, var(--tone) 14%, var(--card)); stroke: var(--tone); stroke-width: 1.5; stroke-linejoin: round; }
+.roll .die svg path.facet { fill: none; stroke-width: .8; opacity: .45; }
+.roll .die b { position: relative; font: 800 17px var(--mono); color: var(--text); margin-top: 3px; }
+.roll.critical_success .die svg path:first-child { fill: var(--tone); }
+.roll.critical_success .die b { color: var(--accent-ink); }
+.roll.foe.critical_success .die b, .roll.critical_failure .die b { color: var(--text); }
+.roll-body { min-width: 0; display: grid; gap: 6px; }
+.roll-head { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
+.roll-label { font-size: 13.5px; font-weight: 600; line-height: 1.3; color: var(--text-2); min-width: 0; }
+.stamp { flex: none; font: 800 12px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--tone); }
+.roll.foe.no .stamp { color: var(--text-2); }
+.sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; font: 600 15px var(--mono); }
+.sum .t { display: inline-flex; align-items: baseline; gap: 3px; }
+.sum .t small { font: 600 10.5px var(--mono); color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.sum .nat { color: var(--tone); }
+.sum .total { font-size: 19px; font-weight: 800; color: var(--text); }
+.sum .op { color: var(--text-3); font-weight: 500; }
+.sum .vs { margin-left: auto; color: var(--text-3); font-size: 13px; white-space: nowrap; }
+.sum .vs b { color: var(--text); font-size: 15px; }
+.sum .vs small { font-size: 11px; }
+.track { position: relative; height: 6px; border-radius: 3px; background: var(--card-2); }
+.track .fill { position: absolute; inset: 0 auto 0 0; width: var(--w); border-radius: 3px; background: var(--tone); }
+.track .need { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--text); border-radius: 1px; }
+.margin { font: 600 11.5px var(--mono); color: var(--text-3); text-align: right; margin-top: -2px; }
+.dmg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: 600 14px var(--mono); padding-top: 8px; border-top: 1px dashed var(--line-2); }
+.roll.solo .dmg { border-top: 0; padding-top: 0; }
+.dmg-k { font-size: 11.5px; color: var(--text-3); }
+.dmg .pips { display: inline-flex; gap: 4px; }
+.dmg .pips i { font-style: normal; min-width: 24px; height: 24px; padding: 0 4px; display: grid; place-items: center; border-radius: 4px; border: 1px solid var(--line-2); background: var(--card-2); font-size: 13px; }
+.dmg .op { color: var(--text-3); }
+.dmg b { font-size: 17px; color: var(--bad); }
+.dmg.heal b { color: var(--accent); }
+.dmg-w { font: 500 12.5px var(--sans); color: var(--text-3); }
+
+/* live rolls: hold the result back while the die tumbles, then land it */
+.roll.fresh .stamp, .roll.fresh .margin, .roll.fresh .dmg, .roll.fresh .sum > :not(.nat) { opacity: 0; }
+.roll.fresh .track .fill { width: 0; }
+.roll.fresh .die svg { animation: tumble .32s linear infinite; }
+.roll.landed .die svg { animation: thud .35s cubic-bezier(.3, 1.6, .5, 1); }
+.roll.landed .track .fill { animation: fill .5s ease-out; }
+.roll.landed .stamp { animation: stamp .4s .15s cubic-bezier(.3, 1.6, .5, 1) backwards; }
+.roll.landed .sum > :not(.nat), .roll.landed .margin { animation: rise .3s backwards; }
+.roll.landed .dmg { animation: rise .3s .35s backwards; }
+@keyframes tumble { to { transform: rotate(360deg); } }
+@keyframes thud { from { transform: scale(1.25) rotate(-12deg); } }
+@keyframes fill { from { width: 0; } }
+@keyframes stamp { from { opacity: 0; transform: scale(1.8); } }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .roll .die svg, .roll .stamp, .roll .track .fill, .roll .sum > *, .roll .margin, .roll .dmg { animation: none !important; }
+}
+
+/* roll tray and the check waiting in the composer */
+.roll-tray .opt b em { font-style: normal; font-weight: 500; color: var(--text-3); }
+.bonus { font: 700 14px var(--mono); color: var(--text); white-space: nowrap; }
+.bonus small { font: 600 10.5px var(--mono); color: var(--text-3); margin-right: 5px; }
+.tray-k { margin: 6px 10px 2px; font-size: 12px; color: var(--text-3); }
+.abil-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 4px; }
+.abil { display: grid; gap: 1px; justify-items: center; padding: 8px 0; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--bg); }
+.abil:hover { border-color: var(--text-3); }
+.abil small { font: 600 10.5px var(--mono); color: var(--text-3); }
+.abil b { font: 700 15px var(--mono); }
+.pending-roll { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; border: 1px solid var(--line-2); border-left: 3px solid var(--accent); border-radius: var(--r-sm); background: var(--card); font-size: 13.5px; }
+.pending-roll .grow { font-size: 12px; text-align: right; }
+.d20-mini { font: 700 10.5px var(--mono); padding: 2px 5px; border-radius: 3px; background: var(--text); color: var(--bg); }
+.pending-roll .x { border: 0; background: transparent; width: 28px; height: 28px; display: grid; place-items: center; color: var(--text-3); border-radius: var(--r-sm); }
+.pending-roll .x svg { width: 15px; height: 15px; }
 .changes { margin: 0; padding: 0 0 0 14px; font-size: 13px; color: var(--text-3); display: grid; gap: 2px; }
 .ev-note { font-size: 14px; color: var(--text-3); }
 .ev-note.bad { color: var(--bad); }

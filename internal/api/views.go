@@ -25,6 +25,7 @@ type ExitView struct {
 	State    string `json:"state"`
 	ZoneID   string `json:"zone_id,omitempty"`
 	Explored bool   `json:"explored"`
+	Sealed   bool   `json:"sealed,omitempty"` // locked until the story opens it; no check can
 }
 
 type NPCBrief struct {
@@ -249,7 +250,8 @@ func locationView(w *game.World, l *game.Location, detail bool) LocationView {
 		v.Zones = append(v.Zones, zv)
 	}
 	for _, x := range exits {
-		v.Exits = append(v.Exits, ExitView{ID: x.Edge.ID, Label: x.Label, ToID: x.To.ID, ToName: x.To.Name, State: string(x.Edge.State), ZoneID: x.Zone, Explored: !x.To.Stub})
+		v.Exits = append(v.Exits, ExitView{ID: x.Edge.ID, Label: x.Label, ToID: x.To.ID, ToName: x.To.Name, State: string(x.Edge.State), ZoneID: x.Zone, Explored: !x.To.Stub,
+			Sealed: x.Edge.State == game.EdgeLocked && x.Edge.LairGate})
 	}
 	for _, n := range w.NPCsAt(l.ID) {
 		v.NPCs = append(v.NPCs, npcBrief(n))

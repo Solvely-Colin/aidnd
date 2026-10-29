@@ -161,15 +161,40 @@ func AttackMod(c *Character, wpn *Item) (int, Ability) {
 
 // CheckRoll is a d20 check with its context, ready for the Resolution.
 type CheckRoll struct {
-	Label   string  `json:"label"`
-	Ability Ability `json:"ability,omitempty"`
+	Label   string     `json:"label"`
+	Ability Ability    `json:"ability,omitempty"`
+	Parts   []RollPart `json:"parts,omitempty"`   // what the modifier is made of
+	Against string     `json:"against,omitempty"` // "AC" or "DC"
+	Cover   int        `json:"cover,omitempty"`   // added to the target
 	dice.Check
+}
+
+// RollPart is one named piece of a roll's modifier, so players can see
+// where a +5 comes from.
+type RollPart struct {
+	Label string `json:"label"`
+	Value int    `json:"value"`
+}
+
+// CheckParts splits CheckMod(a) into the ability modifier and proficiency.
+func CheckParts(c *Character, a Ability) []RollPart {
+	ps := []RollPart{{Label: string(a), Value: c.Mod(a)}}
+	if c.IsProficient(a) {
+		ps = append(ps, RollPart{Label: "Proficiency", Value: ProficiencyBonus(c.Level)})
+	}
+	return ps
+}
+
+// AttackParts splits AttackMod into the ability modifier and proficiency.
+func AttackParts(c *Character, wpn *Item) []RollPart {
+	_, ab := AttackMod(c, wpn)
+	return []RollPart{{Label: string(ab), Value: c.Mod(ab)}, {Label: "Proficiency", Value: ProficiencyBonus(c.Level)}}
 }
 
 // AbilityCheck rolls d20 + modifier vs a snapped DC.
 func AbilityCheck(r *dice.Roller, c *Character, a Ability, dc int) CheckRoll {
 	dc = dice.SnapDC(dc)
-	return CheckRoll{Label: fmt.Sprintf("%s %s check", c.Name, a), Ability: a, Check: r.D20(c.CheckMod(a), dc)}
+	return CheckRoll{Label: fmt.Sprintf("%s %s check", c.Name, a), Ability: a, Parts: CheckParts(c, a), Against: "DC", Check: r.D20(c.CheckMod(a), dc)}
 }
 
 // AttackOutcome is an attack roll plus damage.
@@ -183,7 +208,7 @@ type AttackOutcome struct {
 // Attack rolls toHit vs ac and, on a hit, damage (dice doubled on a 20).
 func Attack(r *dice.Roller, label string, toHit, ac int, damage string) AttackOutcome {
 	ch := r.D20(toHit, ac)
-	out := AttackOutcome{Roll: CheckRoll{Label: label, Check: ch}}
+	out := AttackOutcome{Roll: CheckRoll{Label: label, Against: "AC", Check: ch}}
 	if !ch.Tier.Succeeded() {
 		return out
 	}

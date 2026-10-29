@@ -11,8 +11,18 @@ import (
 
 // Hints are optional map selections sent with an action.
 type Hints struct {
-	TargetID string `json:"target_id,omitempty"`
-	ZoneID   string `json:"zone_id,omitempty"`
+	TargetID string     `json:"target_id,omitempty"`
+	ZoneID   string     `json:"zone_id,omitempty"`
+	Check    *CheckHint `json:"check,omitempty"`
+}
+
+// CheckHint is a check the player called for from the dock. Search,
+// unlock and force are rolled as asked, without the interpreter; any other
+// purpose only fixes the ability and lets the interpreter set the DC.
+type CheckHint struct {
+	Ability string `json:"ability,omitempty"`
+	Purpose string `json:"purpose,omitempty"` // search | unlock | force | other
+	Exit    string `json:"exit,omitempty"`    // locked exit for unlock/force
 }
 
 func itemLine(it *game.Item, c *game.Character) string {

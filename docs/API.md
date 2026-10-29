@@ -90,7 +90,7 @@ they/them, and drafts fill it from the concept.
 | `POST /campaigns/{id}/characters` | joined player | `{character}` or `{concept}` → character view. |
 | `GET /campaigns/{id}/characters/{cid}` | any caller | Character view. |
 | `POST /campaigns/{id}/start` | joined player / service | Starts the game. |
-| `POST /campaigns/{id}/actions` | active player | `{text, target_id?, zone_id?}` → turn result. |
+| `POST /campaigns/{id}/actions` | active player | `{text, target_id?, zone_id?, check?}` → turn result. |
 | `POST /campaigns/{id}/skip` | player / service | Ends the active turn. See Skipping. |
 | `GET /campaigns/{id}/map` | any caller | Known places and passable/locked paths only. |
 | `GET /campaigns/{id}/locations/{lid}` | any caller | A visited or known location; 404 otherwise. |
@@ -132,7 +132,7 @@ and the main quest only shows objectives up to the first one not yet done.
   "location": {
     "id", "name", "kind", "description", "danger", "visited", "explored", "is_hub",
     "zones": [{"id", "name", "desc", "cover", "adjacent": ["z2"], "exits": ["e1"]}],
-    "exits": [{"id", "label", "to_id", "to_name", "state": "open | locked", "zone_id", "explored"}],
+    "exits": [{"id", "label", "to_id", "to_name", "state": "open | locked", "zone_id", "explored", "sealed"}],
     "npcs": [{"id", "name", "role", "zone_id", "merchant", "disposition", "alive"}],
     "items": [{"id", "name", "kind", ...}]           // on the ground
   },
@@ -178,6 +178,13 @@ budget cannot pay for are returned in `skipped` with a reason.
 an NPC, a zone). They resolve ambiguity; the text still decides what
 happens.
 
+`check` is a check the player called for: `{ability?, purpose, exit?}`.
+With purpose `search`, `unlock` or `force` (the last two need a locked
+`exit` that is not `sealed`) the engine rolls exactly that check and the
+interpreter is skipped; a bad exit is a 400. With purpose `other` the
+ability is fixed and the interpreter still sets the DC from the text. The
+engine always rolls the dice.
+
 ### Turn result
 
 ```jsonc
@@ -188,7 +195,9 @@ happens.
       "error": "",                                 // why a step failed
       "rolls": [{"label", "kind": "check|attack|damage|heal|subdue|encounter",
                  "natural": 17, "dice": [5], "expr": "1d8+2", "mod": 5, "total": 22,
-                 "target": 13, "tier": "success"}],
+                 "target": 13, "tier": "success",
+                 "parts": [{"label": "DEX", "value": 3}, {"label": "Proficiency", "value": 2}],
+                 "against": "AC", "cover": 2, "crit": false}],   // parts sum to mod; cover is inside target
       "changes": ["Goblin takes 7 damage (0/7)"],
       "quests": [...], "arrived": "loc_4", "combat_started": false, "combat_ended": true
     }]
