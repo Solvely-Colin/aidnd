@@ -267,11 +267,17 @@ function erasHTML() {
   return `<div class="eras" id="eras">${list.map(([k, l]) => `<button class="${S.era === k ? "on" : ""}" data-era="${esc(k)}">${esc(l)}</button>`).join("")}</div>`;
 }
 
+function deathHTML() {
+  const opts = [["standard", "Characters can die"], ["story", "Heroes never die"]];
+  return `<div class="eras" id="death">${opts.map(([k, l]) => `<button class="${(S.lethality || "standard") === k ? "on" : ""}" data-lethal="${k}">${l}</button>`).join("")}</div>`;
+}
+
 function newStoryHTML() {
   const sug = SUGGESTIONS[hash(S.me?.name || "") % SUGGESTIONS.length];
   return `<span class="mono-k">Begin something new</span>
     <textarea class="under big" id="premise" rows="2" placeholder="What is this story about? A place, a mood, a mystery…"></textarea>
     ${erasHTML()}
+    ${deathHTML()}
     <div class="new-foot"><button class="try" data-premise="${esc(sug)}">Try: <em>${esc(sug)}</em></button><button class="btn" data-act="create">Write this story</button></div>
     <span class="help">The DM writes the places, the people and a main quest. It takes about a minute. To join a friend’s story, open it from Open tables once they have started one.</span>`;
 }
@@ -306,7 +312,7 @@ async function createCampaign() {
   box.innerHTML = writingHTML();
   const t = setInterval(() => { if ($("#new") === box) box.innerHTML = writingHTML(); }, 1000);
   try {
-    const c = await api("POST", "/campaigns", { premise });
+    const c = await api("POST", "/campaigns", { premise, lethality: S.lethality || "standard" });
     await api("POST", `/campaigns/${c.id}/players`, { name: S.me.name });
     go(`#/c/${c.id}`);
   } catch (e) { toast(e.message); renderHome(); }
@@ -331,7 +337,7 @@ async function openCampaign(id) {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
@@ -363,6 +369,13 @@ function liveEvent(e) {
   if (e.type === "enemy_turns") (d.turns || []).forEach(t => t.attack?.roll && queueRoll({ ...t.attack.roll, kind: "attack", label: t.attack.roll.label || `Attack on ${t.target || "the party"}` }, t.enemy, true));
   if (e.type === "location_changed") { S.collapsed = false; S.talkTo = ""; S.stock = {}; }
   if (e.type === "turn_started" && d.player_id !== S.me?.player_id) S.tray = "";
+  if (e.type === "death_save" && d.roll) queueRoll(d.roll, rollerName(d.roll.label));
+}
+
+// rollerName finds the party member whose name starts a roll's label.
+function rollerName(label) {
+  const c = (S.view?.party || []).find(p => String(label || "").startsWith(p.name + " "));
+  return c?.name || "";
 }
 
 const FRESH_SECS = 30;
@@ -382,6 +395,7 @@ async function refreshView() {
 function render() {
   if (!S.view) return;
   if (S.view.status === "lobby") return renderLobby();
+  if (S.draft && mine()?.dead) return renderBuilder();
   renderPlay();
 }
 
@@ -670,7 +684,7 @@ function eachRoll(d) {
     if (r.kind === "encounter") continue;
     const last = out[out.length - 1];
     if (r.kind === "damage" && last?.d20?.kind === "attack" && !last.dmg) { last.dmg = r; continue; }
-    out.push(r.kind === "damage" || r.kind === "heal" ? { d20: null, dmg: r } : { d20: r });
+    out.push(r.kind === "damage" || r.kind === "heal" ? { d20: null, dmg: r } : { d20: r, foe: !!r.foe });
   }
   return out;
 }
@@ -703,7 +717,9 @@ function feedItems(evs) {
         const who = isMe(d.character_id) ? "You" : actorName(d.character_id);
         const rolls = eachRoll(d);
         const changes = (d.steps || []).flatMap(s => s.changes || []).concat(d.world_changes || []);
-        rolls.forEach((g, i) => out.push(rollItem(`${e.id}.${i}`, who, g, false, i === rolls.length - 1 ? changes : [], actorName(d.character_id))));
+        rolls.forEach((g, i) => out.push(g.foe
+          ? rollItem(`${e.id}.${i}`, g.d20.by || "", g, true, [], g.d20.by || "")
+          : rollItem(`${e.id}.${i}`, who, g, false, i === rolls.length - 1 ? changes : [], actorName(d.character_id))));
         if (!rolls.length) changes.forEach(t => out.push({ k: "sys", text: t }));
         (d.steps || []).forEach(s => { if (s.error) out.push({ k: "sys", bad: true, text: s.error }); });
         (d.skipped || []).forEach(s => out.push({ k: "sys", text: `Not this turn: ${s.error}` }));
@@ -716,6 +732,11 @@ function feedItems(evs) {
       case "enemy_turns":
         (d.turns || []).forEach((t, i) => {
           (t.before || []).forEach(c => out.push({ k: "sys", cond: true, text: c }));
+          (t.reactions || []).forEach((re, j) => {
+            const a = re.attack || {};
+            const g = { d20: { ...a.roll, kind: "attack" }, dmg: a.damage ? { ...a.damage, kind: "damage" } : null };
+            out.push(rollItem(`${e.id}.r${i}.${j}`, isMe(re.character_id) ? "You" : re.character, g, false, [re.text], re.character));
+          });
           if (t.kind === "stunned") return;
           if (!t.attack?.roll) return (t.after || []).forEach(c => out.push({ k: "sys", cond: true, text: c }));
           const g = { d20: { ...t.attack.roll, kind: "attack", label: t.attack.roll.label || `vs ${t.target || "the party"}` }, dmg: t.attack.damage ? { ...t.attack.damage, kind: "damage" } : null };
@@ -726,6 +747,12 @@ function feedItems(evs) {
         if (d.narration) out.push({ k: "narr", text: d.narration });
         break;
       case "conditions": (d.changes || []).forEach(t => out.push({ k: "sys", cond: true, text: t })); break;
+      case "death_save": {
+        const name = rollerName(d.roll?.label), c = party.find(p => p.name === name);
+        out.push(rollItem(`${e.id}`, c && isMe(c.id) ? "You" : name, { d20: { ...d.roll, label: "Death save" } }, false, [d.line], name));
+        if (d.died || d.stable || d.revived) out.push({ k: "sys", bad: !!d.died, text: d.line });
+        break;
+      }
       case "quest_updated": {
         const label = d.status === "completed" ? "QUEST DONE" : d.objective_id ? "QUEST" : d.status === "active" ? "NEW QUEST" : "QUEST";
         out.push({ k: "quest", label, text: d.text || d.title });
@@ -842,7 +869,7 @@ function isThinking() {
   if (S.sending || S.progress) return true;
   for (let i = S.events.length - 1; i >= 0; i--) {
     const t = S.events[i].type;
-    if (t === "narration" || t === "enemy_turns" || t === "turn_started" || t === "turn_budget" || t === "campaign_ended") return false;
+    if (t === "narration" || t === "enemy_turns" || t === "turn_started" || t === "turn_budget" || t === "campaign_ended" || t === "action_pending" || t === "action_cancelled" || t === "death_save") return false;
     if (t === "player_action") return true;
   }
   return false;
@@ -853,7 +880,7 @@ function isThinking() {
 
 function suggestions() {
   const v = S.view, me = mine(), loc = v.location || {}, b = v.budget || {};
-  if (!v.you?.your_turn || isThinking() || (S.composer || "").trim() || !me) return [];
+  if (!v.you?.your_turn || isThinking() || (S.composer || "").trim() || !me || (v.pending || []).some(p => isMe(p.character_id))) return [];
   const out = [];
   if (v.encounter) {
     const foe = v.encounter.enemies.find(e => e.hp > 0);
@@ -943,15 +970,17 @@ function renderDock() {
     el.innerHTML = `<div class="dock-in"><div class="ended"><span>${v.status === "completed" ? "The story is complete." : "The story has ended."}</span><button class="btn" data-act="home">Back home</button></div></div>`;
     return;
   }
-  const yours = !!v.you?.your_turn, thinking = isThinking(), enc = v.encounter;
+  const myPend = (v.pending || []).find(p => isMe(p.character_id));
+  const yours = !!v.you?.your_turn && !myPend, thinking = isThinking(), enc = v.encounter, free = !!v.free_roam;
   const groups = trays();
   if (S.tray && !groups[S.tray]?.items.length) S.tray = "";
   if (!yours) S.tray = "";
-  const defs = enc ? [["attack", "Attack"], ["move", "Move"], ["roll", "Roll"], ["use", "Use"], ["end", "End turn"]]
-    : [["look", "Look"], ["talk", "Talk"], ["go", "Go"], ["roll", "Roll"], ["use", "Use"], ["end", "End turn"]];
+  const defs = enc ? [["attack", "Attack"], ["move", "Move"], ["tactics", "Tactics"], ["roll", "Roll"], ["use", "Use"], ["end", "End turn"]]
+    : [["look", "Look"], ["talk", "Talk"], ["go", "Go"], ["roll", "Roll"], ["use", "Use"]];
   const acts = defs.filter(([k]) => k === "look" || k === "end" || groups[k]?.items.length)
     .map(([k, l]) => `<button class="${S.tray === k ? "on" : ""}" data-dock="${k}" ${thinking ? "disabled" : ""}>${l}</button>`).join("");
   const active = v.active, ap = active && v.players.find(p => p.id === active.player_id);
+  const others = (v.pending || []).filter(p => !isMe(p.character_id));
   const idle = v.turn_started ? Date.now() / 1000 - v.turn_started : 0;
   const talkN = S.talkTo && (v.location?.npcs || []).find(n => n.id === S.talkTo);
   const kept = $("#say")?.value ?? S.composer;
@@ -962,16 +991,23 @@ function renderDock() {
       ${e.hp > 0 && e.conditions?.length ? `<span class="conds">${e.conditions.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note)}">${esc(k.label)}</span>`).join("")}</span>` : ""}
       <span class="cta">${e.hp <= 0 ? "down" : yours && v.budget?.action !== 0 ? "Tap to attack" : e.ranged ? "ranged" : zoneName(e.zone_id)}</span></button>`).join("")}</div>` : ""}
     ${yours && S.tray ? trayHTML(groups[S.tray]) : ""}
-    ${yours ? `<div class="turnrow"><span class="who">Your turn</span><span class="acts">${acts}</span></div>` : active ? `<div class="turnrow"><span class="who other">${esc(active.name)}’s turn <em>· ${esc(ap?.name || "")} is thinking</em></span>
+    ${myPend ? rollCardHTML(myPend) : me?.dead ? deadCardHTML(me) : ""}
+    ${others.length ? `<div class="turnrow"><span class="who other">${others.map(p => `${esc(firstName(p.name))} ${p.kind === "death_save" ? "is dying · death save" : "is about to roll"}`).join(" · ")}</span></div>` : ""}
+    ${myPend ? "" : yours ? `<div class="turnrow"><span class="who">${free ? "Free play · anyone can act" : "Your turn"}</span><span class="acts">${acts}</span></div>`
+      : free ? `<div class="turnrow"><span class="who other">Free play <em>· anyone on their feet can act</em></span></div>`
+      : active && !others.some(p => p.character_id === active.character_id) ? `<div class="turnrow"><span class="who other">${esc(active.name)}’s turn <em>· ${esc(ap?.name || "")} is thinking</em></span>
       ${v.you?.joined && idle > 120 ? `<span class="acts"><button data-act="skip">Skip their turn</button></span>` : ""}</div>` : ""}
     ${yours ? checkChipHTML() : ""}
     <form class="inputbar ${yours && !thinking ? "you" : ""}" id="say-form">
       <div class="party">${v.party.map(c => { const st = statuses(c); return `<button type="button" class="pa ${v.active?.character_id === c.id ? "acting" : ""} ${isMe(c.id) ? "you" : ""} ${st.length ? "afflicted" : ""}" data-sheet="${esc(c.id)}" title="${esc(c.name)} · ${c.hp}/${c.max_hp} HP${st.length ? " · " + esc(st.join(", ")) : ""}">${initial(c.name)}${face(c, "round-f")}<span class="hpl"><i class="${c.hp / c.max_hp <= .5 ? "low" : ""}" style="width:${hpPct(c)}%"></i></span></button>`; }).join("")}</div>
       <span class="sep"></span>
       ${thinking ? `<span class="status">The dice are rolling…</span>`
+        : myPend ? `<span class="status">${myPend.kind === "death_save" ? "Roll your death save" : "Roll the dice, or take it back"}</span>`
+        : me?.dead ? `<span class="status">${esc(firstName(me.name))} has fallen</span>`
+        : me?.down && free ? `<span class="status">${esc(firstName(me.name))} is unconscious until someone helps</span>`
         : yours ? `<textarea id="say" rows="1" enterkeyhint="send" placeholder="${esc(enc ? "Say exactly what you do…" : talkN ? `Say something to ${talkN.name}…` : "What do you do?")}">${esc(kept)}</textarea>
           <button class="send" aria-label="Send">${ICON.send}</button>`
-        : `<span class="status">${active ? `Waiting for ${esc(active.name)}…` : "Waiting…"}</span>`}
+        : `<span class="status">${me?.dying ? "You lie dying…" : active ? `Waiting for ${esc(active.name)}…` : "Waiting…"}</span>`}
     </form></div>`;
   const ta = $("#say");
   if (ta) {
@@ -988,10 +1024,15 @@ const zoneName = id => S.view?.location?.zones?.find(z => z.id === id)?.name || 
 // checkMod mirrors the engine's CheckMod so the tray can show the bonus
 // before the roll; the engine still rolls and adds it.
 function checkMod(me, a) { return (me.modifiers?.[a] ?? 0) + ((me.proficient || []).includes(a) && !me.modifiers ? me.proficiency_bonus || 0 : 0); }
+// Skills come from the sheet the engine sends; proficient ones first.
+const skillsOf = me => (me?.skills || []).slice().sort((a, b) => b.proficient - a.proficient);
+const skillMod = (me, key) => (me?.skills || []).find(k => k.key === key)?.mod ?? 0;
+// contestDC mirrors the engine's shove/grapple DC: 8 + STR + proficiency.
+const contestDC = me => 8 + mod(me.scores?.STR ?? 10) + (me.proficiency_bonus || 2);
 
 function trays() {
   const v = S.view, loc = v.location || {}, me = mine(), enc = !!v.encounter, b = v.budget || {};
-  const g = { talk: { title: "Talk to", items: [] }, go: { title: "Go to", items: [] }, move: { title: "Move to · uses your move", items: [] }, attack: { title: "Attack", items: [] }, roll: { title: "Roll a check", items: [] }, use: { title: "Use", items: [] } };
+  const g = { talk: { title: "Talk to", items: [] }, go: { title: "Go to", items: [] }, move: { title: "Move to · uses your move", items: [] }, attack: { title: "Attack", items: [] }, roll: { title: "Roll a check", items: [] }, use: { title: "Use", items: [] }, tactics: { title: "Tactics · uses your action", items: [] } };
   if (!me) return g;
   for (const n of loc.npcs || []) if (n.alive !== false) g.talk.items.push({ name: n.name, sub: [n.role, zoneName(n.zone_id)].filter(Boolean).join(" · "), talk: n.id });
   for (const z of loc.zones || []) if (z.id !== me.zone_id) {
@@ -1007,16 +1048,29 @@ function trays() {
     const w = me.attack || {};
     g.attack.title = `Attack · ${me.weapon?.name || "unarmed"}${w.damage || me.weapon?.damage ? " " + (w.damage || me.weapon.damage) : ""}`;
     for (const e of v.encounter.enemies) if (e.hp > 0) g.attack.items.push({ name: e.display, sub: `${e.hp}/${e.max_hp} HP · ${zoneName(e.zone_id) || (e.ranged ? "ranged" : "")}`, send: `I attack ${the(e.display)}`, hint: { target_id: e.id } });
+    // Teamwork and positioning (5e actions). They are sent as picked.
+    const t = g.tactics.items, act = (kind, extra = {}) => ({ act: { kind, ...extra } });
+    t.push({ name: "Dodge", sub: "attacks on you have disadvantage", send: "I take the Dodge action and focus on defense", hint: act("dodge") });
+    t.push({ name: "Disengage", sub: "move away without opportunity attacks", send: "I disengage carefully", hint: act("disengage") });
+    t.push({ name: "Hide", sub: `Stealth ${signed(skillMod(me, "stealth"))}`, send: "I try to hide", hint: act("hide") });
+    t.push({ name: "Ready an attack", sub: "strike whatever comes within reach", send: "I ready an attack for the first enemy that comes close", hint: act("ready") });
+    for (const c of v.party) if (!isMe(c.id) && !c.down && c.zone_id === me.zone_id) t.push({ name: `Help ${firstName(c.name)}`, sub: "advantage on their next roll", send: `I help ${c.name}`, hint: act("help", { target: c.id }) });
+    for (const e of v.encounter.enemies) if (e.hp > 0 && e.zone_id === me.zone_id) {
+      t.push({ name: `Knock ${the(e.display)} prone`, sub: `shove · DC ${contestDC(me)}`, send: `I shove ${the(e.display)} to the ground`, hint: act("shove", { target: e.id, method: "prone" }) });
+      t.push({ name: `Shove ${the(e.display)} back`, sub: `push a zone · DC ${contestDC(me)}`, send: `I shove ${the(e.display)} away`, hint: act("shove", { target: e.id, method: "push" }) });
+      t.push({ name: `Grapple ${the(e.display)}`, sub: `hold it fast · DC ${contestDC(me)}`, send: `I grab hold of ${the(e.display)}`, hint: act("grapple", { target: e.id }) });
+    }
+    for (const c of v.party) if (c.dying && c.zone_id === me.zone_id) g.use.items.push({ name: `Stabilize ${firstName(c.name)}`, bonus: `Medicine ${signed(skillMod(me, "medicine"))}`, send: `I try to stop ${c.name}'s bleeding`, hint: { check: { skill: "medicine", ability: "WIS", purpose: "stabilize" } } });
   }
   // Checks a player can call for. Search and locks are rolled exactly as
   // picked; an ability check keeps the ability and lets the game master set
   // the DC from what the player writes.
   const tools = (me.inventory || []).some(i => i.key === "thieves_tools");
-  g.roll.items.push({ name: "Search for hidden ways", bonus: `WIS ${signed(checkMod(me, "WIS"))}`, send: "I search the area for hidden ways", hint: { check: { ability: "WIS", purpose: "search" } } });
+  g.roll.items.push({ name: "Search for hidden ways", bonus: `Perception ${signed(skillMod(me, "perception"))}`, send: "I search the area for hidden ways", hint: { check: { ability: "WIS", skill: "perception", purpose: "search" } } });
   for (const x of loc.exits || []) {
     if (x.state !== "locked" || x.sealed) continue;
-    g.roll.items.push({ name: `Pick the lock to ${x.to_name}`, bonus: `DEX ${signed(checkMod(me, "DEX") + (tools ? 2 : 0))}`, send: `I pick the lock on the way to ${x.to_name}`, hint: { check: { ability: "DEX", purpose: "unlock", exit: x.id } } });
-    g.roll.items.push({ name: `Force the way to ${x.to_name}`, bonus: `STR ${signed(checkMod(me, "STR"))}`, send: `I force the way to ${x.to_name}`, hint: { check: { ability: "STR", purpose: "force", exit: x.id } } });
+    g.roll.items.push({ name: `Pick the lock to ${x.to_name}`, bonus: `Sleight of Hand ${signed(skillMod(me, "sleight_of_hand") + (tools ? 2 : 0))}`, send: `I pick the lock on the way to ${x.to_name}`, hint: { check: { ability: "DEX", skill: "sleight_of_hand", purpose: "unlock", exit: x.id } } });
+    g.roll.items.push({ name: `Force the way to ${x.to_name}`, bonus: `Athletics ${signed(skillMod(me, "athletics"))}`, send: `I force the way to ${x.to_name}`, hint: { check: { ability: "STR", skill: "athletics", purpose: "force", exit: x.id } } });
   }
   g.roll.abil = true;
   for (const i of loc.items || []) if (!enc || b.free !== 0) g.use.items.push({ name: `Take the ${i.name}`, sub: "on the ground", send: `I pick up ${the(i.name)}` });
@@ -1030,17 +1084,46 @@ function trayHTML(t) {
   S._tray = t.items;
   return `<div class="tray"><span class="mono-k">${esc(t.title)}</span>
     ${t.items.map((o, i) => `<button class="tray-item" data-pick="${i}"><b>${esc(o.name)}</b>${o.bonus ? `<span class="bonus">${esc(o.bonus)}</span>` : o.sub ? `<span>${esc(o.sub)}</span>` : ""}</button>`).join("")}
-    ${t.abil && me ? `<span class="mono-k">Any other check · say what you try, the DM sets the difficulty</span>
-      <div class="abil-strip">${ABIL.map(a => `<button data-check="${a}"><small>${a}</small><b>${signed(checkMod(me, a))}</b></button>`).join("")}</div>` : ""}
+    ${t.abil && me ? `<span class="mono-k">Any other check · pick a skill, say what you try, the DM sets the difficulty</span>
+      <div class="skill-grid">${skillsOf(me).map(k => `<button class="${k.proficient ? "prof" : ""}" data-skill="${esc(k.key)}"><small>${esc(k.name)}</small><b>${signed(k.mod)}</b></button>`).join("")}</div>` : ""}
   </div>`;
 }
 
 function checkChipHTML() {
   const c = S.hint?.check, me = mine();
   if (!c || !me) return "";
-  const what = { search: "Search", unlock: "Pick the lock", force: "Force it", other: `${ABIL_NAME[c.ability] || c.ability} check` }[c.purpose] || "Check";
-  return `<div class="check-chip"><span class="hex">d20</span><b>${esc(what)}</b><span>${esc(c.ability)} ${signed(checkMod(me, c.ability))}</span>
+  const sk = c.skill && skillsOf(me).find(k => k.key === c.skill);
+  const what = { search: "Search", unlock: "Pick the lock", force: "Force it", other: `${sk ? sk.name : ABIL_NAME[c.ability] || c.ability} check` }[c.purpose] || "Check";
+  return `<div class="check-chip"><span class="hex">d20</span><b>${esc(what)}</b><span>${sk ? `${esc(sk.name)} ${signed(sk.mod)}` : `${esc(c.ability)} ${signed(checkMod(me, c.ability))}`}</span>
     <span class="grow">${c.purpose === "other" ? "say what you try" : "rolled when you send"}</span><button type="button" data-act="clear-check" aria-label="Drop the check">${ICON.close}</button></div>`;
+}
+
+// rollCardHTML is your planned turn waiting for your roll: each step with
+// what it costs, the d20s it needs, and the button that rolls them.
+function rollCardHTML(p) {
+  const me = mine(), v = S.view;
+  if (p.kind === "death_save") {
+    const d = me?.death_saves || { successes: 0, failures: 0 };
+    const pips = (n, cls) => [0, 1, 2].map(i => `<i class="${i < n ? cls : ""}"></i>`).join("");
+    return `<div class="rollcard dying"><div class="rc-head"><span class="mono-k">You are dying</span><span class="pips"><span>Saves ${pips(d.successes, "ok")}</span><span>Fails ${pips(d.failures, "no")}</span></span></div>
+      <p class="rc-note">Roll a d20: 10 or more is a success, a 1 counts twice, a 20 gets you back up. Three successes and you're stable${v.lethality === "story" ? "; in this story you can't die" : "; three failures and you die"}.</p>
+      <div class="rc-acts"><button class="btn primary rc-roll" data-act="roll" ${S.rolling ? "disabled" : ""}><span class="hex">d20</span> Roll death save</button></div></div>`;
+  }
+  const steps = (p.preview || []).map(st => {
+    const rolls = (st.rolls || []).map(r => `<span class="rc-d20"><span class="hex">d20</span>${signed(r.mod)} vs ${r.against === "AC" ? "AC" : "DC"} ${r.target}${r.edge ? ` <em class="edge ${esc(r.edge)}" title="${esc(r.edge_why || "")}">${r.edge === "advantage" ? "ADV" : "DIS"}</em>` : ""}</span>`).join("");
+    const cost = st.error ? `<span class="rc-bad">${esc(st.error)}</span>` : st.slot && st.slot !== "free" && st.slot !== "none" ? `<span class="rc-slot">${esc(st.slot)}</span>` : "";
+    return `<li class="${st.error ? "bad" : ""}"><b>${esc(st.label)}</b>${rolls}${cost}</li>`;
+  }).join("");
+  return `<div class="rollcard"><div class="rc-head"><span class="mono-k">Roll when ready</span><button class="link" data-act="auto-roll">Always roll for me</button></div>
+    ${p.text ? `<p class="rc-said">“${esc(p.text)}”</p>` : ""}
+    <ol class="rc-steps">${steps}</ol>
+    <div class="rc-acts"><button class="back" data-act="take-back">Take it back</button><button class="btn primary rc-roll" data-act="roll" ${S.rolling ? "disabled" : ""}><span class="hex">d20</span> Roll</button></div></div>`;
+}
+
+function deadCardHTML(me) {
+  return `<div class="rollcard dead"><div class="rc-head"><span class="mono-k">${esc(me.name)} has died</span></div>
+    <p class="rc-note">Their story ends here. Make a new character to rejoin the party where they stand, with the same experience.</p>
+    <div class="rc-acts"><button class="btn primary" data-act="new-char">Make a new character</button></div></div>`;
 }
 
 async function send(text, hint = {}) {
@@ -1288,6 +1371,10 @@ function sheetHTML(inRail) {
       const p = (c.proficient || []).includes(a);
       return `<div class="${p ? "prof" : ""}" title="${ABIL_NAME[a]}${p ? `, proficient (+${c.proficiency_bonus})` : ""}"><span>${a}${p ? " ★" : ""}</span><b>${signed(c.modifiers?.[a] ?? mod(c.scores[a]))}</b><small>${c.scores[a]}</small></div>`;
     }).join("")}</div>
+    ${c.death_saves && !c.dead ? `<div class="eq">Death saves <b>${c.death_saves.successes}</b> of 3 successes · <b>${c.death_saves.failures}</b> of 3 failures${c.death_saves.stable ? " · stable" : ""}</div>` : ""}
+    <section><span class="mono-k">Skills · passive Perception ${c.passive_perception ?? 10}</span>
+      <div class="skills">${(c.skills || []).map(k => `<div class="${k.proficient ? "prof" : ""}" title="${esc(k.name)} (${esc(k.ability)})${k.proficient ? ", proficient" : ""}${k.expertise ? ", expertise" : ""}"><span>${esc(k.name)}${k.proficient ? " ★" : ""}${k.expertise ? "★" : ""}</span><b>${signed(k.mod)}</b></div>`).join("")}</div>
+    </section>
     <section><span class="mono-k">Carrying</span>
       ${items.map(i => {
         const on = i.equipped || worn.has(i.id);
@@ -1297,7 +1384,8 @@ function sheetHTML(inRail) {
         return verb ? `<button class="row-line" data-send="I ${verb.toLowerCase()} the ${esc(i.name)}">${body}<span class="verb">${verb}</span></button>` : `<div class="row-line">${body}</div>`;
       }).join("") || `<span class="empty-line">Nothing.</span>`}
     </section>
-    ${c.backstory || c.concept ? `<section><span class="mono-k">Story</span><p class="story-p">${esc(c.backstory || c.concept)}</p></section>` : ""}`;
+    ${c.backstory || c.concept ? `<section><span class="mono-k">Story</span><p class="story-p">${esc(c.backstory || c.concept)}</p></section>` : ""}
+    ${own ? `<section><span class="mono-k">Dice</span><button class="row-line" data-act="auto-roll"><span class="nm">${v.you?.auto_roll ? "The game rolls for you" : "You roll your own dice"}<small>${v.you?.auto_roll ? "turns resolve as soon as you send them" : "attacks and checks wait for your roll"}</small></span><span class="verb">${v.you?.auto_roll ? "Roll myself" : "Roll for me"}</span></button></section>` : ""}`;
 }
 
 // journal. Quests, people, places and clues come from the world record on
@@ -1473,12 +1561,13 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-era],[data-kit],[data-prof],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send]");
+  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-era],[data-lethal],[data-kit],[data-prof],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send]");
   if (!t || t.disabled) return;
   const ds = t.dataset, act = ds.act;
   if (ds.open) return go(`#/c/${ds.open}`);
   if (ds.premise) { $("#premise").value = ds.premise[0].toUpperCase() + ds.premise.slice(1); return; }
   if (ds.era != null && !act) { S.era = ds.era; $("#eras").outerHTML = erasHTML(); return; }
+  if (ds.lethal) { S.lethality = ds.lethal; $("#death").outerHTML = deathHTML(); return; }
   if (ds.kit) { readEditor().kit = ds.kit; return renderBuilder(); }
   if (ds.swap) {
     const d = readEditor(), a = ds.swap;
@@ -1513,6 +1602,11 @@ document.addEventListener("click", async e => {
     return send(o.send, o.hint);
   }
   if (ds.check) { S.hint = { check: { ability: ds.check, purpose: "other" } }; S.tray = ""; renderDock(); const ta = $("#say"); if (ta) { ta.value = S.composer = ta.value || "I try to "; ta.focus(); } return; }
+  if (ds.skill) {
+    const sk = skillsOf(mine()).find(k => k.key === ds.skill);
+    S.hint = { check: { ability: sk?.ability || "WIS", skill: ds.skill, purpose: "other" } }; S.tray = ""; renderDock();
+    const ta = $("#say"); if (ta) { ta.value = S.composer = ta.value || "I try to "; ta.focus(); } return;
+  }
   if (ds.sg) {
     const s = S._sg?.[+ds.sg];
     if (!s) return;
@@ -1566,7 +1660,7 @@ document.addEventListener("click", async e => {
       }
       case "step-next": readEditor(); S.step = Math.min(STEPS.length - 1, S.step + 1); return renderBuilder();
       case "step-back": readEditor(); S.step = Math.max(0, S.step - 1); return renderBuilder();
-      case "cancel-draft": S.draft = null; S.swap = ""; return renderLobby();
+      case "cancel-draft": S.draft = null; S.swap = ""; return render();
       case "save-char": {
         const d = readEditor();
         t.disabled = true;
@@ -1574,7 +1668,7 @@ document.addEventListener("click", async e => {
           await api("POST", `/campaigns/${S.route}/characters`, { character: d });
           S.draft = null;
           await refreshView();
-          renderLobby();
+          render();
         } catch (er) { $("#d-err").textContent = er.message; t.disabled = false; }
         return;
       }
@@ -1589,6 +1683,26 @@ document.addEventListener("click", async e => {
             case "leave-talk": S.talkTo = ""; closePanel(); renderDock(); return renderFeed();
       case "clear-check": S.hint = {}; return renderDock();
       case "skip": return api("POST", `/campaigns/${S.route}/skip`, {});
+      case "roll":
+        S.rolling = true; renderDock();
+        try { await api("POST", `/campaigns/${S.route}/roll`, {}); }
+        finally { S.rolling = false; await refreshView(); renderFeed(); }
+        return;
+      case "take-back": {
+        const p = (S.view.pending || []).find(x => isMe(x.character_id));
+        await api("POST", `/campaigns/${S.route}/roll/cancel`, {});
+        S.composer = p?.text || "";
+        await refreshView();
+        $("#say")?.focus();
+        return;
+      }
+      case "auto-roll": {
+        const auto = !S.view.you?.auto_roll;
+        await api("POST", `/campaigns/${S.route}/me/dice`, { auto_roll: auto });
+        toast(auto ? "The game rolls your dice from now on." : "You roll your own dice again.");
+        return refreshView();
+      }
+      case "new-char": S.draft = blankDraft(); S.step = 0; return renderBuilder();
       case "jtab": J.tab = ds.k; J.q = ""; J.editing = ""; return refreshJournal();
       case "note-edit": J.editing = ds.id; refreshJournal(); return $("#n-edit")?.focus();
       case "note-cancel": J.editing = ""; return refreshJournal();

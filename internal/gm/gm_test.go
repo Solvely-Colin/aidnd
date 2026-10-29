@@ -312,10 +312,25 @@ func TestQuickFreeActionKeepsTurn(t *testing.T) {
 }
 
 func TestNotYourTurn(t *testing.T) {
-	r := newRig(t, 2, 1)
-	r.start(t)
+	r := fightRig(t, 1, game.EnemySpec{Name: "Marsh Ghoul", HP: 30, AC: 5, AttackBonus: 2, Damage: "1d4"})
 	if _, err := r.g.TakeAction(bg, r.id, "u2", "hi", Hints{}); !errors.Is(err, ErrNotYourTurn) {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestFreeRoamAnyoneActs(t *testing.T) {
+	r := newRig(t, 2, 1)
+	r.start(t)
+	r.f.Default("narrate", llm.Text("Harrowmere hums."))
+	// out of combat there is no turn order: u2 can act first, then u1
+	res := r.act(t, "u2", "I search", llm.Call("ability_check", map[string]any{"skill": "perception", "dc": 10, "purpose": "search", "text": "look about"}))
+	if res.Budget == nil || res.Budget.Action != 1 || res.NextActor != nil {
+		t.Fatalf("free roam should leave a fresh budget and no next actor: %+v %+v", res.Budget, res.NextActor)
+	}
+	r.act(t, "u1", "I look", llm.Call("look", map[string]any{}))
+	r.act(t, "u2", "and again", llm.Call("look", map[string]any{}))
+	if _, err := r.g.Skip(bg, r.id, "u1", SkipAsPlayer); err == nil {
+		t.Fatal("skip outside a fight should be refused")
 	}
 }
 
@@ -352,16 +367,16 @@ func TestMoveAuthorsStubAndEndTurnPasses(t *testing.T) {
 	if count != 1 || w.NPC("Old Wenna") == nil || w.Location("Heron Isle") == nil {
 		t.Fatal("fill not applied/deduped")
 	}
-	if res.TurnEnded || res.Budget.Move != 0 {
-		t.Fatalf("move should keep the action: %+v", res.Budget)
+	if res.TurnEnded || res.Budget.Move != 1 || res.Budget.Action != 1 {
+		t.Fatalf("outside a fight the next message starts fresh: %+v", res.Budget)
 	}
 	if len(r.events(t, "location_changed")) != 2 { // start + arrival
 		t.Fatal("location_changed missing")
 	}
 	// side quest objective "Scout the Reedmarsh" is not active (not accepted), so nothing ticks
 	res = r.act(t, "u1", "I'm done", llm.Call("end_turn", map[string]any{}))
-	if !res.TurnEnded || res.NextActor == nil || res.NextActor.PlayerID != "u2" {
-		t.Fatalf("next actor %+v", res.NextActor)
+	if res.NextActor != nil {
+		t.Fatalf("no turn order outside a fight: %+v", res.NextActor)
 	}
 }
 
@@ -785,8 +800,8 @@ func TestMapHintsAreHintsWordsWin(t *testing.T) {
 }
 
 func TestSkipRules(t *testing.T) {
-	r := newRig(t, 2, 1)
-	r.start(t)
+	r := fightRig(t, 1, game.EnemySpec{Name: "Marsh Ghoul", HP: 30, AC: 5, AttackBonus: 2, Damage: "1d4"})
+	r.f.Default("narrate_enemies", llm.Text("The ghoul waits."))
 	if _, err := r.g.Skip(bg, r.id, "u2", SkipAsPlayer); !errors.Is(err, ErrNotYourTurn) {
 		t.Fatalf("early skip of another player: %v", err)
 	}

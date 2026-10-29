@@ -33,9 +33,9 @@ const (
 )
 
 // ActionKinds lists every valid kind.
-var ActionKinds = []string{ActLook, ActSay, ActEquip, ActDrop, ActEndTurn, ActMove, ActReposition, ActTravel,
+var ActionKinds = append([]string{ActLook, ActSay, ActEquip, ActDrop, ActEndTurn, ActMove, ActReposition, ActTravel,
 	ActAttack, ActSubdue, ActCheck, ActUseItem, ActTalkTo, ActBuy, ActSell, ActAcceptQuest, ActTurnInQuest,
-	ActPickUp, ActGiveItem, ActRest}
+	ActPickUp, ActGiveItem, ActRest}, tacticKinds...)
 
 // MaxSteps is how many steps one message may resolve.
 const MaxSteps = 4
@@ -48,9 +48,10 @@ type Action struct {
 	Item    string `json:"item,omitempty"`    // item id or name
 	Zone    string `json:"zone,omitempty"`    // zone id or name
 	Ability string `json:"ability,omitempty"` // for checks
+	Skill   string `json:"skill,omitempty"`   // for checks; sets the ability
 	DC      int    `json:"dc,omitempty"`
-	Purpose string `json:"purpose,omitempty"` // ability_check: search | unlock | force | other
-	Method  string `json:"method,omitempty"`  // subdue method
+	Purpose string `json:"purpose,omitempty"` // ability_check: search | unlock | force | escape | stabilize | other
+	Method  string `json:"method,omitempty"`  // subdue method; shove: prone | push
 	Text    string `json:"text,omitempty"`    // speech, or what the check is for
 	Promise string `json:"promise,omitempty"` // talk_to: what the character gave their word to do
 }
@@ -76,6 +77,10 @@ type Roll struct {
 	Edge     string `json:"edge,omitempty"`
 	Naturals []int  `json:"naturals,omitempty"`
 	EdgeWhy  string `json:"edge_why,omitempty"`
+	// Foe marks an enemy's roll made during a character's step (an
+	// opportunity attack) or an enemy's save against the character.
+	Foe bool   `json:"foe,omitempty"`
+	By  string `json:"by,omitempty"` // who rolled a foe roll
 }
 
 func checkRoll(kind string, c CheckRoll) Roll {
@@ -363,10 +368,10 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 	case ActTalkTo:
 		return talkTo(w, c, a, st)
 	case ActReposition:
-		return reposition(w, c, a.Zone, st)
+		return reposition(ctx, c, a.Zone, st)
 	case ActMove:
 		if a.Target == "" && a.Zone != "" {
-			return reposition(w, c, a.Zone, st)
+			return reposition(ctx, c, a.Zone, st)
 		}
 		return moveThrough(ctx, c, a.Target, st)
 	case ActTravel:
@@ -381,6 +386,20 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 		return useItem(ctx, c, a, st)
 	case ActRest:
 		return rest(ctx, c, st)
+	case ActDodge:
+		return dodge(w, c, st)
+	case ActDisengage:
+		return disengage(w, c, st)
+	case ActHelp:
+		return help(w, c, a, st)
+	case ActHide:
+		return hide(ctx, c, st)
+	case ActReady:
+		return ready(w, c, a, st)
+	case ActShove:
+		return shove(ctx, c, a, st)
+	case ActGrapple:
+		return grapple(ctx, c, a, st)
 	}
 	return fmt.Errorf("unknown action %q", a.Kind)
 }
@@ -527,7 +546,8 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	return nil
 }
 
-func reposition(w *World, c *Character, zoneRef string, st *Step) error {
+func reposition(ctx *Ctx, c *Character, zoneRef string, st *Step) error {
+	w := ctx.W
 	l := w.Here()
 	z := l.Zone(zoneRef)
 	if z == nil {
@@ -545,6 +565,10 @@ func reposition(w *World, c *Character, zoneRef string, st *Step) error {
 	if fz, ok := frightOf(w, c.Conditions); ok && ZoneDistance(l, z.ID, fz) < ZoneDistance(l, c.ZoneID, fz) {
 		return fmt.Errorf("%s is too frightened to move closer to %s", c.Name, c.Conditions.Get(CondFrightened).Source)
 	}
+	if ctx != nil && opportunityAttacks(ctx, c, st) {
+		return nil // cut down before they could get away
+	}
+	st.Changes = append(st.Changes, releaseGrapples(w, c)...)
 	c.ZoneID = z.ID
 	line := fmt.Sprintf("%s moves to %s", c.Name, z.Name)
 	if st.Slot == SlotDash {
@@ -579,7 +603,11 @@ func moveThrough(ctx *Ctx, c *Character, ref string, st *Step) error {
 		if c.ZoneID != x.Zone && x.Zone != "" {
 			return fmt.Errorf("to flee through %s you must stand in %s; reposition first", x.Label, ZoneName(here, x.Zone))
 		}
+		if opportunityAttacks(ctx, c, st) {
+			return nil // cut down before they could get away
+		}
 		st.Changes = append(st.Changes, fmt.Sprintf("%s leads the party in a retreat to %s", c.Name, x.To.Name))
+		st.Changes = append(st.Changes, StabilizeDying(w)...)
 		w.Encounter = nil
 		ClearFightConditions(w)
 		AdjustTension(w, -1)
@@ -625,6 +653,9 @@ func arrive(ctx *Ctx, loc *Location, via *Edge, st *Step) {
 	repairPlacements(w, loc)
 	if w.Encounter != nil && w.Encounter.LocationID != loc.ID {
 		w.Encounter = nil
+	}
+	if from != loc.ID {
+		noticeHidden(w, loc, st)
 	}
 	s := &w.Campaign.Scene
 	s.Turns, s.Quiet, s.StartTurn, s.Goal = 0, 0, w.Campaign.Turn, ""
@@ -739,8 +770,76 @@ func ambush(ctx *Ctx, loc *Location, st *Step) bool {
 		names = append(names, e.Display())
 	}
 	st.Changes = append(st.Changes, fmt.Sprintf("Ambush at %s: %s", loc.Name, strings.Join(names, ", ")))
+	surprise(ctx, enc, st)
 	return true
 }
+
+// surprise pits the ambushers' Stealth against the party's best passive
+// Perception. Spotted, they are seen in time; unseen, each gets a free
+// action before anyone can react.
+func surprise(ctx *Ctx, enc *Encounter, st *Step) {
+	w := ctx.W
+	watcher, pp := BestPassive(w)
+	if watcher == nil || len(enc.Enemies) == 0 {
+		return
+	}
+	sneak := 0
+	for _, e := range enc.Enemies {
+		sneak = max(sneak, e.AttackBonus/2)
+	}
+	ch := ctx.R.D20(sneak, pp)
+	st.Rolls = append(st.Rolls, Roll{Label: fmt.Sprintf("Ambushers' Stealth against %s's passive Perception", watcher.Name), Kind: "check", Natural: ch.Natural,
+		Mod: ch.Mod, Total: ch.Total, Target: pp, Tier: flip(ch.Tier), Against: "DC", Foe: true, By: "The ambushers"})
+	if !ch.Tier.Succeeded() {
+		st.Changes = append(st.Changes, fmt.Sprintf("%s spots the ambush in time (passive Perception %d)", watcher.Name, pp))
+		return
+	}
+	st.Changes = append(st.Changes, "The party is caught by surprise: the ambushers strike first")
+	l := w.Here()
+	var targets []*Character
+	for _, c := range w.Party() {
+		if !c.Down() {
+			targets = append(targets, c)
+		}
+	}
+	for _, e := range enc.Enemies {
+		live := targets[:0:0]
+		for _, c := range targets {
+			if !c.Down() {
+				live = append(live, c)
+			}
+		}
+		if len(live) == 0 {
+			break
+		}
+		et := enemyAct(w, ctx.R, l, e, live, ConditionTick{}, true)
+		st.Changes = append(st.Changes, et.Text)
+		if et.Attack != nil {
+			r := checkRoll("attack", et.Attack.Roll)
+			r.Foe, r.By = true, e.Display()
+			st.Rolls = append(st.Rolls, r)
+		}
+	}
+}
+
+// noticeHidden lets the party's best passive Perception spot a hidden way
+// on arriving somewhere new.
+func noticeHidden(w *World, loc *Location, st *Step) {
+	watcher, pp := BestPassive(w)
+	if watcher == nil || pp < NoticeDC(loc) {
+		return
+	}
+	for _, x := range w.Exits(loc.ID, true) {
+		if x.Edge.State == EdgeHidden && !x.Edge.LairGate {
+			_ = RevealExit(w, x.Edge.ID)
+			st.Changes = append(st.Changes, fmt.Sprintf("%s notices a hidden way: %s (passive Perception %d)", watcher.Name, firstNonEmpty(x.Label, "to "+x.To.Name), pp))
+			return
+		}
+	}
+}
+
+// NoticeDC is the passive Perception that spots a hidden way on arrival.
+func NoticeDC(loc *Location) int { return 15 + clamp(loc.Danger, 0, 5) }
 
 // npcAsEnemy turns an NPC present into a combatant.
 func npcAsEnemy(w *World, n *NPC) *Enemy {
@@ -821,6 +920,10 @@ func attack(ctx *Ctx, c *Character, a Action, st *Step) error {
 	edge, why := AttackEdge(c.Conditions, e.Conditions, d)
 	out := AttackWithEdge(ctx.R, fmt.Sprintf("%s attacks %s with %s", c.Name, e.Display(), wpn.Name), toHit, e.AC+cover, wpn.Damage, edge, why)
 	out.Roll.Parts, out.Roll.Cover = AttackParts(c, wpn), cover
+	if c.Conditions.remove(CondHidden) {
+		st.Changes = append(st.Changes, c.Name+" gives away their hiding place")
+	}
+	c.Conditions.remove(CondHelped)
 	st.Rolls = append(st.Rolls, checkRoll("attack", out.Roll))
 	st.Tier = out.Roll.Tier
 	if !out.Hit {
@@ -870,9 +973,14 @@ func subdue(ctx *Ctx, c *Character, a Action, st *Step) error {
 		dc -= 2 // easier to pin or talk down a foe that can't fight back
 	}
 	edge, why := checkEdge(c.Conditions)
-	ch := ctx.R.D20Edge(c.CheckMod(ab), dc, edge)
-	st.Rolls = append(st.Rolls, Roll{Label: fmt.Sprintf("%s tries to %s %s (%s)", c.Name, strings.ReplaceAll(method, "_", " "), e.Display(), ab),
-		Kind: "subdue", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: CheckParts(c, ab), Against: "DC",
+	mod, parts, what := c.CheckMod(ab), CheckParts(c, ab), string(ab)
+	if sk, ok := SkillByKey(subdueSkill(method)); ok && sk.Ability == ab {
+		mod, parts, what = c.SkillMod(sk), SkillParts(c, sk), sk.Name
+	}
+	ch := ctx.R.D20Edge(mod, dc, edge)
+	c.Conditions.remove(CondHelped)
+	st.Rolls = append(st.Rolls, Roll{Label: fmt.Sprintf("%s tries to %s %s (%s)", c.Name, strings.ReplaceAll(method, "_", " "), e.Display(), what),
+		Kind: "subdue", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: parts, Against: "DC",
 		Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: why})
 	st.Tier = ch.Tier
 	if !ch.Tier.Succeeded() {
@@ -933,9 +1041,9 @@ func endEncounter(w *World) []string {
 	if l != nil {
 		danger = max(1, l.Danger)
 	}
+	changes := append([]string{"The fight is won"}, StabilizeDying(w)...)
 	w.Encounter = nil
 	ClearFightConditions(w)
-	changes := []string{"The fight is won"}
 	for _, c := range w.Characters {
 		changes = append(changes, AwardXP(c, XPPerDanger*danger)...)
 	}
@@ -950,6 +1058,7 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	purpose := strings.ToLower(a.Purpose)
 	ab, ok := ParseAbility(a.Ability)
 	var lockEdge *Edge
+	var patient *Character
 	escapeDC := 0
 	switch purpose {
 	case "unlock", "force", "open":
@@ -989,6 +1098,23 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 			}
 		}
 		escapeDC = max(10, r.SaveDC)
+	case "stabilize":
+		t := w.Character(a.Target)
+		if t == nil || !t.Dying() {
+			for _, ch := range w.Party() {
+				if ch.Dying() && ch.ID != c.ID {
+					t = ch
+					break
+				}
+			}
+		}
+		if t == nil || !t.Dying() {
+			return fmt.Errorf("nobody here is dying")
+		}
+		if w.InCombat() && t.ZoneID != c.ZoneID {
+			return fmt.Errorf("%s is in %s; move to them first", t.Name, ZoneName(l, t.ZoneID))
+		}
+		patient = t
 	case "search":
 		if !ok {
 			ab = WIS
@@ -998,13 +1124,34 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 			ab = WIS
 		}
 	}
+	// a skill sets the ability; a purpose's usual skill applies when the
+	// ability asked for is the skill's own
+	sk, hasSkill := SkillByKey(a.Skill)
+	if !hasSkill {
+		if def, found := SkillByKey(purposeSkill(purpose)); found && (!ok || def.Ability == ab) {
+			sk, hasSkill = def, true
+		}
+	}
+	if hasSkill && escapeDC > 0 && sk.Key != "athletics" && sk.Key != "acrobatics" {
+		hasSkill = false
+	}
+	if hasSkill {
+		ab = sk.Ability
+	}
 	dc := dice.SnapDC(a.DC)
 	if a.DC == 0 {
+		dc = 10
+	}
+	if patient != nil {
 		dc = 10
 	}
 	mod := c.CheckMod(ab)
 	parts := CheckParts(c, ab)
 	label := fmt.Sprintf("%s %s check", c.Name, ab)
+	if hasSkill {
+		mod, parts = c.SkillMod(sk), SkillParts(c, sk)
+		label = fmt.Sprintf("%s %s check", c.Name, sk.Name)
+	}
 	if lockEdge != nil {
 		dc = lockEdge.LockDC
 		if dc == 0 {
@@ -1027,6 +1174,7 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	}
 	edge, why := checkEdge(c.Conditions)
 	ch := ctx.R.D20Edge(mod, dc, edge)
+	c.Conditions.remove(CondHelped)
 	st.Rolls = append(st.Rolls, Roll{Label: label, Kind: "check", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: parts, Against: "DC",
 		Edge: ch.Edge, Naturals: ch.Naturals, EdgeWhy: why})
 	st.Tier = ch.Tier
@@ -1034,11 +1182,20 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	case dice.CritFailure:
 		AdjustTension(w, 1)
 	}
+	what := string(ab)
+	if hasSkill {
+		what = sk.Name
+	}
 	if !ch.Tier.Succeeded() {
-		st.Changes = append(st.Changes, fmt.Sprintf("%s's %s check fails (%d vs DC %d)", c.Name, ab, ch.Total, dc))
+		st.Changes = append(st.Changes, fmt.Sprintf("%s's %s check fails (%d vs DC %d)", c.Name, what, ch.Total, dc))
 		return nil
 	}
-	st.Changes = append(st.Changes, fmt.Sprintf("%s's %s check succeeds (%d vs DC %d)", c.Name, ab, ch.Total, dc))
+	st.Changes = append(st.Changes, fmt.Sprintf("%s's %s check succeeds (%d vs DC %d)", c.Name, what, ch.Total, dc))
+	if patient != nil {
+		Stabilize(patient)
+		st.Changes = append(st.Changes, fmt.Sprintf("%s stabilizes %s, who stops dying but stays unconscious", c.Name, patient.Name))
+		return nil
+	}
 	if escapeDC > 0 {
 		c.Conditions.remove(CondRestrained)
 		st.Changes = append(st.Changes, fmt.Sprintf("%s breaks free", c.Name))
@@ -1102,10 +1259,12 @@ func useItem(ctx *Ctx, c *Character, a Action, st *Step) error {
 		return err
 	}
 	st.Rolls = append(st.Rolls, dmgRoll(it.Name, "heal", res))
-	wasDown := target.Down()
-	target.HP = min(target.MaxHP, target.HP+max(1, res.Total))
+	if target.Dead {
+		return fmt.Errorf("%s is dead; no potion can help now", target.Name)
+	}
+	_, woke := Heal(target, res.Total)
 	line := fmt.Sprintf("%s uses %s on %s: +%d HP (%d/%d)", c.Name, it.Name, target.Name, res.Total, target.HP, target.MaxHP)
-	if wasDown {
+	if woke {
 		line += fmt.Sprintf("; %s is back on their feet", target.Name)
 	}
 	if strings.Contains(it.Effect, "revive") && target.Conditions.remove(CondPoisoned) {
@@ -1139,7 +1298,7 @@ func rest(ctx *Ctx, c *Character, st *Step) error {
 	ClearAllConditions(w)
 	if l.Danger == 0 {
 		for _, ch := range w.Characters {
-			ch.HP = ch.MaxHP
+			SetHP(ch, ch.MaxHP)
 		}
 		s := &w.Campaign.Scene
 		s.Day++
@@ -1150,9 +1309,9 @@ func rest(ctx *Ctx, c *Character, st *Step) error {
 	}
 	for _, ch := range w.Characters {
 		if ch.Down() {
-			ch.HP = 1
+			SetHP(ch, 1)
 		} else {
-			ch.HP = min(ch.MaxHP, ch.HP+(ch.MaxHP+1)/2)
+			SetHP(ch, ch.HP+(ch.MaxHP+1)/2)
 		}
 	}
 	AdvanceTime(w, 1)

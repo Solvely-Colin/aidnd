@@ -22,7 +22,9 @@ Rules:
 - Questions like "what do I see?" or "what's in the room?" are look. Talking to an NPC in a conversation is talk_to; a passing remark is say. Outside combat talk_to walks the actor over to the NPC, so no reposition is needed first. "I talk to X: <question>" is one talk_to with that question as text. Words addressed to a named NPC ("I tell X ...", "I promise X ...") are talk_to, not say.
 - When the character gives an NPC their word (promises, swears, makes a deal or owes a debt), put what they promised in talk_to's promise field.
 - Anything risky or uncertain (climbing, sneaking, searching, persuading, picking a lock) is ability_check with a sensible DC (5/10/15/20/25).
-- Laying hands on someone who is not an enemy in this fight (grab, pin, shove, trip, restrain, pickpocket) is ability_check (STR or DEX) naming that person in its text, never a bare reposition. Grabbing or pinning an enemy in combat is subdue.
+- Laying hands on someone who is not an enemy in this fight (grab, pin, shove, trip, restrain, pickpocket) is ability_check (athletics or sleight_of_hand) naming that person in its text, never a bare reposition. Shoving or tripping an enemy is shove; grabbing and holding one is grapple; pinning or tying up a badly hurt enemy to end its fight is subdue.
+- Teamwork in a fight: "I cover / defend myself / brace" = dodge; "I back away carefully" = disengage (then reposition); "I distract it so X can hit" / "I give X a hand" = help; "I duck out of sight" = hide; "I wait for it to come to me" / "I shoot whatever comes through the door" = ready.
+- Give ability_check the skill that fits (stealth to sneak, perception to notice, insight to read someone, persuasion, deception, intimidation, athletics to climb, medicine to treat or stabilize a dying ally...).
 - "skip", "pass", "wait", "end my turn" = end_turn.
 - A MAP SELECTION is only a hint. The player's words win. A selected NPC means the person spoken to, traded with or examined; attack them only if the words clearly say so.`
 
@@ -188,7 +190,9 @@ func describeHints(w *game.World, h Hints) string {
 		}
 	}
 	if h.Check != nil {
-		if ab, ok := game.ParseAbility(h.Check.Ability); ok {
+		if sk, ok := game.SkillByKey(h.Check.Skill); ok {
+			parts = append(parts, fmt.Sprintf("the player asks to make a %s (%s) ability_check", sk.Name, sk.Ability))
+		} else if ab, ok := game.ParseAbility(h.Check.Ability); ok {
 			parts = append(parts, fmt.Sprintf("the player asks to make a %s ability_check", ab))
 		}
 	}
@@ -199,11 +203,14 @@ func describeHints(w *game.World, h Hints) string {
 // action itself, so the roll is exactly the one the player chose. It
 // returns nil when the hint is absent or is left to the interpreter.
 func directCheck(w *game.World, actor *game.Character, h Hints) ([]game.Action, error) {
+	if h.Act != nil {
+		return directAct(w, actor, *h.Act)
+	}
 	ch := h.Check
 	if ch == nil {
 		return nil, nil
 	}
-	a := game.Action{Kind: game.ActCheck, Purpose: ch.Purpose, Ability: ch.Ability}
+	a := game.Action{Kind: game.ActCheck, Purpose: ch.Purpose, Ability: ch.Ability, Skill: ch.Skill}
 	switch ch.Purpose {
 	case "search":
 		a.Text = "search the area"
@@ -220,6 +227,22 @@ func directCheck(w *game.World, actor *game.Character, h Hints) ([]game.Action, 
 	default:
 		return nil, nil
 	}
+	if msg := validateAction(w, actor, &a); msg != "" {
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, msg)
+	}
+	return []game.Action{a}, nil
+}
+
+// tacticKinds are the actions the dock may send directly.
+var dockActs = map[string]bool{game.ActDodge: true, game.ActDisengage: true, game.ActHelp: true, game.ActHide: true,
+	game.ActReady: true, game.ActShove: true, game.ActGrapple: true}
+
+// directAct turns a dock tactic into the action itself.
+func directAct(w *game.World, actor *game.Character, h ActHint) ([]game.Action, error) {
+	if !dockActs[h.Kind] {
+		return nil, fmt.Errorf("%w: unknown dock action %q", ErrBadRequest, h.Kind)
+	}
+	a := game.Action{Kind: h.Kind, Target: h.Target, Method: h.Method}
 	if msg := validateAction(w, actor, &a); msg != "" {
 		return nil, fmt.Errorf("%w: %s", ErrBadRequest, msg)
 	}
@@ -269,6 +292,9 @@ func applyHints(w *game.World, a game.Action, h Hints, text string) game.Action 
 		if h.Check != nil {
 			if ab, ok := game.ParseAbility(h.Check.Ability); ok {
 				a.Ability = string(ab)
+			}
+			if sk, ok := game.SkillByKey(h.Check.Skill); ok {
+				a.Skill, a.Ability = sk.Key, string(sk.Ability)
 			}
 		}
 	case game.ActReposition:
@@ -389,14 +415,42 @@ func validateAction(w *game.World, c *game.Character, a *game.Action) string {
 		}
 		a.Target = q.ID
 	case game.ActCheck:
+		if sk, ok := game.SkillByKey(a.Skill); ok {
+			a.Skill, a.Ability = sk.Key, string(sk.Ability)
+		} else {
+			a.Skill = ""
+		}
 		if _, ok := game.ParseAbility(a.Ability); !ok {
 			a.Ability = "WIS"
 		}
 		if a.Target != "" {
 			if x := w.FindExit(l.ID, a.Target); x != nil {
 				a.Target = x.Edge.ID
+			} else if t := w.Character(a.Target); t != nil {
+				a.Target = t.ID
 			}
 		}
+	case game.ActDodge, game.ActDisengage, game.ActHide:
+	case game.ActHelp:
+		t := w.Character(a.Target)
+		if t == nil || t.ID == c.ID {
+			return fmt.Sprintf("no other party member %q", a.Target)
+		}
+		a.Target = t.ID
+	case game.ActReady:
+		if a.Target != "" {
+			if e := w.Enemy(a.Target); e != nil {
+				a.Target = e.ID
+			} else {
+				a.Target = ""
+			}
+		}
+	case game.ActShove, game.ActGrapple:
+		e := w.Enemy(a.Target)
+		if e == nil {
+			return fmt.Sprintf("no enemy %q here", a.Target)
+		}
+		a.Target = e.ID
 	default:
 		return fmt.Sprintf("unknown action %q", a.Kind)
 	}

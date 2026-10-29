@@ -618,6 +618,9 @@ func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.Ene
 		if e != nil && e.Ranged && t.Kind == "attack" {
 			line += " (a ranged attack, from a distance)"
 		}
+		for _, re := range t.Reactions {
+			line += "\n  - reaction: " + re.Text
+		}
 		lines = append(lines, line)
 		if e != nil && !seen[e.Name] {
 			seen[e.Name] = true
@@ -641,6 +644,9 @@ func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.Ene
 	if err != nil || text == "" {
 		var parts []string
 		for _, t := range turns {
+			for _, re := range t.Reactions {
+				parts = append(parts, re.Text)
+			}
 			parts = append(parts, t.Text)
 		}
 		return strings.Join(parts, ". ") + "."

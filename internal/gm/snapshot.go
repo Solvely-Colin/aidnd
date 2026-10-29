@@ -14,6 +14,15 @@ type Hints struct {
 	TargetID string     `json:"target_id,omitempty"`
 	ZoneID   string     `json:"zone_id,omitempty"`
 	Check    *CheckHint `json:"check,omitempty"`
+	Act      *ActHint   `json:"act,omitempty"`
+}
+
+// ActHint is a tactical action picked from the dock (dodge, help, shove...).
+// It is resolved as picked, without the interpreter.
+type ActHint struct {
+	Kind   string `json:"kind"`
+	Target string `json:"target,omitempty"`
+	Method string `json:"method,omitempty"`
 }
 
 // CheckHint is a check the player called for from the dock. Search,
@@ -21,6 +30,7 @@ type Hints struct {
 // purpose only fixes the ability and lets the interpreter set the DC.
 type CheckHint struct {
 	Ability string `json:"ability,omitempty"`
+	Skill   string `json:"skill,omitempty"`
 	Purpose string `json:"purpose,omitempty"` // search | unlock | force | other
 	Exit    string `json:"exit,omitempty"`    // locked exit for unlock/force
 }
@@ -46,8 +56,16 @@ func itemLine(it *game.Item, c *game.Character) string {
 // sheetLine summarises a character.
 func sheetLine(w *game.World, c *game.Character) string {
 	st := ""
-	if c.Down() {
-		st = " DOWN"
+	switch {
+	case c.Dead:
+		st = " DEAD"
+	case c.Dying():
+		st = fmt.Sprintf(" DYING (death saves %d/3 successes, %d/3 failures)", c.Death.Successes, c.Death.Failures)
+	case c.Down():
+		st = " DOWN (stable, unconscious)"
+	}
+	if c.Readied != nil {
+		st += " (has an attack readied)"
 	}
 	if cs := c.Conditions.String(); cs != "" {
 		st += " (" + cs + ")"
@@ -73,6 +91,13 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 			abil = append(abil, fmt.Sprintf("%s %+d", a, m))
 		}
 		line("CHECK MODIFIERS: %s (proficient: %v)", strings.Join(abil, ", "), actor.Proficient)
+		var sks []string
+		for _, k := range actor.SkillList() {
+			if sk, ok := game.SkillByKey(k); ok {
+				sks = append(sks, fmt.Sprintf("%s %+d", sk.Key, actor.SkillMod(sk)))
+			}
+		}
+		line("SKILLS (proficient): %s; passive Perception %d", orNone(sks), actor.PassivePerception())
 		wpn := game.Weapon(w, actor)
 		line("WEAPON: %s, %s, %s", wpn.Name, wpn.Damage, game.ReachName(game.InferReach(wpn)))
 		var inv []string

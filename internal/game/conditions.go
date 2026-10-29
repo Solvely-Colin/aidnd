@@ -28,8 +28,24 @@ const (
 	CondStunned    = "stunned"
 )
 
-// ConditionKinds lists every condition in display order.
+// ConditionKinds lists every condition an enemy or hazard can inflict, in
+// display order.
 var ConditionKinds = []string{CondPoisoned, CondProne, CondRestrained, CondFrightened, CondBlinded, CondStunned}
+
+// Stances are short states characters give themselves with tactical
+// actions. Nothing can inflict them.
+const (
+	CondDodging    = "dodging"
+	CondDisengaged = "disengaged"
+	CondHidden     = "hidden"
+	CondHelped     = "helped"
+)
+
+// StanceKinds lists the stances in display order.
+var StanceKinds = []string{CondHidden, CondDodging, CondDisengaged, CondHelped}
+
+// allKinds is every condition and stance in display order.
+var allKinds = append(append([]string{}, ConditionKinds...), StanceKinds...)
 
 // condRule is a condition's default save and duration.
 type condRule struct {
@@ -37,7 +53,10 @@ type condRule struct {
 	Rounds   int     // turns it lasts; 0 = until the bearer's next turn starts
 	SaveEnds bool    // a save at the end of each of the bearer's turns ends it
 	Lingers  bool    // survives the end of a fight
-	Summary  string  // player-facing effect
+	// EndsAtStart conditions last until the start of the bearer's next
+	// turn instead of counting down at the end of turns.
+	EndsAtStart bool
+	Summary     string // player-facing effect
 }
 
 var condRules = map[string]condRule{
@@ -47,6 +66,12 @@ var condRules = map[string]condRule{
 	CondFrightened: {Save: WIS, Rounds: 2, SaveEnds: true, Summary: "disadvantage on attacks and checks; can't move closer to what scared them"},
 	CondBlinded:    {Save: CON, Rounds: 1, Summary: "attacks at disadvantage and easier to hit"},
 	CondStunned:    {Save: CON, Rounds: 1, Summary: "loses their next turn and is easier to hit"},
+	// Stances. Hidden is set during the bearer's own turn, so 2 lasts to the
+	// end of their next turn; helped is set on someone else's turn.
+	CondDodging:    {EndsAtStart: true, Summary: "attacks against them have disadvantage until their next turn"},
+	CondDisengaged: {EndsAtStart: true, Summary: "can move away from enemies without opportunity attacks this turn"},
+	CondHidden:     {Rounds: 2, Summary: "enemies can't target them; their next attack has advantage and gives them away"},
+	CondHelped:     {Rounds: 1, Summary: "advantage on their next attack or check"},
 }
 
 // MinStunDanger is the lowest location danger at which enemies may stun.
@@ -81,7 +106,7 @@ func (cs Conditions) Get(kind string) *Condition {
 // Kinds lists the condition names in display order.
 func (cs Conditions) Kinds() []string {
 	var out []string
-	for _, k := range ConditionKinds {
+	for _, k := range allKinds {
 		if cs.Has(k) {
 			out = append(out, k)
 		}
@@ -117,12 +142,22 @@ func (cs *Conditions) remove(kind string) bool {
 }
 
 func condOrder(kind string) int {
-	for i, k := range ConditionKinds {
+	for i, k := range allKinds {
 		if k == kind {
 			return i
 		}
 	}
-	return len(ConditionKinds)
+	return len(allKinds)
+}
+
+// IsStance reports whether kind is a self-given stance.
+func IsStance(kind string) bool {
+	for _, k := range StanceKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseCondition normalizes a condition name ("knocked prone", "Poison").
@@ -264,6 +299,15 @@ func AttackEdge(attacker, target Conditions, dist int) (int, string) {
 			adv = append(adv, "target "+k)
 		}
 	}
+	if attacker.Has(CondHidden) {
+		adv = append(adv, "attacking from hiding")
+	}
+	if attacker.Has(CondHelped) {
+		adv = append(adv, "helped by an ally")
+	}
+	if target.Has(CondDodging) {
+		dis = append(dis, "target dodging")
+	}
 	if target.Has(CondProne) {
 		if dist == 0 {
 			adv = append(adv, "target prone")
@@ -276,13 +320,16 @@ func AttackEdge(attacker, target Conditions, dist int) (int, string) {
 
 // checkEdge is the advantage state of a creature's own ability checks.
 func checkEdge(cs Conditions) (int, string) {
-	var dis []string
+	var adv, dis []string
 	for _, k := range []string{CondPoisoned, CondFrightened} {
 		if cs.Has(k) {
 			dis = append(dis, k)
 		}
 	}
-	return edge(nil, dis)
+	if cs.Has(CondHelped) {
+		adv = append(adv, "helped by an ally")
+	}
+	return edge(adv, dis)
 }
 
 // CanMove reports whether conditions stop the bearer leaving its zone.
@@ -330,6 +377,12 @@ func (t *ConditionTick) add(o ConditionTick) {
 // turn (the caller ends it).
 func StartCharacterTurn(c *Character, b *Budget) ConditionTick {
 	var t ConditionTick
+	c.Readied = nil
+	for _, k := range StanceKinds {
+		if condRules[k].EndsAtStart {
+			c.Conditions.remove(k) // lapses quietly
+		}
+	}
 	if c.Conditions.remove(CondProne) {
 		if c.Conditions.Has(CondRestrained) || c.Conditions.Has(CondStunned) {
 			c.Conditions.add(Condition{Kind: CondProne}) // can't get up yet
@@ -352,8 +405,8 @@ func EndCharacterTurn(r *dice.Roller, c *Character) ConditionTick {
 	var t ConditionTick
 	keep := c.Conditions[:0]
 	for _, cond := range c.Conditions {
-		if cond.Kind == CondProne {
-			keep = append(keep, cond) // ends when they stand, at their next turn
+		if cond.Kind == CondProne || condRules[cond.Kind].EndsAtStart {
+			keep = append(keep, cond) // ends at their next turn (standing up, or the stance lapsing)
 			continue
 		}
 		cond.Rounds--

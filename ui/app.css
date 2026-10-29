@@ -525,7 +525,9 @@ img.gen.on { opacity: 1; }
 .cs-id .pl { font-size: 12.5px; color: var(--ink3); }
 .conds { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
 .cond { font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 4px 6px; border-radius: 4px; background: var(--bg3); color: var(--ink2); }
-.cond.down, .cond.bloodied { color: var(--bad); }
+.cond.down, .cond.bloodied, .cond.dying, .cond.dead { color: var(--bad); }
+.cond.dying, .cond.dead { box-shadow: inset 0 0 0 1px var(--bad); }
+.cond.hidden, .cond.dodging, .cond.disengaged, .cond.helped { color: var(--acc); box-shadow: inset 0 0 0 1px var(--line2); }
 .cond.acting { color: var(--acc); }
 .cond.poisoned, .cond.prone, .cond.restrained, .cond.frightened, .cond.blinded, .cond.stunned { color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
 .foe-card .conds { margin-top: 0; }
@@ -614,3 +616,46 @@ img.gen.on { opacity: 1; }
 .mnode .lb b { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .mnode .lb span { font: 10px/1.3 var(--mono); color: var(--ink3); }
 .mnode.here .lb span { color: var(--acc); }
+
+/* the roll card: a planned turn waiting for its player's d20 */
+.rollcard { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--acc); animation: reveal .18s ease both; }
+.rollcard.dying, .rollcard.dead { border-color: var(--bad); }
+.rc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.rc-head .mono-k { color: var(--acc); }
+.rollcard.dying .rc-head .mono-k, .rollcard.dead .rc-head .mono-k { color: var(--bad); }
+.rc-head .link { font-size: 12.5px; }
+.rc-said { margin: 0; font-size: 14.5px; color: var(--ink2); font-style: italic; }
+.rc-note { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink2); }
+.rc-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; counter-reset: st; }
+.rc-steps li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 14.5px; counter-increment: st; }
+.rc-steps li::before { content: counter(st); font: 600 11px/1 var(--mono); color: var(--ink3); width: 12px; }
+.rc-steps li b { font-weight: 600; }
+.rc-steps li.bad b { color: var(--ink3); text-decoration: line-through; }
+.rc-d20 { display: inline-flex; align-items: center; gap: 6px; font: 600 12.5px/1 var(--mono); color: var(--ink); }
+.rc-d20 .hex { width: 22px; height: 22px; background: var(--acc); color: var(--accInk); font-size: 8.5px; font-weight: 700; }
+.rc-d20 .edge { font-style: normal; font-size: 10.5px; color: var(--acc); }
+.rc-d20 .edge.disadvantage { color: var(--bad); }
+.rc-slot { font: 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.rc-bad { font-size: 12.5px; color: var(--bad); flex-basis: 100%; padding-left: 22px; }
+.rc-acts { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
+.rc-acts .back { font-weight: 600; font-size: 14px; color: var(--ink2); }
+.rc-roll { display: inline-flex; align-items: center; gap: 10px; padding: 11px 18px; font-size: 15.5px; }
+.rc-roll .hex { width: 22px; height: 22px; background: var(--accInk); color: var(--acc); font-size: 8.5px; font-weight: 700; }
+.pips { display: flex; gap: 14px; font: 11px/1 var(--mono); color: var(--ink3); }
+.pips span { display: inline-flex; align-items: center; gap: 4px; }
+.pips i { width: 9px; height: 9px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line2); }
+.pips i.ok { background: var(--acc); box-shadow: none; }
+.pips i.no { background: var(--bad); box-shadow: none; }
+
+/* skills: the roll tray's picker and the sheet's list */
+.skill-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px 4px 6px; }
+.skill-grid button { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; padding: 8px 9px; border-radius: 4px; background: var(--bg3); text-align: left; min-width: 0; }
+.skill-grid small { font-size: 12px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-grid b { font: 600 13px/1 var(--mono); }
+.skill-grid .prof small, .skill-grid .prof b { color: var(--acc); }
+@media (max-width: 420px) { .skill-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.skills { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; margin-top: 8px; }
+.skills div { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; color: var(--ink3); }
+.skills div b { font: 600 13px/1.3 var(--mono); color: var(--ink2); }
+.skills .prof, .skills .prof b { color: var(--ink); }
+.skills .prof span { color: var(--acc); }

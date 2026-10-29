@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
     summary       TEXT NOT NULL DEFAULT '',
     summary_turn  INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL DEFAULT 0,
-    updated_at    INTEGER NOT NULL DEFAULT 0
+    updated_at    INTEGER NOT NULL DEFAULT 0,
+    extra         TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS players (
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS players (
     character_id TEXT NOT NULL DEFAULT '',
     token        TEXT NOT NULL DEFAULT '',
     joined_turn  INTEGER NOT NULL DEFAULT 0,
+    auto_roll    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (campaign_id, id)
 );
 CREATE INDEX IF NOT EXISTS players_by_id ON players(id);
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS characters (
     armor       TEXT NOT NULL DEFAULT '',
     zone_id     TEXT NOT NULL DEFAULT '',
     conditions  TEXT NOT NULL DEFAULT '[]',
+    extra       TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (campaign_id, id)
 );
 
@@ -193,6 +196,7 @@ CREATE TABLE IF NOT EXISTS enemies (
     acted_round  INTEGER NOT NULL DEFAULT 0,
     inflicts     TEXT NOT NULL DEFAULT '',
     conditions   TEXT NOT NULL DEFAULT '[]',
+    extra        TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (campaign_id, id)
 );
 

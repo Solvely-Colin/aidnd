@@ -68,12 +68,13 @@ func interpreterTools() []llm.Tool {
 		tool(game.ActSubdue, "ACTION. Non-lethal takedown: grapple, tie up, intimidate, calm or persuade an enemy to stop fighting.", obj(map[string]any{
 			"target": str("enemy id"),
 			"method": enum("how", "grapple", "tie_up", "intimidate", "calm", "persuade")}, "target", "method")),
-		tool(game.ActCheck, "ACTION. An ability check for anything risky or uncertain: searching (finds hidden exits), picking or forcing a lock, climbing, sneaking, persuading, recalling lore under pressure.", obj(map[string]any{
+		tool(game.ActCheck, "ACTION. A skill or ability check for anything risky or uncertain: searching (finds hidden exits), picking or forcing a lock, climbing, sneaking, persuading, recalling lore under pressure, stabilizing a dying ally.", obj(map[string]any{
+			"skill":   skillEnum,
 			"ability": abilityEnum,
 			"dc":      intEnum("difficulty: 5 trivial, 10 easy, 15 medium, 20 hard, 25 very hard", 5, 10, 15, 20, 25),
-			"purpose": enum("search reveals hidden exits; unlock/force targets a locked exit; escape breaks free when the character is restrained (the engine sets that DC)", "search", "unlock", "force", "escape", "other"),
-			"target":  str("optional exit id for unlock/force"),
-			"text":    str("what the check is for, in a few words")}, "ability", "dc", "purpose", "text")),
+			"purpose": enum("search reveals hidden exits; unlock/force targets a locked exit; escape breaks free when the character is restrained or grappled; stabilize stops a dying ally's death saves (Medicine, DC 10). The engine sets those DCs", "search", "unlock", "force", "escape", "stabilize", "other"),
+			"target":  str("optional exit id for unlock/force, or the dying party member's id for stabilize"),
+			"text":    str("what the check is for, in a few words")}, "dc", "purpose", "text")),
 		tool(game.ActUseItem, "ACTION. Use an item: drink a potion, apply a healer's kit (can revive a downed ally), use a key or tools on a locked exit.", obj(map[string]any{
 			"item":   str("item id from INVENTORY"),
 			"target": str("optional party member id or exit id")}, "item")),
@@ -89,14 +90,28 @@ func interpreterTools() []llm.Tool {
 		tool(game.ActGiveItem, "ACTION. Hand a carried item to a party member or an NPC here.", obj(map[string]any{
 			"item": str("item id from INVENTORY"), "to": str("party member id or NPC id")}, "item", "to")),
 		tool(game.ActRest, "ACTION. Rest the party (not in combat). Full rest only in safe places.", obj(map[string]any{})),
+		tool(game.ActDodge, "ACTION, combat only. Dodge: focus on defense; attacks against the character have disadvantage until their next turn.", obj(map[string]any{})),
+		tool(game.ActDisengage, "ACTION, combat only. Disengage: back off carefully so leaving an enemy's zone this turn draws no opportunity attacks. Usually followed by a reposition.", obj(map[string]any{})),
+		tool(game.ActHelp, "ACTION. Help a party member: they get advantage on their next attack or check (in combat they must share the zone).", obj(map[string]any{
+			"target": str("party member id")}, "target")),
+		tool(game.ActHide, "ACTION, combat only. Hide (Stealth against the enemies' passive Perception): needs cover or no enemy in the zone. Hidden characters can't be targeted and their next attack has advantage.", obj(map[string]any{})),
+		tool(game.ActReady, "ACTION, combat only. Ready an attack: it strikes the first enemy (or the named one) that comes within reach or acts within reach before the character's next turn.", obj(map[string]any{
+			"target": str("optional enemy id to wait for")})),
+		tool(game.ActShove, "ACTION. Shove an enemy in the same zone: knock it prone, or push it into the next zone (it makes a STR save).", obj(map[string]any{
+			"target": str("enemy id"),
+			"method": enum("prone knocks it down; push drives it into a neighbouring zone", "prone", "push")}, "target", "method")),
+		tool(game.ActGrapple, "ACTION. Grab an enemy in the same zone and hold it (it makes a STR save; held, it can't move and is easier to hit until it breaks free).", obj(map[string]any{
+			"target": str("enemy id")}, "target")),
 	}
 }
+
+var skillEnum = enum("the skill the check uses (it sets the ability): athletics climb/jump/swim/force, acrobatics balance/tumble, sleight_of_hand pick pockets/locks, stealth sneak, arcana magic, history, investigation deduce/search a thing, nature, religion, animal_handling, insight read someone, medicine, perception notice, survival track/forage, deception lie, intimidation threaten, performance, persuasion convince", game.SkillKeys()...)
 
 // toAction converts an interpreter tool call to an engine action.
 func toAction(tc llm.ToolCall) (game.Action, error) {
 	var a struct {
-		Target, Weapon, Method, Ability, Purpose, Text, Item, Exit, Zone, Destination, NPC, Quest, To, Promise string
-		DC                                                                                                     int
+		Target, Weapon, Method, Ability, Skill, Purpose, Text, Item, Exit, Zone, Destination, NPC, Quest, To, Promise string
+		DC                                                                                                            int
 	}
 	if err := tc.Decode(&a); err != nil {
 		return game.Action{}, err
@@ -119,7 +134,11 @@ func toAction(tc llm.ToolCall) (game.Action, error) {
 	case game.ActSubdue:
 		act.Target, act.Method = a.Target, a.Method
 	case game.ActCheck:
-		act.Ability, act.DC, act.Purpose, act.Target = a.Ability, a.DC, a.Purpose, a.Target
+		act.Ability, act.Skill, act.DC, act.Purpose, act.Target = a.Ability, a.Skill, a.DC, a.Purpose, a.Target
+	case game.ActHelp, game.ActReady, game.ActGrapple:
+		act.Target = a.Target
+	case game.ActShove:
+		act.Target, act.Method = a.Target, a.Method
 	case game.ActUseItem:
 		act.Item, act.Target = a.Item, a.Target
 	case game.ActTalkTo:

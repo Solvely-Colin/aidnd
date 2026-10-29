@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -135,8 +136,9 @@ func TestOpenModeFlow(t *testing.T) {
 		t.Fatalf("view %s", e.do("GET", "/campaigns/"+id, nil, t1, "").body)
 	}
 	checkSheets(t, v)
-	if r := e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "hi"}, t2, ""); r.code != 409 {
-		t.Fatalf("not your turn: %d", r.code)
+	// outside a fight everyone on their feet may act
+	if v2 := e.do("GET", "/campaigns/"+id, nil, t2, "").json(t); v2["free_roam"] != true || v2["you"].(map[string]any)["your_turn"] != true {
+		t.Fatalf("free roam view %v", v2["you"])
 	}
 	e.fake.On("interpret", llm.Calls(llm.Call("look", map[string]any{})))
 	r = e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "what do I see?"}, t1, "")
@@ -149,8 +151,8 @@ func TestOpenModeFlow(t *testing.T) {
 	}
 	e.fake.On("interpret", llm.Calls(llm.Call("end_turn", map[string]any{})))
 	tr = e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "done"}, t1, "").json(t)
-	if tr["next_actor"].(map[string]any)["name"] == "" {
-		t.Fatalf("next actor missing: %v", tr)
+	if tr["next_actor"] != nil || tr["budget"] == nil {
+		t.Fatalf("outside a fight nobody is next: %v", tr)
 	}
 	lg := e.do("GET", "/campaigns/"+id+"/log?after=0", nil, t1, "").json(t)
 	types := map[string]bool{}
@@ -359,6 +361,20 @@ func TestSkipAndCORS(t *testing.T) {
 		e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": s}, "k", pid)
 	}
 	e.do("POST", "/campaigns/"+id+"/start", nil, "k", "")
+	// outside a fight there is no turn to skip
+	if r := e.do("POST", "/campaigns/"+id+"/skip", map[string]bool{"force": true}, "k", ""); r.code != 409 {
+		t.Fatalf("skip outside a fight: %d %s", r.code, r.body)
+	}
+	w, err := e.g.Store.Load(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := game.StartEncounter(w, []game.EnemySpec{{Name: "Rat", HP: 20, AC: 10, Damage: "1d2"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.g.Store.Save(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
 	if r := e.do("POST", "/campaigns/"+id+"/skip", nil, "k", "u2"); r.code != 409 {
 		t.Fatalf("u2 skipping u1 early: %d %s", r.code, r.body)
 	}

@@ -26,22 +26,25 @@ func actorOf(c *game.Character) *Actor {
 
 // TurnResult is returned by POST /actions.
 type TurnResult struct {
-	Resolution     *game.Resolution `json:"resolution"`
-	Narration      string           `json:"narration"`
-	Quick          bool             `json:"quick"`
-	WorldChanges   []string         `json:"world_changes,omitempty"`
-	WorldRolls     []game.Roll      `json:"world_rolls,omitempty"` // saves against a narrated hazard
-	EnemyTurns     []game.EnemyTurn `json:"enemy_turns,omitempty"`
-	EnemyNarration string           `json:"enemy_narration,omitempty"`
-	Setback        []string         `json:"setback,omitempty"`
-	Conditions     []string         `json:"conditions,omitempty"`      // condition changes at turn boundaries
-	ConditionRolls []game.Roll      `json:"condition_rolls,omitempty"` // saves made at turn boundaries
-	TurnEnded      bool             `json:"turn_ended"`
-	Budget         *game.Budget     `json:"budget,omitempty"`
-	Skipped        []game.Step      `json:"skipped,omitempty"`
-	NextActor      *Actor           `json:"next_actor,omitempty"`
-	CampaignEnded  bool             `json:"campaign_ended"`
-	Status         string           `json:"status"`
+	Resolution     *game.Resolution       `json:"resolution"`
+	Narration      string                 `json:"narration"`
+	Quick          bool                   `json:"quick"`
+	WorldChanges   []string               `json:"world_changes,omitempty"`
+	WorldRolls     []game.Roll            `json:"world_rolls,omitempty"` // saves against a narrated hazard
+	EnemyTurns     []game.EnemyTurn       `json:"enemy_turns,omitempty"`
+	EnemyNarration string                 `json:"enemy_narration,omitempty"`
+	Setback        []string               `json:"setback,omitempty"`
+	Conditions     []string               `json:"conditions,omitempty"`      // condition changes at turn boundaries
+	ConditionRolls []game.Roll            `json:"condition_rolls,omitempty"` // saves made at turn boundaries
+	DeathSaves     []game.DeathSaveResult `json:"death_saves,omitempty"`
+	// Pending is the planned turn waiting for the player to roll.
+	Pending       *game.PendingAction `json:"pending,omitempty"`
+	TurnEnded     bool                `json:"turn_ended"`
+	Budget        *game.Budget        `json:"budget,omitempty"`
+	Skipped       []game.Step         `json:"skipped,omitempty"`
+	NextActor     *Actor              `json:"next_actor,omitempty"`
+	CampaignEnded bool                `json:"campaign_ended"`
+	Status        string              `json:"status"`
 }
 
 func (g *GM) recent(ctx context.Context, w *game.World) []string {
@@ -120,7 +123,10 @@ func (g *GM) Start(ctx context.Context, campaignID string) (*game.World, string,
 	return w, opening, err
 }
 
-// TakeAction runs the full pipeline for the active player's message.
+// TakeAction runs the full pipeline for a player's message. In a fight
+// only the character whose turn it is may act; outside one, anyone whose
+// character is on their feet may. When the turn needs the player's own d20
+// and they roll their own dice, it is read and planned but waits for Roll.
 func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, hints Hints) (*TurnResult, error) {
 	defer g.lock(campaignID)()
 	w, err := g.Store.Load(ctx, campaignID)
@@ -130,9 +136,15 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	if w.Campaign.Status != game.StatusActive {
 		return nil, Conflict("the campaign is %s", w.Campaign.Status)
 	}
-	actor := w.ActiveCharacter()
-	if actor == nil || actor.PlayerID != playerID {
-		return nil, ErrNotYourTurn
+	actor, err := g.actorFor(w, playerID)
+	if err != nil {
+		return nil, err
+	}
+	if p := w.Campaign.Pending[actor.ID]; p != nil {
+		if p.Kind == game.PendingDeathSave {
+			return nil, Conflict("%s is dying: roll the death save first", actor.Name)
+		}
+		return nil, Conflict("roll the dice for your last move, or take it back, first")
 	}
 	text = trim(text, 600)
 	if text == "" {
@@ -149,6 +161,56 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	if actions == nil {
 		actions = g.interpret(ctx, w, actor, text, hints, recent)
 	}
+	if g.rollsOwnDice(w, actor) {
+		if preview, needs := g.plan(w, actor, actions); needs {
+			return g.holdForRoll(ctx, w, actor, playerID, text, hints, actions, preview)
+		}
+	}
+	return g.resolveTurn(ctx, w, actor, playerID, text, hints, actions, recent)
+}
+
+// actorFor finds who acts for playerID. Outside a fight there is no turn
+// order: the player's character becomes the acting one for this message.
+func (g *GM) actorFor(w *game.World, playerID string) (*game.Character, error) {
+	if w.InCombat() {
+		actor := w.ActiveCharacter()
+		if actor == nil || actor.PlayerID != playerID {
+			return nil, ErrNotYourTurn
+		}
+		return actor, nil
+	}
+	p := w.Player(playerID)
+	if p == nil {
+		return nil, ErrForbidden
+	}
+	c := w.Character(p.CharacterID)
+	if c == nil {
+		return nil, ErrNotYourTurn
+	}
+	if c.Dead {
+		return nil, Conflict("%s is dead; make a new character to rejoin the story", c.Name)
+	}
+	if c.Down() {
+		return nil, Conflict("%s is unconscious until someone heals them or the party rests", c.Name)
+	}
+	t := &w.Campaign.Turns
+	for i, id := range t.Order {
+		if id == c.ID {
+			if t.Index != i {
+				t.Budget = game.FullBudget(false)
+			}
+			t.Index = i
+		}
+	}
+	t.Started = g.Now().Unix()
+	return c, nil
+}
+
+// resolveTurn is everything after interpretation: resolve, direct,
+// narrate, judge, then end the turn (in a fight) or reset the budget
+// (outside one), and save.
+func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Character, playerID, text string, hints Hints, actions []game.Action, recent []string) (*TurnResult, error) {
+	campaignID := w.Campaign.ID
 	// 2. resolve
 	onArrive, ambush := g.arrivalHooks(ctx, w)
 	prevLoc := w.Campaign.LocationID
@@ -193,10 +255,15 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 		l := w.Here()
 		evs = append(evs, store.NewEvent("location_changed", "", map[string]any{"location_id": l.ID, "name": l.Name}))
 	}
-	// 6. enemy turns, setbacks, next actor
-	if res.TurnEnded && w.Campaign.Status == game.StatusActive {
+	// 6. enemy turns, setbacks, next actor; outside a fight, the next
+	// message from anyone starts fresh
+	switch {
+	case w.Campaign.Status != game.StatusActive:
+	case !w.InCombat():
+		evs = append(evs, g.endFreeTurn(w, actor, out, quick)...)
+	case res.TurnEnded:
 		evs = append(evs, g.endTurn(ctx, w, out)...)
-	} else if !res.TurnEnded {
+	default:
 		b := w.Campaign.Turns.Budget
 		out.Budget = &b
 		evs = append(evs, store.NewEvent("turn_budget", playerID, map[string]any{"character_id": actor.ID, "budget": b}))
@@ -208,7 +275,7 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	}
 	out.Status = w.Campaign.Status
 	// story-so-far every N turns
-	if out.TurnEnded && w.Campaign.Turn-w.Campaign.SummaryTurn >= g.Cfg.SummaryEvery {
+	if !quick && w.Campaign.Turn-w.Campaign.SummaryTurn >= g.Cfg.SummaryEvery {
 		g.summarize(ctx, w, append(recent, actor.Name+": "+text, "GM: "+nar.Text))
 	}
 	// 7. save + broadcast
@@ -216,6 +283,23 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 		return nil, err
 	}
 	return out, nil
+}
+
+// endFreeTurn closes a message outside a fight: the actor's conditions
+// tick (unless it was only talk), the turn counter moves on, and the
+// budget is fresh for whoever speaks next.
+func (g *GM) endFreeTurn(w *game.World, actor *game.Character, out *TurnResult, quick bool) []store.Event {
+	var evs []store.Event
+	if !quick {
+		evs = append(evs, conditionEvents(out, game.EndCharacterTurn(g.Dice, actor))...)
+		w.Campaign.Turn++
+	}
+	t := &w.Campaign.Turns
+	t.Budget = game.FullBudget(false)
+	t.Started = g.Now().Unix()
+	b := t.Budget
+	out.Budget = &b
+	return append(evs, store.NewEvent("turn_budget", actor.PlayerID, map[string]any{"character_id": actor.ID, "budget": b, "free_roam": true}))
 }
 
 // ErrBadRequest marks invalid input.
@@ -255,6 +339,21 @@ func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []stor
 		}
 		if next == nil {
 			return evs
+		}
+		if next.Dying() && w.InCombat() {
+			if g.rollsOwnDice(w, next) {
+				w.Campaign.SetPending(&game.PendingAction{Kind: game.PendingDeathSave, CharacterID: next.ID, PlayerID: next.PlayerID, Created: g.Now().Unix()})
+				out.NextActor = actorOf(next)
+				return append(evs, store.NewEvent("turn_started", next.PlayerID, map[string]any{"character_id": next.ID, "player_id": next.PlayerID, "name": next.Name, "budget": w.Campaign.Turns.Budget, "death_save": true}))
+			}
+			ds := game.DeathSave(w, g.Dice, next)
+			evs = append(evs, deathSaveEvent(out, ds))
+			if !ds.Revived {
+				if passes > 4*len(w.Campaign.Turns.Order)+8 {
+					return evs
+				}
+				continue // the turn passes while they lie there
+			}
 		}
 		tick := game.StartCharacterTurn(next, &w.Campaign.Turns.Budget)
 		evs = append(evs, conditionEvents(out, tick)...)
@@ -296,6 +395,9 @@ func (g *GM) Skip(ctx context.Context, campaignID, playerID string, mode SkipMod
 	if w.Campaign.Status != game.StatusActive {
 		return nil, Conflict("the campaign is %s", w.Campaign.Status)
 	}
+	if !w.InCombat() {
+		return nil, Conflict("outside a fight there are no turns to skip; anyone can act")
+	}
 	actor := w.ActiveCharacter()
 	if actor == nil {
 		return nil, Conflict("no active turn")
@@ -310,7 +412,17 @@ func (g *GM) Skip(ctx context.Context, campaignID, playerID string, mode SkipMod
 		}
 	}
 	out := &TurnResult{TurnEnded: true}
-	evs := []store.Event{store.NewEvent("narration", "", map[string]any{"text": actor.Name + " holds and lets the moment pass.", "skip": true, "character_id": actor.ID})}
+	var evs []store.Event
+	if p := w.Campaign.TakePending(actor.ID); p != nil && p.Kind == game.PendingDeathSave {
+		// nobody rolled for them, so the engine does
+		ds := game.DeathSave(w, g.Dice, actor)
+		evs = append(evs, deathSaveEvent(out, ds))
+		if ds.Revived {
+			evs = append(evs, store.NewEvent("narration", "", map[string]any{"text": ds.Line + ".", "character_id": actor.ID}))
+		}
+	} else {
+		evs = append(evs, store.NewEvent("narration", "", map[string]any{"text": actor.Name + " holds and lets the moment pass.", "skip": true, "character_id": actor.ID}))
+	}
 	noteSceneTurn(w, &game.Resolution{})
 	evs = append(evs, g.endTurn(ctx, w, out)...)
 	if w.Campaign.Status == game.StatusFailed {
