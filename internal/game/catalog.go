@@ -19,6 +19,8 @@ type ItemDef struct {
 	DexCap  int     `json:"dex_cap,omitempty"`
 	Effect  string  `json:"effect,omitempty"`
 	Desc    string  `json:"desc,omitempty"`
+	Base    string  `json:"base,omitempty"`    // fantasy key this reskins
+	Setting string  `json:"setting,omitempty"` // "" is fantasy
 }
 
 // Catalog is the fixed item list: prices, damage dice, AC and effects.
@@ -95,9 +97,10 @@ func KitKeys() []string {
 	return []string{"warrior", "skirmisher", "ranger", "arcanist", "devout", "bard"}
 }
 
-// NewItem instantiates a catalog item for owner. Unknown keys return nil.
+// NewItem instantiates a catalog item for owner, translated into the
+// campaign's setting. Unknown keys return nil.
 func NewItem(w *World, key string, owner Owner) *Item {
-	def, ok := Catalog[key]
+	def, ok := ItemFor(w.Setting(), key)
 	if !ok {
 		return nil
 	}

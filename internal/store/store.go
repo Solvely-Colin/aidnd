@@ -244,10 +244,10 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 	}
 	if err := insert(ctx, tx, "campaigns", []string{"id", "title", "premise", "pitch", "status", "hub_id", "lair_id", "antagonist_id", "location_id",
 		"turn", "seq", "setbacks", "max_setbacks", "max_players", "day", "time_of_day", "tension", "scene_goal", "scene_turns", "scene_quiet", "scene_start",
-		"turn_order", "turn_index", "turn_started", "budget_free", "budget_move", "budget_action", "summary", "summary_turn", "created_at", "updated_at"},
+		"turn_order", "turn_index", "turn_started", "budget_free", "budget_move", "budget_action", "summary", "summary_turn", "created_at", "setting", "updated_at"},
 		c.ID, c.Title, c.Premise, c.Pitch, c.Status, c.HubID, c.LairID, c.AntagonistID, c.LocationID,
 		c.Turn, c.Seq, c.Setbacks, c.MaxSetbacks, c.MaxPlayers, sc.Day, sc.Time, sc.Tension, sc.Goal, sc.Turns, sc.Quiet, sc.StartTurn,
-		js(nonNil(tu.Order)), tu.Index, tu.Started, tu.Budget.Free, tu.Budget.Move, tu.Budget.Action, c.Summary, c.SummaryTurn, c.CreatedAt, now); err != nil {
+		js(nonNil(tu.Order)), tu.Index, tu.Started, tu.Budget.Free, tu.Budget.Move, tu.Budget.Action, c.Summary, c.SummaryTurn, c.CreatedAt, c.Setting, now); err != nil {
 		return err
 	}
 	for _, t := range childTables {
@@ -355,13 +355,13 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 	var order string
 	err = tx.QueryRowContext(ctx, `SELECT id, title, premise, pitch, status, hub_id, lair_id, antagonist_id, location_id,
 		turn, seq, setbacks, max_setbacks, max_players, day, time_of_day, tension, scene_goal, scene_turns, scene_quiet, scene_start,
-		turn_order, turn_index, turn_started, budget_free, budget_move, budget_action, summary, summary_turn, created_at
+		turn_order, turn_index, turn_started, budget_free, budget_move, budget_action, summary, summary_turn, created_at, setting
 		FROM campaigns WHERE id = ?`, id).Scan(
 		&c.ID, &c.Title, &c.Premise, &c.Pitch, &c.Status, &c.HubID, &c.LairID, &c.AntagonistID, &c.LocationID,
 		&c.Turn, &c.Seq, &c.Setbacks, &c.MaxSetbacks, &c.MaxPlayers, &c.Scene.Day, &c.Scene.Time, &c.Scene.Tension, &c.Scene.Goal,
 		&c.Scene.Turns, &c.Scene.Quiet, &c.Scene.StartTurn,
 		&order, &c.Turns.Index, &c.Turns.Started, &c.Turns.Budget.Free, &c.Turns.Budget.Move, &c.Turns.Budget.Action,
-		&c.Summary, &c.SummaryTurn, &c.CreatedAt)
+		&c.Summary, &c.SummaryTurn, &c.CreatedAt, &c.Setting)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

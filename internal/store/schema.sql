@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     title         TEXT NOT NULL DEFAULT '',
     premise       TEXT NOT NULL DEFAULT '',
     pitch         TEXT NOT NULL DEFAULT '',
+    setting       TEXT NOT NULL DEFAULT '',
     status        TEXT NOT NULL DEFAULT 'lobby',
     hub_id        TEXT NOT NULL DEFAULT '',
     lair_id       TEXT NOT NULL DEFAULT '',

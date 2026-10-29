@@ -64,6 +64,13 @@ internal/web      single-file /dev/ testing table
   objective counts for any place already visited, so reaching it early is not wasted.
 - Lair-gate edges ignore keys and checks; they open when all main objectives but the last
   are done. Defeating (or subduing) the antagonist completes the campaign.
+- Settings: every campaign has an era (`fantasy`, `gaslight`, `pulp`, `modern`, `future`).
+  The author picks it, but a year, decade or era word in the premise wins, and campaigns
+  saved before settings existed infer it from the premise. Each era reskins the whole
+  fantasy catalog with identical stats (a pulp Automatic Pistol rolls what a Light
+  Crossbow does) and renames the six kits (pulp skirmisher = Gumshoe). `NewItem`
+  translates any catalog key into the campaign's era, so authored stock and loot can't
+  bring swords into 1931. Existing characters keep the gear they already have.
 
 ## Changes from the live play-test (deepseek-v4.1-flash)
 

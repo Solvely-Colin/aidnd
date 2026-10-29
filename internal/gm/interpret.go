@@ -10,7 +10,7 @@ import (
 	"github.com/Solvely-Colin/aidnd/internal/llm"
 )
 
-const interpreterSystem = `You translate a player's message in a turn-based fantasy game into 1-4 tool calls, in the order the player wants them.
+const interpreterSystem = `You translate a player's message in a turn-based tabletop game into 1-4 tool calls, in the order the player wants them.
 Rules:
 - Call tools only; never write prose.
 - Use only ids that appear in the state below. Never invent ids.

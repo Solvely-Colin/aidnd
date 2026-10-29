@@ -403,7 +403,9 @@ function readyHTML(c) {
   </section>`;
 }
 
-function kitName(k) { return S.meta?.kits.find(x => x.key === k)?.name || k; }
+// Kits are reskinned per campaign setting (a 1930s game gets pistols, not swords).
+function kitList() { return S.meta?.settings?.find(s => s.key === S.view?.setting)?.kits || S.meta?.kits || []; }
+function kitName(k) { return kitList().find(x => x.key === k)?.name || k; }
 const ABIL = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
 const ABIL_NAME = { STR: "Strength", DEX: "Dexterity", CON: "Constitution", INT: "Intelligence", WIS: "Wisdom", CHA: "Charisma" };
 const mod = n => Math.floor((n - 10) / 2);
@@ -420,7 +422,7 @@ function builderHTML() {
         <label class="field"><span>Pronouns</span><input class="input" id="d-pron" value="${esc(d.pronouns || "they/them")}" maxlength="20"></label>
       </div>
       <label class="field"><span>Calling</span><input class="input" id="d-class" value="${esc(d.class)}" placeholder="Private eye, occultist, boxer…"></label>`,
-    () => `<div class="kits">${(S.meta?.kits || []).map(k => `<button class="kit ${k.key === d.kit ? "on" : ""}" data-kit="${esc(k.key)}"><b>${esc(k.name)}</b><span>${esc(k.desc)}</span></button>`).join("")}</div>`,
+    () => `<div class="kits">${kitList().map(k => `<button class="kit ${k.key === d.kit ? "on" : ""}" data-kit="${esc(k.key)}"><b>${esc(k.name)}</b><span>${esc(k.desc)}</span><span class="kit-items">${esc((k.items || []).map(it => it.name).join(" · "))}</span></button>`).join("")}</div>`,
     () => {
       const arr = S.meta?.standard_array || [15, 14, 13, 12, 10, 8];
       return `<p class="muted small">Pick a value for each, then star your two strengths.</p>

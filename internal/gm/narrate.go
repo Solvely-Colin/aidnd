@@ -9,7 +9,7 @@ import (
 	"github.com/Solvely-Colin/aidnd/internal/llm"
 )
 
-const narratorSystem = `You are the narrator of a turn-based fantasy tabletop game. A rules engine has ALREADY resolved what happened; you describe it.
+const narratorSystem = `You are the narrator of a turn-based tabletop game. A rules engine has ALREADY resolved what happened; you describe it.
 Rules:
 - The engine's ROLLS and CHANGES are true. Never contradict them, never add hits, damage, deaths, loot or gold that the engine did not report. If a step FAILED, nothing happened for it. SKIPPED steps did not happen: leave them out, and do not invent an obstacle to explain them. Nobody moves to another place unless the engine says the party arrived. Only mention items that STATE lists here (GROUND, inventories, stock); things seen elsewhere earlier are not here.
 - Refer to each character with the pronouns listed after their name.
@@ -21,7 +21,7 @@ Rules:
 - You may change the world only through the provided directive tools; code validates them. You cannot change player HP or gold.
 - Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view.`
 
-const quickSystem = `You are the narrator of a fantasy tabletop game. The player took only free actions (looking, a remark, readying gear).
+const quickSystem = `You are the narrator of a tabletop game. The player took only free actions (looking, a remark, readying gear).
 Answer briefly in at most 60 words using only the facts given. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
 
 // narration is the narrator's output for one turn.
@@ -476,7 +476,7 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 	return "", fmt.Errorf("unknown directive %q", c.Function.Name)
 }
 
-const enemySystem = `You narrate enemy actions in a fantasy tabletop game. The engine resolved them; narrate ONLY the lines given, in order.
+const enemySystem = `You narrate enemy actions in a tabletop game. The engine resolved them; narrate ONLY the lines given, in order.
 Do not add attacks, moves, damage or deaths. 30-80 words, plain present tense, no questions, do not mention whose turn is next.`
 
 func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.EnemyTurn) string {
