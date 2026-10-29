@@ -217,6 +217,7 @@ type Location struct {
 	IsHub       bool   `json:"is_hub,omitempty"`
 	IsLair      bool   `json:"is_lair,omitempty"`
 	Zones       []Zone `json:"zones,omitempty"`
+	LastDay     int    `json:"last_day,omitempty"` // day the party was last here
 }
 
 // Zone looks up a zone by id or name.
@@ -247,6 +248,7 @@ type NPC struct {
 	Alive       bool     `json:"alive"`
 	Antagonist  bool     `json:"antagonist,omitempty"`
 	Memory      []string `json:"memory,omitempty"` // short notes, newest last
+	Keeps       []string `json:"keeps,omitempty"`  // memories never forgotten
 	LastTalked  int      `json:"last_talked"`      // campaign turn, -1 never
 	// Combat stats used if the NPC becomes an enemy.
 	Stats *StatBlock `json:"stats,omitempty"`
@@ -469,9 +471,20 @@ type Beat struct {
 }
 
 // ChronicleEntry is a fact established in play (public via /journal).
+// It is the world's long-term memory: the narrator is shown the entries
+// about the place and people in the scene, and open promises.
 type ChronicleEntry struct {
-	Turn int    `json:"turn"`
-	Text string `json:"text"`
+	ID         string   `json:"id,omitempty"`
+	Turn       int      `json:"turn"`
+	Day        int      `json:"day,omitempty"`
+	Kind       string   `json:"kind,omitempty"` // see Fact* kinds; "" is FactNote
+	Text       string   `json:"text"`
+	LocationID string   `json:"location_id,omitempty"`
+	NPCIDs     []string `json:"npc_ids,omitempty"`
+	Source     string   `json:"source,omitempty"` // "engine" or "gm"
+	QuestID    string   `json:"quest_id,omitempty"`
+	Status     string   `json:"status,omitempty"` // promises: open, kept, broken
+	Outcome    string   `json:"outcome,omitempty"`
 }
 
 // Times of day, in order.

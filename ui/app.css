@@ -115,6 +115,8 @@ a { color: var(--accent); }
 .avatar { position: relative; overflow: hidden; }
 .gen { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .5s; }
 .gen.on { opacity: 1; }
+.art-box { position: relative; overflow: hidden; }
+.art-box .cover { position: absolute; inset: 0; }
 .avatar.sm { width: 28px; height: 28px; font-size: 12px; border-radius: 8px; }
 .avatar.lg { width: 52px; height: 52px; font-size: 20px; border-radius: 14px; }
 .avatar.xl { width: 64px; height: 64px; font-size: 26px; border-radius: 16px; }
@@ -324,6 +326,25 @@ a { color: var(--accent); }
 .ev-quest span { font: 700 11px var(--mono); text-transform: uppercase; color: var(--accent); }
 .ev-place { font: 800 26px/1.1 var(--display); letter-spacing: -.03em; padding-top: 10px; border-top: 1px solid var(--line); margin-top: 8px; }
 .ev-sys { font: 600 12px var(--mono); color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; }
+/* one card per turn: what was done, the dice, what happened, what changed */
+.turn-card { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+.turn-card > header { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--card); }
+.turn-card.you > header { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.turn-card.you > header .avatar { background: var(--accent); color: var(--accent-ink); }
+.turn-card > header .by { font-size: 12px; font-weight: 700; color: var(--text-3); }
+.turn-card > header p { margin: 0; }
+.turn-card + .turn-card { padding-top: 16px; border-top: 1px solid var(--line); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { font: 500 12px/1.3 var(--mono); color: var(--text-3); padding: 4px 8px; border-radius: var(--r-sm); background: var(--card); border: 1px solid var(--line); }
+.tag.quest { color: var(--text); background: var(--accent-soft); border-color: transparent; display: inline-flex; gap: 8px; }
+.tag.quest b { font-weight: 700; color: var(--accent); text-transform: uppercase; }
+.turn-card.pending .thinking { min-height: 24px; }
+.party-strip { display: flex; gap: 4px; margin-left: auto; }
+.party-strip .avatar.ready { box-shadow: 0 0 0 2px var(--accent); }
+.builder-page .titles { flex: 1; min-width: 0; }
+.builder-page .titles h1 { font: 700 18px/1.2 var(--display); letter-spacing: -.02em; margin: 0; }
+.builder-page .titles .eyebrow { display: block; font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.builder-page .wrap { padding-top: 18px; padding-bottom: 0; }
 .thinking { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: 14px; }
 
 .dock { border-top: 1px solid var(--line); background: var(--bg); padding: 10px 12px 12px; }

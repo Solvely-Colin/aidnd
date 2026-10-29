@@ -271,8 +271,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, l := range w.Locations {
-		if err := insert(ctx, tx, "locations", []string{"campaign_id", "id", "ord", "name", "kind", "hint", "description", "danger", "stub", "visited", "is_hub", "is_lair", "zones"},
-			id, l.ID, i, l.Name, l.Kind, l.Hint, l.Description, l.Danger, l.Stub, l.Visited, l.IsHub, l.IsLair, js(nonNil(l.Zones))); err != nil {
+		if err := insert(ctx, tx, "locations", []string{"campaign_id", "id", "ord", "name", "kind", "hint", "description", "danger", "stub", "visited", "is_hub", "is_lair", "zones", "last_day"},
+			id, l.ID, i, l.Name, l.Kind, l.Hint, l.Description, l.Danger, l.Stub, l.Visited, l.IsHub, l.IsLair, js(nonNil(l.Zones)), l.LastDay); err != nil {
 			return err
 		}
 	}
@@ -283,8 +283,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, n := range w.NPCs {
-		if err := insert(ctx, tx, "npcs", []string{"campaign_id", "id", "ord", "name", "role", "description", "location_id", "zone_id", "disposition", "merchant", "alive", "antagonist", "memory", "last_talked", "stats"},
-			id, n.ID, i, n.Name, n.Role, n.Desc, n.LocationID, n.ZoneID, n.Disposition, n.Merchant, n.Alive, n.Antagonist, js(nonNil(n.Memory)), n.LastTalked, js(n.Stats)); err != nil {
+		if err := insert(ctx, tx, "npcs", []string{"campaign_id", "id", "ord", "name", "role", "description", "location_id", "zone_id", "disposition", "merchant", "alive", "antagonist", "memory", "last_talked", "stats", "keeps"},
+			id, n.ID, i, n.Name, n.Role, n.Desc, n.LocationID, n.ZoneID, n.Disposition, n.Merchant, n.Alive, n.Antagonist, js(nonNil(n.Memory)), n.LastTalked, js(n.Stats), js(nonNil(n.Keeps))); err != nil {
 			return err
 		}
 	}
@@ -324,7 +324,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, ce := range w.Chronicle {
-		if err := insert(ctx, tx, "chronicle", []string{"campaign_id", "ord", "turn", "text"}, id, i, ce.Turn, ce.Text); err != nil {
+		if err := insert(ctx, tx, "chronicle", []string{"campaign_id", "ord", "turn", "text", "id", "day", "kind", "location_id", "npc_ids", "source", "quest_id", "status", "outcome"},
+			id, i, ce.Turn, ce.Text, ce.ID, ce.Day, ce.Kind, ce.LocationID, js(nonNil(ce.NPCIDs)), ce.Source, ce.QuestID, ce.Status, ce.Outcome); err != nil {
 			return err
 		}
 	}
@@ -401,10 +402,10 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Characters = append(w.Characters, ch)
 			return errors.Join(unjs(scores, &ch.Scores), unjs(prof, &ch.Proficient))
 		}),
-		q(`SELECT id, name, kind, hint, description, danger, stub, visited, is_hub, is_lair, zones FROM locations WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
+		q(`SELECT id, name, kind, hint, description, danger, stub, visited, is_hub, is_lair, zones, last_day FROM locations WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			l := &game.Location{}
 			var zones string
-			if err := r.Scan(&l.ID, &l.Name, &l.Kind, &l.Hint, &l.Description, &l.Danger, &l.Stub, &l.Visited, &l.IsHub, &l.IsLair, &zones); err != nil {
+			if err := r.Scan(&l.ID, &l.Name, &l.Kind, &l.Hint, &l.Description, &l.Danger, &l.Stub, &l.Visited, &l.IsHub, &l.IsLair, &zones, &l.LastDay); err != nil {
 				return err
 			}
 			w.Locations = append(w.Locations, l)
@@ -420,15 +421,15 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Edges = append(w.Edges, e)
 			return nil
 		}),
-		q(`SELECT id, name, role, description, location_id, zone_id, disposition, merchant, alive, antagonist, memory, last_talked, stats
+		q(`SELECT id, name, role, description, location_id, zone_id, disposition, merchant, alive, antagonist, memory, last_talked, stats, keeps
 			FROM npcs WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			n := &game.NPC{}
-			var mem, stats string
-			if err := r.Scan(&n.ID, &n.Name, &n.Role, &n.Desc, &n.LocationID, &n.ZoneID, &n.Disposition, &n.Merchant, &n.Alive, &n.Antagonist, &mem, &n.LastTalked, &stats); err != nil {
+			var mem, stats, keeps string
+			if err := r.Scan(&n.ID, &n.Name, &n.Role, &n.Desc, &n.LocationID, &n.ZoneID, &n.Disposition, &n.Merchant, &n.Alive, &n.Antagonist, &mem, &n.LastTalked, &stats, &keeps); err != nil {
 				return err
 			}
 			w.NPCs = append(w.NPCs, n)
-			return errors.Join(unjs(mem, &n.Memory), unjs(stats, &n.Stats))
+			return errors.Join(unjs(mem, &n.Memory), unjs(stats, &n.Stats), unjs(keeps, &n.Keeps))
 		}),
 		q(`SELECT id, key, name, kind, description, value, damage, ability, finesse, reach, ac, dex_cap, effect, owner_kind, owner_id
 			FROM items WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
@@ -484,13 +485,18 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Beats = append(w.Beats, b)
 			return unjs(eff, &b.Effects)
 		}),
-		q(`SELECT turn, text FROM chronicle WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
+		q(`SELECT turn, text, id, day, kind, location_id, npc_ids, source, quest_id, status, outcome FROM chronicle WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			var ce game.ChronicleEntry
-			if err := r.Scan(&ce.Turn, &ce.Text); err != nil {
+			var npcs string
+			if err := r.Scan(&ce.Turn, &ce.Text, &ce.ID, &ce.Day, &ce.Kind, &ce.LocationID, &npcs, &ce.Source, &ce.QuestID, &ce.Status, &ce.Outcome); err != nil {
 				return err
 			}
+			if ce.ID == "" { // written before facts had ids
+				ce.ID = fmt.Sprintf("fact%d", len(w.Chronicle)+1)
+			}
+			err := unjs(npcs, &ce.NPCIDs)
 			w.Chronicle = append(w.Chronicle, ce)
-			return nil
+			return err
 		}),
 		q(`SELECT name, npc_id, location_id, turn FROM defeats WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			var d game.DefeatRecord
