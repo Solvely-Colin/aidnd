@@ -573,6 +573,7 @@ function renderSide() {
   const el = $("#side");
   if (!el) return;
   const key = wide() ? S.panel : (S.tab === "story" ? S.panel : S.tab);
+  if (key === "journal" && journalBusy()) { J.stale = true; return; }
   const tabs = [["scene", "Scene"], ["you", "You"], ["journal", "Journal"], ["map", "Map"]];
   el.innerHTML = `<div class="side-tabs">${tabs.map(([k, l]) => `<button class="tab ${key === k ? "on" : ""}" data-panel="${k}">${l}</button>`).join("")}</div>
     <div class="side-body">${({ scene: sceneHTML, you: youHTML, journal: journalHTML, map: mapHTML })[key]()}</div>`;
@@ -697,7 +698,7 @@ function eventHTML(e, latest) {
     }
     case "narration":
       if (d.skip && !d.text) return "";
-      return `<p class="ev-narr ${d.quick ? "quick" : ""} ${d.opening ? "opening" : ""} ${latest ? "latest" : ""}">${esc(d.text)}</p>`;
+      return `<div class="narr-wrap"><p class="ev-narr ${d.quick ? "quick" : ""} ${d.opening ? "opening" : ""} ${latest ? "latest" : ""}">${esc(d.text)}</p>${S.view?.you?.joined ? `<button class="jot" data-act="jot" data-text="${esc(d.text)}" title="Copy to your notes" aria-label="Copy to your notes">${ICON.plus}</button>` : ""}</div>`;
     case "enemy_turns": {
       const rolls = (d.turns || []).map(t => t.attack?.roll ? rollHTML({ ...t.attack.roll, label: t.attack.roll.label || t.enemy }) : "").join("");
       return `${rolls ? `<div class="rolls foe">${rolls}</div>` : ""}${d.narration ? `<p class="ev-narr">${esc(d.narration)}</p>` : ""}`;
@@ -865,24 +866,180 @@ function youHTML() {
     ${c.backstory ? `<section><p class="eyebrow">Backstory</p><p class="muted">${esc(c.backstory)}</p></section>` : ""}`;
 }
 
-function journalHTML() {
-  const v = S.view;
-  if (!S.journal) {
-    api("GET", `/campaigns/${S.route}/journal`).then(j => { S.journal = j; if (sideKey() === "journal") renderSide(); }).catch(() => {});
-  }
-  const j = S.journal;
-  const quests = v.quests.filter(q => q.status !== "available" || q.is_main);
-  return `
-    <section><p class="eyebrow">Quests</p>${quests.length ? quests.map(q => `
-      <div class="quest-card"><div class="row spread"><b>${esc(q.title)}</b>${q.is_main ? `<span class="pill accent">Main</span>` : `<span class="pill">${esc(q.status)}</span>`}</div>
-        ${q.summary ? `<div class="muted small">${esc(q.summary)}</div>` : ""}
-        ${q.objectives.map(o => `<div class="objective ${o.done ? "done" : ""}"><i></i><span>${esc(o.text)}</span></div>`).join("")}
-        ${q.reward_gold || q.reward_xp ? `<div class="muted small">Reward: ${[q.reward_gold && q.reward_gold + " gold", q.reward_xp && q.reward_xp + " XP"].filter(Boolean).join(", ")}${q.giver_name ? " · from " + esc(q.giver_name) : ""}</div>` : ""}
-      </div>`).join("") : `<div class="muted">No quests yet.</div>`}</section>
-    ${j ? `${j.summary ? `<section><p class="eyebrow">The story so far</p><p class="muted">${esc(j.summary)}</p></section>` : ""}
-      <section><p class="eyebrow">Chronicle</p><ol class="chronicle">${j.chronicle.length ? j.chronicle.slice().reverse().map(c => `<li>${esc(c.text)}</li>`).join("") : `<li class="muted">Nothing recorded yet.</li>`}</ol></section>`
-    : `<div class="muted">Loading the journal…</div>`}`;
+// journal: a notebook with chapters. Quests, people, places and clues come
+// from the world record on the server; notes are the player's own.
+
+const CHAPTERS = [["quests", "Quests"], ["people", "People"], ["places", "Places"], ["clues", "Clues"], ["notes", "Notes"]];
+const MOOD = ["hostile", "unfriendly", "wary", "neutral", "friendly", "warm", "devoted"];
+const J = { tab: "quests", q: "", notes: null, notesFor: "", last: null, draft: "", editing: "", stale: false };
+
+function loadNotes() {
+  if (J.notesFor === S.route) return;
+  J.notesFor = S.route; J.notes = null;
+  if (!S.view?.you?.joined) { J.notes = []; return; }
+  api("GET", `/campaigns/${S.route}/notes`).then(r => { J.notes = r.notes; if (sideKey() === "journal") renderSide(); }).catch(() => { J.notes = []; });
 }
+
+async function addNote(text) {
+  const n = await api("POST", `/campaigns/${S.route}/notes`, { text });
+  (J.notes ||= []).push(n);
+  return n;
+}
+
+function journalHTML() {
+  if (!S.journal) {
+    api("GET", `/campaigns/${S.route}/journal`).then(j => { S.journal = j; J.last = j; if (sideKey() === "journal") renderSide(); }).catch(() => {});
+  }
+  loadNotes();
+  const j = S.journal || (J.last?.chronicle && J.lastFor === S.route ? J.last : null);
+  J.lastFor = S.route;
+  const v = S.view;
+  const quests = v.quests.filter(q => q.status !== "available" || q.is_main);
+  const count = { quests: quests.filter(q => q.status === "active" || q.status === "completed").length, people: j?.people?.length, places: j?.places?.filter(p => p.visited).length, clues: j?.chronicle?.length, notes: J.notes?.length };
+  const index = `<nav class="j-index" aria-label="Journal chapters">${CHAPTERS.map(([k, l]) => `<button class="j-tab ${J.tab === k ? "on" : ""}" data-act="jtab" data-k="${k}"><span>${l}</span><b>${count[k] ?? "·"}</b></button>`).join("")}</nav>`;
+  const find = J.tab === "quests" ? "" : `<label class="j-find">${ICON.look}<input id="j-find" type="search" placeholder="Search ${J.tab}" value="${esc(J.q)}" autocomplete="off"></label>`;
+  let body;
+  if (J.tab === "quests") body = questsChapter(quests);
+  else if (J.tab === "notes") body = notesChapter();
+  else if (!j) body = `<div class="muted">Opening the journal…</div>`;
+  else body = ({ people: peopleChapter, places: placesChapter, clues: cluesChapter })[J.tab](j);
+  return `<div class="journal">${index}${find}<div class="j-body">${body}</div></div>`;
+}
+
+const match = (...parts) => !J.q || parts.join(" ").toLowerCase().includes(J.q.toLowerCase());
+const none = what => `<div class="j-empty">${what}</div>`;
+
+function questsChapter(quests) {
+  if (!quests.length) return none("No quests yet. Talk to people and they will ask things of you.");
+  return quests.map(q => `
+    <div class="quest-card"><div class="row spread"><b>${esc(q.title)}</b>${q.is_main ? `<span class="pill accent">Main</span>` : `<span class="pill">${esc(q.status.replace("_", " "))}</span>`}</div>
+      ${q.summary ? `<div class="muted small">${esc(q.summary)}</div>` : ""}
+      ${q.objectives.map(o => `<div class="objective ${o.done ? "done" : ""}"><i></i><span>${esc(o.text)}</span></div>`).join("")}
+      ${q.reward_gold || q.reward_xp ? `<div class="muted small">Reward: ${[q.reward_gold && q.reward_gold + " gold", q.reward_xp && q.reward_xp + " XP"].filter(Boolean).join(", ")}${q.giver_name ? " · from " + esc(q.giver_name) : ""}</div>` : ""}
+    </div>`).join("");
+}
+
+function moodMeter(d) {
+  const i = Math.max(0, Math.min(6, d + 3));
+  return `<span class="mood" title="${MOOD[i]}">${MOOD.map((_, k) => `<i class="${k === i ? "on" : ""} ${k < 3 ? "neg" : k > 3 ? "pos" : ""}"></i>`).join("")}<em>${MOOD[i]}</em></span>`;
+}
+
+function peopleChapter(j) {
+  const ps = j.people.filter(p => match(p.name, p.role, p.desc, p.location_name));
+  if (!j.people.length) return none("Nobody yet. People you meet are written in here.");
+  if (!ps.length) return none(`Nobody matches “${esc(J.q)}”.`);
+  return ps.map(p => `
+    <article class="dossier ${p.alive ? "" : "dead"} ${p.here ? "here" : ""}">
+      <div class="mono">${esc(p.name[0])}</div>
+      <div class="grow">
+        <div class="d-head"><b>${esc(p.name)}</b>${p.here ? `<span class="tag here">here</span>` : ""}${p.alive ? "" : `<span class="tag">dead</span>`}${p.merchant ? `<span class="tag">trader</span>` : ""}</div>
+        <div class="d-sub">${esc(p.role || "")}${p.role ? " · " : ""}${p.met ? "spoke with at" : "seen at"} ${esc(p.location_name)}</div>
+        ${p.desc ? `<p>${esc(p.desc)}</p>` : ""}
+        ${p.quests?.length ? `<div class="d-sub">Gave you: ${p.quests.map(esc).join(", ")}</div>` : ""}
+        <div class="d-foot">${p.alive ? moodMeter(p.disposition) : ""}${p.here && p.alive && !S.view.encounter ? `<button class="btn small" data-fill="I talk to ${esc(p.name)}: " data-target="${esc(p.id)}">Talk</button>` : ""}</div>
+      </div>
+    </article>`).join("");
+}
+
+function dangerPips(n) { return `<span class="danger" title="danger ${n} of 5">${[1, 2, 3, 4, 5].map(k => `<i class="${k <= n ? "on" : ""}"></i>`).join("")}</span>`; }
+
+function placesChapter(j) {
+  const ps = j.places.filter(p => match(p.name, p.kind, p.hint, p.description, (p.people || []).join(" ")));
+  if (!j.places.length) return none("No places yet.");
+  if (!ps.length) return none(`No place matches “${esc(J.q)}”.`);
+  return ps.map(p => `
+    <article class="gazette ${p.visited ? "" : "rumor"} ${p.here ? "here" : ""}">
+      <div class="g-head"><b>${esc(p.name)}</b>${p.here ? `<span class="tag here">you are here</span>` : p.is_hub ? `<span class="tag">home</span>` : ""}<span class="grow"></span>${dangerPips(p.danger)}</div>
+      <div class="d-sub">${esc(p.kind)}${p.visited ? "" : " · not yet visited"}</div>
+      ${p.visited ? (p.description ? `<p>${esc(p.description)}</p>` : "") : p.hint ? `<p class="muted">Heard of: ${esc(p.hint)}</p>` : ""}
+      ${p.people?.length ? `<div class="d-sub">People: ${p.people.map(esc).join(", ")}</div>` : ""}
+    </article>`).join("");
+}
+
+function cluesChapter(j) {
+  const cs = j.chronicle.map((c, i) => ({ ...c, i })).filter(c => match(c.text, c.kind)).reverse();
+  return `${j.summary && !J.q ? `<section class="sofar"><p class="eyebrow">The story so far</p><p>${esc(j.summary)}</p></section>` : ""}
+    ${!j.chronicle.length ? none("Nothing recorded yet. Facts the story settles are written here.") : !cs.length ? none(`No clue matches “${esc(J.q)}”.`) : `<ol class="clues">${cs.map(c => `
+      <li><span class="when">${c.day ? `D${c.day}` : `T${c.turn}`}</span><p>${esc(c.text)}${c.kind ? ` <span class="tag">${esc(c.kind)}</span>` : ""}</p>
+        <button class="jot" data-act="jot" data-text="${esc(c.text)}" title="Copy to your notes" aria-label="Copy to your notes">${ICON.plus}</button></li>`).join("")}</ol>`}`;
+}
+
+function notesChapter() {
+  if (!S.view.you?.joined) return none("Join this story to keep notes.");
+  if (!J.notes) return `<div class="muted">Opening your notes…</div>`;
+  const ns = J.notes.filter(n => match(n.text)).slice().reverse();
+  const stamp = n => `Day ${n.day || 1} · ${esc(n.time || "")}`;
+  return `
+    <form class="n-new" id="n-new"><textarea id="n-text" class="textarea" rows="3" placeholder="Write it down before you forget: names, hunches, what someone wasn't telling you…">${esc(J.draft)}</textarea>
+      <div class="row"><span class="muted small grow">Only you can read these.</span><button class="btn small primary">Write</button></div></form>
+    ${!J.notes.length ? none("No notes yet. Tap + on a line of the story or a clue to copy it here.") : !ns.length ? none(`No note matches “${esc(J.q)}”.`) : `<div class="notes">${ns.map(n => J.editing === n.id ? `
+      <form class="note editing" data-note="${esc(n.id)}"><div class="n-stamp">${stamp(n)}</div><textarea class="textarea" id="n-edit" rows="4">${esc(n.text)}</textarea>
+        <div class="row"><button type="button" class="btn small ghost" data-act="note-del" data-id="${esc(n.id)}">Delete</button><span class="grow"></span><button type="button" class="btn small ghost" data-act="note-cancel">Cancel</button><button class="btn small primary">Save</button></div></form>` : `
+      <button class="note" data-act="note-edit" data-id="${esc(n.id)}"><div class="n-stamp">${stamp(n)}</div><p>${esc(n.text)}</p></button>`).join("")}</div>`}`;
+}
+
+// The side panel re-renders on every game event. Hold off while the player
+// is typing in the journal and catch up when they leave the field.
+function journalBusy() {
+  const a = document.activeElement;
+  return !!a && a.closest?.(".journal") && a.matches("input, textarea");
+}
+document.addEventListener("focusout", () => setTimeout(() => { if (J.stale && !journalBusy()) { J.stale = false; renderSide(); } }, 0));
+document.addEventListener("input", e => {
+  if (e.target.id === "j-find") {
+    J.q = e.target.value;
+    const pos = e.target.selectionStart;
+    renderJournalBody();
+    const f = $("#j-find"); if (f) { f.focus(); f.setSelectionRange(pos, pos); }
+  }
+  if (e.target.id === "n-text") J.draft = e.target.value;
+});
+function renderJournalBody() {
+  const el = $(".journal");
+  if (!el) return;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = journalHTML();
+  el.querySelector(".j-body").replaceWith(tmp.querySelector(".j-body"));
+  el.querySelector(".j-index").replaceWith(tmp.querySelector(".j-index"));
+}
+document.addEventListener("submit", async e => {
+  const f = e.target;
+  if (f.id === "n-new") {
+    e.preventDefault();
+    const text = $("#n-text").value.trim();
+    if (!text) return;
+    try { await addNote(text); J.draft = ""; renderSide(); } catch (er) { toast(er.message); }
+  } else if (f.dataset?.note) {
+    e.preventDefault();
+    const id = f.dataset.note, text = $("#n-edit").value.trim();
+    if (!text) return;
+    try {
+      await api("POST", `/campaigns/${S.route}/notes/${id}`, { text });
+      const n = J.notes.find(n => n.id === id); if (n) n.text = text;
+      J.editing = ""; renderSide();
+    } catch (er) { toast(er.message); }
+  }
+});
+document.addEventListener("click", async e => {
+  const t = e.target.closest("[data-act]");
+  if (!t) return;
+  switch (t.dataset.act) {
+    case "jtab": J.tab = t.dataset.k; J.q = ""; J.editing = ""; return renderSide();
+    case "note-edit": J.editing = t.dataset.id; renderSide(); return $("#n-edit")?.focus();
+    case "note-cancel": J.editing = ""; return renderSide();
+    case "note-del":
+      try {
+        await api("DELETE", `/campaigns/${S.route}/notes/${t.dataset.id}`);
+        J.notes = J.notes.filter(n => n.id !== t.dataset.id); J.editing = ""; renderSide();
+      } catch (er) { toast(er.message); }
+      return;
+    case "jot":
+      if (!S.view?.you?.joined) return toast("Join this story to keep notes.");
+      loadNotes();
+      try { await addNote(`“${t.dataset.text.slice(0, 3900)}”`); t.classList.add("done"); toast("Copied to your notes."); if (sideKey() === "journal" && J.tab === "notes") renderSide(); } catch (er) { toast(er.message); }
+      return;
+  }
+});
 
 function mapHTML() {
   if (!S.map) {

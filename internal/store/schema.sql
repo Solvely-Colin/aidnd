@@ -249,3 +249,19 @@ CREATE TABLE IF NOT EXISTS events (
     created_at  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS events_by_campaign ON events(campaign_id, id);
+
+-- Free-form notes a player keeps for themselves. Not part of the world, so
+-- Save never rewrites them, and only their author can read them.
+CREATE TABLE IF NOT EXISTS notes (
+    campaign_id TEXT NOT NULL,
+    id          TEXT NOT NULL,
+    player_id   TEXT NOT NULL DEFAULT '',
+    text        TEXT NOT NULL DEFAULT '',
+    turn        INTEGER NOT NULL DEFAULT 0,
+    day         INTEGER NOT NULL DEFAULT 0,
+    time        TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL DEFAULT 0,
+    updated_at  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (campaign_id, id)
+);
+CREATE INDEX IF NOT EXISTS notes_by_player ON notes(campaign_id, player_id, created_at);
