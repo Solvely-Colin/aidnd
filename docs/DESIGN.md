@@ -97,3 +97,15 @@ changes below (enemies act once per round, softer early fights).
   hidden thinking) without the cap. `LLM_REASONING_EFFORT` passes `reasoning_effort`.
 - Merchants remember trades; quest items are never for sale. A carried shield shows as
   equipped (it always counted toward AC).
+
+## Keeping the scene where the party is (Drowned Bell play-test)
+
+- Beats that name an NPC wait until the actor shares that NPC's zone (or the beat brings the NPC). A turn-triggered beat had the coroner unveil bodies while the party stood on another part of the town.
+- Snapshots carry a SCENE line (who is in the actor's zone) and mark other NPCs as out of the scene; the narrator may only have people in the scene speak or act, and may not describe people or things that STATE does not list.
+- Outside combat, talk_to walks the actor to the NPC's zone, so the state matches the conversation.
+- When the interpreter returns only a reposition for words that are not about moving, it is asked for the missing step; if it still has none and an NPC is selected on the map, a talk_to with the player's words is added.
+- Character names are unique per campaign: drafts avoid party names, and saving another player's name is a 409. The feed shows only each player's latest lobby sheet.
+- The world author lists a `cast`: every person, group, creature or body the story says can be found, placed at the hub or a place. Objective wording must describe the one action that completes it, and the first main objective is hearing the quest giver.
+- A beat in which someone new shows up names them as `figure`. The figure is created offstage and brought into the actor's zone when the beat plays (and attacks if hostile).
+- Examining an NPC counts toward talk_to_npc objectives. Looking at something that is not here says so instead of describing the whole place.
+- Narration must not use game words (zone, NPC, HP, ...). If it does anyway, one rewrite pass replaces them.

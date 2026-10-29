@@ -16,11 +16,12 @@ Rules:
 - Use only ids that appear in the state below. Never invent ids.
 - Compound intents need multiple calls: "I charge and finish it" = reposition + attack. "I run to the door and leave" = reposition + move. "I look around and then attack the archer" = look + attack.
 - Going somewhere else ("on to the wreck", "head back to town", "lead us to X") always needs move with that exit's id, or travel for a far place already visited. Outside combat an exit can be taken from any zone, so no reposition is needed first.
-- FREE actions: look, say, equip, drop, accept_quest, turn_in_quest (and outside combat: reposition, talk_to, buy, sell). MOVE: move through an exit, travel, reposition in combat. ACTION: everything else. Spending the ACTION ends the turn.
+- FREE actions: look, say, equip, drop, pick_up, accept_quest, turn_in_quest (and outside combat: reposition, talk_to, buy, sell). MOVE: move through an exit, travel, reposition in combat. ACTION: everything else. Spending the ACTION ends the turn, but the moves and free actions after it in the same message still happen, so always emit every step the player asked for. Buying several things is one buy call per item; in combat several buys from one merchant cost one action in total.
 - Respect LEFT THIS TURN; if the player asks for more than is left, still emit their steps in order (the engine reports what could not be done).
 - Attacks need the target in reach: melee = same zone, thrown = 1 zone, bows/foci/holy symbols = 2 zones. If the target is out of reach, reposition first.
-- Questions like "what do I see?" or "what's in the room?" are look. Talking to an NPC in a conversation is talk_to; a passing remark is say.
+- Questions like "what do I see?" or "what's in the room?" are look. Talking to an NPC in a conversation is talk_to; a passing remark is say. Outside combat talk_to walks the actor over to the NPC, so no reposition is needed first. "I talk to X: <question>" is one talk_to with that question as text.
 - Anything risky or uncertain (climbing, sneaking, searching, persuading, picking a lock) is ability_check with a sensible DC (5/10/15/20/25).
+- Laying hands on someone who is not an enemy in this fight (grab, pin, shove, trip, restrain, pickpocket) is ability_check (STR or DEX) naming that person in its text, never a bare reposition. Grabbing or pinning an enemy in combat is subdue.
 - "skip", "pass", "wait", "end my turn" = end_turn.
 - A MAP SELECTION is only a hint. The player's words win. A selected NPC means the person spoken to, traded with or examined; attack them only if the words clearly say so.`
 
@@ -92,8 +93,9 @@ func (g *GM) interpret(ctx context.Context, w *game.World, actor *game.Character
 	}
 	calls, err := g.forced(ctx, req, validate)
 	// Some models answer with one tool call at a time. When the message
-	// reads like several steps, show what is queued and let them add more.
-	if err == nil && len(parsed) > 0 && len(parsed) < game.MaxSteps && multiStepRe.MatchString(text) {
+	// reads like several steps, or the only step is walking somewhere the
+	// player did not ask to go, show what is queued and let them add more.
+	if err == nil && len(parsed) > 0 && len(parsed) < game.MaxSteps && (multiStepRe.MatchString(text) || strayReposition(parsed, text)) {
 		msgs := append([]llm.Message{}, req.Messages...)
 		for round := 0; round < 2 && len(parsed) < game.MaxSteps; round++ {
 			msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: calls})
@@ -138,7 +140,30 @@ func (g *GM) interpret(ctx context.Context, w *game.World, actor *game.Character
 	if len(parsed) == 0 {
 		return []game.Action{{Kind: game.ActLook}}
 	}
+	// still only a walk: if the player picked an NPC on the map, they
+	// meant to talk to them
+	if strayReposition(parsed, text) && len(parsed) < game.MaxSteps {
+		if n := w.NPC(hints.TargetID); n != nil && n.ID == hints.TargetID {
+			a := game.Action{Kind: game.ActTalkTo, Target: n.ID, Text: text}
+			if validateAction(w, actor, &a) == "" {
+				parsed = append(parsed, a)
+			}
+		}
+	}
 	return append([]game.Action(nil), parsed...)
+}
+
+var walkRe = regexp.MustCompile(`(?i)\b(go|goes|going|head|heads|move|moves|walk|walks|run|runs|step|steps|approach|approaches|cross|crosses|wander|return|returns|back to|over to|join|joins|follow|follows|reposition|stand|hide|take cover|duck|climb)\b`)
+
+// strayReposition is true when every step is a reposition but the player's
+// words do not talk about moving: the model dropped the step that mattered.
+func strayReposition(as []game.Action, text string) bool {
+	for _, a := range as {
+		if a.Kind != game.ActReposition {
+			return false
+		}
+	}
+	return len(as) > 0 && !walkRe.MatchString(text)
 }
 
 func describeHints(w *game.World, h Hints) string {
@@ -232,9 +257,8 @@ func validateAction(w *game.World, c *game.Character, a *game.Action) string {
 	}
 	switch a.Kind {
 	case game.ActLook:
-		if a.Target != "" && len(game.Look(w, c, a.Target)) == 0 {
-			a.Target = ""
-		}
+		// an unknown target stays, so the engine can say it is not here
+		// instead of describing the whole place
 	case game.ActSay:
 		if strings.TrimSpace(a.Text) == "" {
 			return "text is required"

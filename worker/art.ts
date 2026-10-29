@@ -23,6 +23,7 @@ export type CampaignInfo = {
 	title?: string;
 	pitch?: string;
 	premise?: string;
+	setting?: string; // fantasy, gaslight, pulp, modern or future
 	party?: CharacterInfo[];
 };
 
@@ -58,17 +59,30 @@ const clip = (s: string | undefined, n: number) => {
 	return t.length > n ? t.slice(0, n).replace(/\s\S*$/, "") + "…" : t;
 };
 
-const STYLE =
-	"Painted illustration in the style of a classic tabletop fantasy adventure book, gouache and ink, " +
-	"strong shapes, muted earthy palette with one warm light source. No text, no letters, no logos, no border.";
+// The look follows the story's setting, so a 1930s lighthouse story
+// doesn't get swords and spell books.
+const ERA: Record<string, { genre: string; look: string }> = {
+	fantasy: { genre: "fantasy adventure", look: "a classic tabletop fantasy adventure book" },
+	gaslight: { genre: "Victorian gaslight mystery", look: "a Victorian penny-dreadful illustration" },
+	pulp: { genre: "1920s-1940s pulp adventure", look: "a 1930s pulp magazine illustration" },
+	modern: { genre: "present-day thriller", look: "a modern graphic novel" },
+	future: { genre: "science fiction adventure", look: "a classic science fiction paperback" },
+};
 
+const era = (setting: string | undefined) => ERA[(setting ?? "").toLowerCase()] ?? ERA.fantasy;
+
+const style = (setting: string | undefined) =>
+	`Painted illustration in the style of ${era(setting).look}, gouache and ink, ` +
+	"strong shapes, muted earthy palette with one warm light source. No text, no letters, no words, no title, no logos, no border.";
+
+// The title is left out on purpose: given one, the model paints it as
+// lettering across the sky, and the UI already shows it.
 export function coverPrompt(c: CampaignInfo): string {
 	return [
-		"Cover art for a fantasy adventure: a wide establishing shot of the place where the story happens.",
+		`Cover art for a ${era(c.setting).genre}: a wide establishing shot of the place where the story happens.`,
 		"No people, no characters, no figures, no faces.",
-		c.title ? `Title of the adventure: ${clip(c.title, 80)}.` : "",
 		`The story: ${clip(c.pitch || c.premise, 400)}`,
-		STYLE,
+		style(c.setting),
 	]
 		.filter(Boolean)
 		.join(" ");
@@ -81,13 +95,13 @@ function who(pronouns: string | undefined): string {
 	return "a person";
 }
 
-export function portraitPrompt(ch: CharacterInfo): string {
+export function portraitPrompt(ch: CharacterInfo, setting?: string): string {
 	return [
-		`Head and shoulders portrait of one fantasy adventurer, ${who(ch.pronouns)}, looking toward the viewer, plain dark background.`,
+		`Head and shoulders portrait of one character from a ${era(setting).genre}, ${who(ch.pronouns)}, looking toward the viewer, plain dark background.`,
 		ch.class ? `Their calling: ${clip(ch.class, 60)}.` : "",
 		ch.concept ? `${clip(ch.concept, 240).replace(/[^.!?…]$/, "$&.")}` : "",
 		ch.backstory ? `Background: ${clip(ch.backstory, 240)}` : "",
-		STYLE,
+		style(setting),
 	]
 		.filter(Boolean)
 		.join(" ");
@@ -170,7 +184,7 @@ export async function serveArt(
 	} else {
 		const ch = c.party?.find((p) => p.id === t.id);
 		if (!ch) return new Response(null, { status: 404 });
-		[prompt, w, h] = [portraitPrompt(ch), 640, 640];
+		[prompt, w, h] = [portraitPrompt(ch, c.setting), 640, 640];
 	}
 	if (!(await takeQuota(env, now))) return new Response(null, { status: 404, headers: { "X-Art": "daily limit" } });
 

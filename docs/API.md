@@ -162,13 +162,16 @@ from the turn budget:
 
 | Slot | Actions |
 |---|---|
-| free | look, say, equip, drop, accept or turn in a quest; outside combat also reposition, talk and trade |
+| free | look, say, equip, drop, pick up, accept or turn in a quest; outside combat also reposition, talk and trade |
 | move | move to a zone, travel, reposition in combat (a second move spends the action as a dash) |
 | none | end turn ("I wait", "done") |
 | action | attack, subdue, ability checks (search, unlock, force), use item, rest, flee through an exit in combat; in combat also talk and trade |
 
 In combat a turn has 1 action, 1 move and 3 free actions. Outside combat
-free actions are unlimited. Spending the action ends the turn; steps the
+free actions are unlimited. Spending the action ends the turn, but the rest
+of the same message still runs where the move or free actions cover it ("I
+stab it and step back"); `end_turn` stops the message outright. Several
+buys or sells with one merchant in one message cost one action. Steps the
 budget cannot pay for are returned in `skipped` with a reason.
 
 `target_id` and `zone_id` are optional hints from a click (an enemy token,
@@ -250,7 +253,7 @@ data: {"id":42,"campaign_id":"c_...","type":"narration","data":{...},"created_at
 |---|---|
 | `campaign_created` | `{id, title, pitch}` |
 | `player_joined` | `{player_id, name, seat}` |
-| `character_created` | `{player_id, character_id, name, class, kit, concept}` |
+| `character_created` | `{player_id, character_id, name, class, kit, concept, replaces}` (`replaces` is the id of the sheet this one replaced in the lobby, or empty) |
 | `location_changed` | `{location_id, name}` |
 | `turn_started` | `{character_id, player_id, name, budget}` |
 | `player_action` | `{character_id, character, text, hints}` |

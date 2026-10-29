@@ -3,6 +3,7 @@ package gm
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Solvely-Colin/aidnd/internal/game"
@@ -11,18 +12,21 @@ import (
 
 const narratorSystem = `You are the narrator of a turn-based tabletop game. A rules engine has ALREADY resolved what happened; you describe it.
 Rules:
-- The engine's ROLLS and CHANGES are true. Never contradict them, never add hits, damage, deaths, loot or gold that the engine did not report. If a step FAILED, nothing happened for it. SKIPPED steps did not happen: leave them out, and do not invent an obstacle to explain them. Nobody moves to another place unless the engine says the party arrived. Only mention items that STATE lists here (GROUND, inventories, stock); things seen elsewhere earlier are not here.
+- The engine's ROLLS and CHANGES are true. Never contradict them, never add hits, damage, deaths, loot or gold that the engine did not report. If a step FAILED, nothing happened for it. SKIPPED steps did not happen: leave them out, and do not invent an obstacle to explain them. Nobody moves to another place unless the engine says the party arrived. Only mention items that STATE lists here (GROUND, inventories, stock); things seen elsewhere earlier are not here. Nobody picks up, pockets or already carries anything unless CHANGES or the inventories in STATE say so.
+- The scene is the actor's zone (see SCENE). Only the people listed there can speak, act or show the actor anything. People in other zones are elsewhere: never narrate them joining the conversation, revealing things or doing things in front of the actor, and never put the actor in another zone than the engine says. An NPC in the scene may point the way to someone elsewhere.
+- People, bodies, creatures and objects exist only if STATE lists them. If a quest or the log mentions someone who is not in STATE, they have not been found yet: do not describe them as present. A named person STATE lists is alive and where STATE puts them: never write them as missing, dead or among the lost. Describe people as their description in STATE says (someone "heard but not seen" stays unseen).
 - Refer to each character with the pronouns listed after their name.
 - Never decide what a player character does, says, thinks or feels beyond what the player stated.
 - Enemies act only through engine-resolved lines. Do not invent enemy movement, attacks or hits.
 - Do not end with a question or a menu of options ("What do you do? A, B or C"). End on the situation.
 - Do not hand the spotlight to the next player or say whose turn it is.
+- Write as a storyteller, never as the engine: no game words (zone, exit, NPC, attitude, disposition, HP, AC, budget, action, step, engine, state) and no lists of who is where. Say "across the green" or "down by the steps", not "one zone off".
 - 40-100 words, plain language, lead with what happened. Second person plural or character names; present tense.
 - You may change the world only through the provided directive tools; code validates them. You cannot change player HP or gold.
-- Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view.`
+- Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.`
 
 const quickSystem = `You are the narrator of a tabletop game. The player took only free actions (looking, a remark, readying gear).
-Answer briefly in at most 60 words using only the facts given. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
+Answer briefly in at most 60 words using only the facts given, as a storyteller: no game words (zone, exit, NPC, attitude, HP, budget, action, engine) and no lists of who is where; answer the question asked, not everything in the state. If what they look for is not there, say so plainly. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
 
 // narration is the narrator's output for one turn.
 type narration struct {
@@ -61,6 +65,8 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		}
 		if out.Text == "" {
 			out.Text = fallbackNarration(res)
+		} else {
+			out.Text = g.dejargon(ctx, out.Text)
 		}
 		return out
 	}
@@ -160,8 +166,28 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		if len(out.Changes) > 0 {
 			textOut += " " + strings.Join(out.Changes, ". ") + "."
 		}
+	} else {
+		textOut = g.dejargon(ctx, textOut)
 	}
 	out.Text = textOut
+	return out
+}
+
+var jargonRe = regexp.MustCompile(`(?i)\b(zones?|npcs?|disposition|hit points|HP|the engine)\b`)
+
+// dejargon rewrites narration that slipped into game terms. It keeps the
+// original when the rewrite fails or still reads like the engine.
+func (g *GM) dejargon(ctx context.Context, text string) string {
+	if !jargonRe.MatchString(text) {
+		return text
+	}
+	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "dejargon", Temperature: 0.3, MaxTokens: 300, Messages: []llm.Message{
+		llm.System("Rewrite the passage as a storyteller would say it. Keep every fact, name and number. Replace game terms (zone, NPC, disposition, HP, engine) with natural description, e.g. \"one zone off\" becomes \"across the green\". Same length or shorter. No questions."),
+		llm.User(text)}})
+	out := strings.TrimSpace(resp.Content)
+	if err != nil || out == "" || jargonRe.MatchString(out) {
+		return text
+	}
 	return out
 }
 
@@ -477,20 +503,38 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 }
 
 const enemySystem = `You narrate enemy actions in a tabletop game. The engine resolved them; narrate ONLY the lines given, in order.
-Do not add attacks, moves, damage or deaths. 30-80 words, plain present tense, no questions, do not mention whose turn is next.`
+Do not add attacks, moves, damage or deaths. Each enemy looks and fights as its description says, and the scene continues from the last narration: keep its setting, objects and voice. 30-80 words, plain present tense, no questions, do not mention whose turn is next.`
 
-func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.EnemyTurn) string {
-	var lines []string
+// narrateEnemies describes the enemies' turns. last is the narration just
+// before, so the enemies stay the creatures and the place the story set up.
+func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.EnemyTurn, last string) string {
+	var lines, looks []string
+	seen := map[string]bool{}
 	for _, t := range turns {
 		line := "- " + t.Text
-		if e := w.Enemy(t.EnemyID); e != nil && e.Ranged && t.Kind == "attack" {
+		e := w.Enemy(t.EnemyID)
+		if e != nil && e.Ranged && t.Kind == "attack" {
 			line += " (a ranged attack, from a distance)"
 		}
 		lines = append(lines, line)
+		if e != nil && !seen[e.Name] {
+			seen[e.Name] = true
+			if d := enemyLooks(w, e); d != "" {
+				looks = append(looks, fmt.Sprintf("- %s: %s", e.Display(), d))
+			}
+		}
 	}
+	prompt := fmt.Sprintf("Location: %s.\nParty (use these pronouns): %s.\n", w.Here().Name, partyPronouns(w))
+	if len(looks) > 0 {
+		prompt += "Enemies:\n" + strings.Join(looks, "\n") + "\n"
+	}
+	if last = strings.TrimSpace(last); last != "" {
+		prompt += "Last narration: " + trim(last, 700) + "\n"
+	}
+	prompt += "Engine-resolved enemy actions:\n" + strings.Join(lines, "\n")
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "narrate_enemies", Temperature: 0.7, MaxTokens: 300, Messages: []llm.Message{
 		llm.System(enemySystem),
-		llm.User(fmt.Sprintf("Location: %s.\nParty (use these pronouns): %s.\nEngine-resolved enemy actions:\n%s", w.Here().Name, partyPronouns(w), strings.Join(lines, "\n")))}})
+		llm.User(prompt)}})
 	text := strings.TrimSpace(resp.Content)
 	if err != nil || text == "" {
 		var parts []string
@@ -503,6 +547,15 @@ func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.Ene
 		text = g.tighten(ctx, text, 80)
 	}
 	return text
+}
+
+// enemyLooks is what an enemy is, from its NPC (a named foe) or its stat
+// block's name.
+func enemyLooks(w *game.World, e *game.Enemy) string {
+	if n := w.NPC(e.NPCID); e.NPCID != "" && n != nil {
+		return trim(strings.TrimSpace(n.Role+". "+n.Desc), 240)
+	}
+	return ""
 }
 
 const judgeSystem = `You are a strict objective judge for a tabletop game. You may only mark FREEFORM objectives complete, and only when the

@@ -135,7 +135,7 @@ type Ctx struct {
 // reposition it depends on distance and is computed in resolve.
 func SlotFor(w *World, a Action) Slot {
 	switch a.Kind {
-	case ActLook, ActSay, ActEquip, ActDrop, ActAcceptQuest, ActTurnInQuest:
+	case ActLook, ActSay, ActEquip, ActDrop, ActPickUp, ActAcceptQuest, ActTurnInQuest:
 		return SlotFree
 	case ActEndTurn:
 		return SlotNone
@@ -159,7 +159,10 @@ func SlotFor(w *World, a Action) Slot {
 
 // Resolve executes up to MaxSteps actions for the active character, in
 // order, against the turn budget. Unaffordable steps are skipped and
-// reported; spending the action ends the turn and skips the rest.
+// reported. Spending the action ends the turn, but the rest of the message
+// still runs where the budget covers it ("I stab it and step back"); only
+// end_turn stops the message outright. Several trades with one merchant in
+// one message cost a single action.
 func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 	w := ctx.W
 	res := &Resolution{ActorID: actor.ID, AllFree: true}
@@ -170,8 +173,10 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		actions = actions[:MaxSteps]
 	}
 	budget := &w.Campaign.Turns.Budget
+	tradedWith := map[string]bool{}
+	stopped := false
 	for i, a := range actions {
-		if res.TurnEnded || w.Campaign.Status != StatusActive {
+		if stopped || w.Campaign.Status != StatusActive {
 			for _, rest := range actions[i:] {
 				res.Skipped = append(res.Skipped, Step{Action: rest, Skipped: true, Error: "your turn ended before this step"})
 			}
@@ -181,11 +186,18 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 			res.Skipped = append(res.Skipped, Step{Action: a, Skipped: true, Error: actor.Name + " is down"})
 			continue
 		}
+		if a.Kind == ActReposition && a.Zone != "" && w.Here().Zone(a.Zone) != nil && w.Here().Zone(a.Zone).ID == actor.ZoneID {
+			continue // already there: nothing to do or report
+		}
 		slot, err := costOf(w, actor, a)
 		if err != nil {
 			st := Step{Action: a, Error: err.Error()}
 			res.Steps = append(res.Steps, st)
 			continue
+		}
+		trade := a.Kind == ActBuy || a.Kind == ActSell
+		if trade && tradedWith[strings.ToLower(a.Target)] {
+			slot = SlotFree // same bargain, already paid for
 		}
 		trial := *budget
 		used, err := trial.Pay(slot)
@@ -203,6 +215,9 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		}
 		st.OK = true
 		*budget = trial
+		if trade {
+			tradedWith[strings.ToLower(a.Target)] = true
+		}
 		if !wasCombat && w.InCombat() && (budget.Free == Unlimited || budget.Free > CombatFreeActions) {
 			budget.Free = CombatFreeActions // a fight broke out during this step
 		}
@@ -228,6 +243,9 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		}
 		res.CombatStarted = res.CombatStarted || st.CombatStarted
 		res.CombatEnded = res.CombatEnded || st.CombatEnded
+		if a.Kind == ActEndTurn {
+			stopped = true
+		}
 		if a.Kind == ActEndTurn || budget.Spent() {
 			res.TurnEnded = true
 		}
@@ -281,7 +299,17 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	switch a.Kind {
 	case ActLook:
-		st.Info = append(st.Info, Look(w, c, a.Target)...)
+		facts := Look(w, c, a.Target)
+		if len(facts) == 0 && a.Target != "" {
+			// answer about the thing asked for, not the whole place
+			st.Info = append(st.Info, fmt.Sprintf("%s looks for %s but finds nothing like it here", c.Name, trimTo(a.Target, 60)))
+			return nil
+		}
+		st.Info = append(st.Info, facts...)
+		// examining someone counts as meeting them (talk_to_npc objectives)
+		if n := w.NPC(a.Target); n != nil && n.Alive && n.LocationID == w.Campaign.LocationID {
+			n.LastTalked = w.Campaign.Turn
+		}
 		return nil
 	case ActSay:
 		if strings.TrimSpace(a.Text) == "" {
@@ -393,6 +421,9 @@ func Look(w *World, c *Character, target string) []string {
 		if x := w.FindExit(l.ID, target); x != nil {
 			return []string{fmt.Sprintf("Exit %s leads to %s (%s). %s", x.Label, x.To.Name, x.Edge.State, x.To.Hint)}
 		}
+		if !lookAround(target) && !NameMatch(l.Name, target) {
+			return nil // nothing by that name is here
+		}
 	}
 	facts := []string{fmt.Sprintf("%s: %s", l.Name, l.Description)}
 	if z := l.Zone(c.ZoneID); z != nil {
@@ -415,10 +446,27 @@ func Look(w *World, c *Character, target string) []string {
 	return facts
 }
 
+// lookAround reports whether a look target just means the surroundings.
+func lookAround(target string) bool {
+	t := strings.ToLower(strings.TrimSpace(target))
+	t = strings.TrimPrefix(strings.TrimPrefix(t, "the "), "my ")
+	switch t {
+	case "", "around", "here", "room", "area", "place", "surroundings", "everything", "everyone", "scene", "location", "town", "street", "it all":
+		return true
+	}
+	return false
+}
+
 func talkTo(w *World, c *Character, a Action, st *Step) error {
 	n := w.NPC(a.Target)
 	if n == nil || !n.Alive || n.LocationID != w.Campaign.LocationID {
 		return fmt.Errorf("nobody called %q is here", a.Target)
+	}
+	// outside a fight, talking to someone across the location means
+	// walking over to them, so the actor ends up in the NPC's zone
+	if l := w.Here(); !w.InCombat() && l.Zone(n.ZoneID) != nil && n.ZoneID != c.ZoneID {
+		c.ZoneID = n.ZoneID
+		st.Changes = append(st.Changes, fmt.Sprintf("%s moves to %s", c.Name, ZoneName(l, n.ZoneID)))
 	}
 	n.LastTalked = w.Campaign.Turn
 	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.Disposition))

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/Solvely-Colin/aidnd/internal/game"
 )
@@ -115,7 +116,7 @@ func (g *GM) direct(ctx context.Context, w *game.World, res *game.Resolution, re
 		if b := pickBeat(w, res); b != nil {
 			b.Fired, b.FiredTurn = true, w.Campaign.Turn
 			d.Beat = b
-			d.BeatChanges = g.applyBeat(ctx, w, b)
+			d.BeatChanges = g.applyBeat(ctx, w, b, w.Character(res.ActorID))
 			sc.Quiet = 0
 			if len(d.BeatChanges) > 0 {
 				d.ForceProgress = false // the beat itself moved the story
@@ -164,11 +165,81 @@ func pickBeat(w *game.World, res *game.Resolution) *game.Beat {
 		if fire && ambushes(b) && safeHere(w) {
 			fire = false // no fights in the safe hub; the beat waits for the road
 		}
+		if fire && !castPresent(w, b, w.Character(res.ActorID)) {
+			fire = false // the beat waits until the actor is with the people in it
+		}
 		if fire {
 			return b
 		}
 	}
 	return nil
+}
+
+// castPresent reports whether every NPC a beat names is in the actor's
+// scene: same location and, where zones exist, same zone. An NPC the beat
+// brings in itself does not need to be there yet.
+func castPresent(w *game.World, b *game.Beat, actor *game.Character) bool {
+	l := w.Here()
+	if l == nil {
+		return true
+	}
+	for _, n := range w.NPCs {
+		if !n.Alive || !beatNames(b.Text, n.Name) {
+			continue
+		}
+		if n.ID == b.EffectTarget && hasEffect(b, game.EffectBringNPC) {
+			continue
+		}
+		if n.LocationID != l.ID {
+			return false
+		}
+		if actor != nil && !withActor(l, actor, n) {
+			return false
+		}
+	}
+	return true
+}
+
+// honorifics are skipped when matching an NPC's name in beat text.
+var honorifics = map[string]bool{"sister": true, "brother": true, "mother": true, "father": true, "doc": true, "doctor": true,
+	"constable": true, "captain": true, "lady": true, "lord": true, "old": true, "the": true, "mister": true, "madam": true, "sir": true}
+
+// beatNames reports whether text names the NPC: the full name, or a
+// capitalised part of it that is not a title ("Halloway", "Ione"). A part
+// at the start of a sentence does not count, so "Pale hands rise" does
+// not name "Morwen the Pale".
+func beatNames(text, name string) bool {
+	if name == "" {
+		return false
+	}
+	if strings.Contains(strings.ToLower(text), strings.ToLower(name)) {
+		return true
+	}
+	parts := map[string]bool{}
+	for _, p := range strings.Fields(name) {
+		p = strings.Trim(p, ",.'\"")
+		if len(p) >= 3 && !honorifics[strings.ToLower(p)] && unicode.IsUpper([]rune(p)[0]) {
+			parts[p] = true
+		}
+	}
+	start := true
+	for _, f := range strings.Fields(text) {
+		wd := strings.TrimSuffix(strings.TrimSuffix(strings.TrimFunc(f, func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' }), "'s"), "'")
+		if !start && parts[wd] {
+			return true
+		}
+		start = strings.ContainsAny(f[len(f)-1:], ".!?:\"")
+	}
+	return false
+}
+
+func hasEffect(b *game.Beat, e string) bool {
+	for _, x := range b.Effects {
+		if x == e {
+			return true
+		}
+	}
+	return false
 }
 
 func ambushes(b *game.Beat) bool {
@@ -185,7 +256,7 @@ func safeHere(w *game.World) bool {
 	return l != nil && l.IsHub && l.Danger == 0
 }
 
-func (g *GM) applyBeat(ctx context.Context, w *game.World, b *game.Beat) []string {
+func (g *GM) applyBeat(ctx context.Context, w *game.World, b *game.Beat, actor *game.Character) []string {
 	var changes []string
 	l := w.Here()
 	for _, e := range b.Effects {
@@ -229,7 +300,10 @@ func (g *GM) applyBeat(ctx context.Context, w *game.World, b *game.Beat) []strin
 				continue
 			}
 			n.LocationID = l.ID
-			if len(l.Zones) > 0 {
+			switch {
+			case actor != nil && l.Zone(actor.ZoneID) != nil:
+				n.ZoneID = actor.ZoneID // they arrive where the scene is
+			case len(l.Zones) > 0:
 				n.ZoneID = l.Zones[0].ID
 			}
 			changes = append(changes, fmt.Sprintf("%s arrives", n.Name))

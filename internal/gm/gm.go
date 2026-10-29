@@ -191,7 +191,13 @@ func (g *GM) SaveCharacter(ctx context.Context, campaignID, playerID string, spe
 	if w.Campaign.Status != game.StatusLobby {
 		return nil, Conflict("characters are locked once the campaign starts")
 	}
-	if old := w.CharacterOf(playerID); old != nil {
+	for _, other := range w.Characters {
+		if other.PlayerID != playerID && strings.EqualFold(strings.TrimSpace(other.Name), strings.TrimSpace(spec.Name)) {
+			return nil, Conflict("%s is already in the party; pick another name", other.Name)
+		}
+	}
+	old := w.CharacterOf(playerID)
+	if old != nil {
 		removeCharacter(w, old.ID)
 	}
 	c, err := game.CreateCharacter(w, playerID, spec)
@@ -199,8 +205,15 @@ func (g *GM) SaveCharacter(ctx context.Context, campaignID, playerID string, spe
 		return nil, err
 	}
 	_, err = g.commit(ctx, w, store.NewEvent("character_created", playerID, map[string]any{
-		"player_id": playerID, "character_id": c.ID, "name": c.Name, "class": c.Class, "kit": c.Kit, "concept": c.Concept}))
+		"player_id": playerID, "character_id": c.ID, "name": c.Name, "class": c.Class, "kit": c.Kit, "concept": c.Concept, "replaces": replaced(old)}))
 	return c, err
+}
+
+func replaced(c *game.Character) string {
+	if c == nil {
+		return ""
+	}
+	return c.ID
 }
 
 func removeCharacter(w *game.World, id string) {

@@ -559,9 +559,18 @@ function renderFeed(force) {
   const feed = $("#feed");
   if (!feed) { if (S.view?.status === "lobby") renderSetup(true); return; }
   const stick = force || nearBottom();
-  const lastNarr = S.events.map(e => e.type).lastIndexOf("narration");
-  feed.innerHTML = S.events.map((e, i) => eventHTML(e, i === lastNarr)).join("") + (isThinking() ? `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>The game master is writing…</div>` : "");
+  const evs = currentEvents(S.events);
+  const lastNarr = evs.map(e => e.type).lastIndexOf("narration");
+  feed.innerHTML = evs.map((e, i) => eventHTML(e, i === lastNarr)).join("") + (isThinking() ? `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>The game master is writing…</div>` : "");
   if (stick) requestAnimationFrame(toBottom);
+}
+
+// currentEvents drops character sheets a player later replaced in the
+// lobby, so each seat joins the party once.
+function currentEvents(evs) {
+  const last = {};
+  evs.forEach((e, i) => { if (e.type === "character_created") last[e.data?.player_id] = i; });
+  return evs.filter((e, i) => e.type !== "character_created" || last[e.data?.player_id] === i);
 }
 
 // isThinking: an action is in flight and its narration has not arrived.
