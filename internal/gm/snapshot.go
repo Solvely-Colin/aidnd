@@ -143,8 +143,8 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 		if secrets && n.Desc != "" && (actor == nil || withActor(l, actor, n)) {
 			s += "; looks: " + trim(n.Desc, 200)
 		}
-		if secrets && len(n.Memory) > 0 {
-			s += "; remembers: " + strings.Join(n.Memory, " | ")
+		if mem := n.Recall(); secrets && len(mem) > 0 {
+			s += "; remembers: " + strings.Join(mem, " | ")
 		}
 		npcs = append(npcs, s)
 	}

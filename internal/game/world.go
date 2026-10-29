@@ -290,16 +290,7 @@ func (w *World) PartyLevel() int {
 
 // AddChronicle records a public fact.
 func (w *World) AddChronicle(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	for _, c := range w.Chronicle {
-		if NameMatch(c.Text, text) {
-			return
-		}
-	}
-	w.Chronicle = append(w.Chronicle, ChronicleEntry{Turn: w.Campaign.Turn, Text: text})
+	w.Record(ChronicleEntry{Text: text})
 }
 
 // sortedStrings returns a sorted copy.

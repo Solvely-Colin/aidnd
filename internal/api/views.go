@@ -1,6 +1,8 @@
 package api
 
 import (
+	"sort"
+
 	"github.com/Solvely-Colin/aidnd/internal/game"
 	"github.com/Solvely-Colin/aidnd/internal/gm"
 )
@@ -494,4 +496,100 @@ type JournalView struct {
 	Chronicle []game.ChronicleEntry `json:"chronicle"`
 	Quests    []QuestView           `json:"quests"`
 	Setbacks  int                   `json:"setbacks"`
+	People    []JournalPerson       `json:"people"`
+	Places    []JournalPlace        `json:"places"`
+}
+
+// JournalPerson is someone the party has come across. Everything comes
+// from the world record, so the journal never lists a person the engine
+// does not know about.
+type JournalPerson struct {
+	NPCBrief
+	LocationName string   `json:"location_name"`
+	Met          bool     `json:"met"`  // the party has spoken with them
+	Here         bool     `json:"here"` // in the party's location now
+	Quests       []string `json:"quests,omitempty"`
+}
+
+// JournalPlace is a location the party has been to or has seen a way to.
+type JournalPlace struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Kind        string   `json:"kind"`
+	Hint        string   `json:"hint,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Danger      int      `json:"danger"`
+	Visited     bool     `json:"visited"`
+	Here        bool     `json:"here"`
+	IsHub       bool     `json:"is_hub,omitempty"`
+	People      []string `json:"people,omitempty"`
+}
+
+// journalPeople lists the NPCs a player may see: those at visited places,
+// with the antagonist only while the party faces them (as in npcView).
+// People nearby come first, then the most recently spoken to.
+func journalPeople(w *game.World) []JournalPerson {
+	gave := map[string][]string{}
+	for _, q := range w.Quests {
+		if q.GiverID != "" && questVisible(w, q) {
+			gave[q.GiverID] = append(gave[q.GiverID], q.Title)
+		}
+	}
+	out := []JournalPerson{}
+	for _, n := range w.NPCs {
+		v, ok := npcView(w, n)
+		if !ok {
+			continue
+		}
+		out = append(out, JournalPerson{NPCBrief: v.NPCBrief, LocationName: v.LocationName, Met: n.LastTalked >= 0,
+			Here: n.LocationID == w.Campaign.LocationID, Quests: gave[n.ID]})
+	}
+	talked := map[string]int{}
+	for _, n := range w.NPCs {
+		talked[n.ID] = n.LastTalked
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Here != b.Here {
+			return a.Here
+		}
+		if a.Alive != b.Alive {
+			return a.Alive
+		}
+		return talked[a.ID] > talked[b.ID]
+	})
+	return out
+}
+
+// journalPlaces lists known locations: where the party is, then places
+// visited, then places only seen from a path.
+func journalPlaces(w *game.World) []JournalPlace {
+	out := []JournalPlace{}
+	for _, l := range w.Locations {
+		if !locationKnown(w, l) {
+			continue
+		}
+		lv := locationView(w, l, false)
+		p := JournalPlace{ID: l.ID, Name: l.Name, Kind: l.Kind, Hint: l.Hint, Description: lv.Description, Danger: l.Danger,
+			Visited: l.Visited, Here: l.ID == w.Campaign.LocationID, IsHub: l.IsHub}
+		if l.Visited {
+			for _, n := range w.NPCsAt(l.ID) {
+				if !n.Antagonist {
+					p.People = append(p.People, n.Name)
+				}
+			}
+		}
+		out = append(out, p)
+	}
+	rank := func(p JournalPlace) int {
+		switch {
+		case p.Here:
+			return 0
+		case p.Visited:
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	return out
 }

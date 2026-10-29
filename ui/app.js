@@ -50,6 +50,7 @@ const S = {
   lastId: 0,
   es: null,
   draft: null,       // character being edited
+  progress: null,    // how far the action in flight has got (unsaved stream event)
   step: 0,           // character builder step
   composing: false,  // new story form open on home
   sending: false,
@@ -137,6 +138,9 @@ function cover(seed, cls = "") {
 const ART = new Map(); // src -> "ok" | "gone" | tries so far
 const ART_TRIES = 15, ART_WAIT = 6000;
 const coverArt = id => artImg(`/img/${id}/cover`);
+// Only the place the party stands in can be painted (the Worker reads it
+// from the campaign view), so other places keep their drawn art.
+const placeArt = (id, cls) => `<div class="art-box ${cls}">${cover(id || "place")}${id && id === S.view?.location?.id ? artImg(`/img/${S.route}/place/${id}`) : ""}</div>`;
 const portrait = c => c?.id && S.route ? artImg(`/img/${S.route}/char/${c.id}`) : "";
 function artImg(src) {
   const st = ART.get(src);
@@ -176,7 +180,7 @@ async function route() {
 
 function leaveCampaign() {
   S.es?.close();
-  Object.assign(S, { es: null, view: null, events: [], lastId: 0, draft: null, step: 0, journal: null, map: null, tab: "story", tray: "", composer: "", hint: {}, sheet: "", sheetOpen: false });
+  Object.assign(S, { es: null, view: null, events: [], lastId: 0, progress: null, draft: null, step: 0, journal: null, map: null, tab: "story", tray: "", composer: "", hint: {}, sheet: "", sheetOpen: false });
 }
 
 // ---- sign in
@@ -304,6 +308,9 @@ function connect(id) {
   const es = new EventSource(`/api/campaigns/${id}/events`);
   const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
+  // Progress events are not saved and have no id: they say the action is
+  // being read, then carry its dice while the narration is written.
+  es.addEventListener("progress", ev => { S.progress = JSON.parse(ev.data).data; renderFeed(); });
   S.es = es;
 }
 
@@ -312,6 +319,7 @@ function onEvent(e) {
   if (e.id <= S.lastId) return;
   S.lastId = e.id;
   S.events.push(e);
+  if (e.type !== "character_created" && e.type !== "player_joined") S.progress = null;
   clearTimeout(feedTimer);
   feedTimer = setTimeout(renderFeed, 30);
   clearTimeout(refreshTimer);
@@ -344,8 +352,20 @@ function mine() {
 function renderSetup(soft) {
   const v = S.view, me = mine();
   if (soft && S.draft) {
-    // Keep the builder as it is; only the party row changes.
-    const p = $("#party"); if (p) p.innerHTML = partyRow();
+    // Keep the builder as it is; only the party strip changes.
+    const p = $("#party"); if (p) p.innerHTML = partyStrip();
+    return;
+  }
+  // The builder gets the whole screen; the party shrinks to a strip of faces.
+  if (S.draft && v.you?.joined) {
+    app.innerHTML = `
+    <div class="page builder-page">
+      <header class="topbar"><button class="icon-btn" data-act="cancel-draft" aria-label="Stop making a character">${ICON.close}</button>
+        <div class="titles"><span class="eyebrow">${esc(v.title)}</span><h1>Your character</h1></div>
+        <div class="party-strip" id="party">${partyStrip()}</div></header>
+      <main class="wrap">${builderHTML()}</main>
+    </div>`;
+    wireBuilder();
     return;
   }
   const allReady = v.players.length > 0 && v.players.every(p => p.character_id);
@@ -357,12 +377,12 @@ function renderSetup(soft) {
     </div>
     <main class="wrap">
       <p class="pitch">${esc(v.pitch || v.premise)}</p>
+      ${v.you?.joined ? (me ? readyHTML(me) : conceptHTML()) : ""}
       <section class="section">
         <div class="section-head"><h2>Party</h2><span class="count">${v.players.length}/${v.max_players}</span></div>
         <div class="party-row" id="party">${partyRow()}</div>
         ${!v.you?.joined ? `<button class="btn primary block" data-act="join">Join as ${esc(S.me.name)}</button>` : ""}
       </section>
-      ${v.you?.joined ? (S.draft ? builderHTML() : me ? readyHTML(me) : conceptHTML()) : ""}
     </main>
     ${v.you?.joined && !S.draft ? `<div class="start-bar"><div class="start-inner">
       <span class="muted">${allReady ? "Everyone is ready." : "Waiting for every player to make a character."}</span>
@@ -379,6 +399,14 @@ function partyRow() {
     const c = v.party.find(x => x.id === p.character_id);
     return `<div class="seat ${c ? "ready" : ""}"><div class="avatar lg">${esc((c?.name || p.name)[0] || "?")}${portrait(c)}</div>
       <b>${esc(c ? c.name : p.name)}</b><span>${c ? esc(c.class) : "Making a character…"}</span></div>`;
+  }).join("");
+}
+
+function partyStrip() {
+  const v = S.view;
+  return v.players.map(p => {
+    const c = v.party.find(x => x.id === p.character_id);
+    return `<span class="avatar sm ${c ? "ready" : ""}" title="${esc(c ? c.name : p.name + " is making a character")}">${esc((c?.name || p.name)[0] || "?")}${portrait(c)}</span>`;
   }).join("");
 }
 
@@ -549,6 +577,7 @@ function renderSide() {
   const el = $("#side");
   if (!el) return;
   const key = wide() ? S.panel : (S.tab === "story" ? S.panel : S.tab);
+  if (key === "journal" && journalBusy()) { J.stale = true; return; }
   const tabs = [["scene", "Scene"], ["you", "Sheet"], ["journal", "Journal"], ["map", "Map"]];
   el.innerHTML = `<div class="side-tabs">${tabs.map(([k, l]) => `<button class="tab ${key === k ? "on" : ""}" data-panel="${k}">${l}</button>`).join("")}</div>
     <div class="side-body">${({ scene: sceneHTML, you: () => sheetHTML(false), journal: journalHTML, map: mapHTML })[key]()}</div>`;
@@ -563,9 +592,9 @@ function renderFeed(force) {
   const feed = $("#feed");
   if (!feed) { if (S.view?.status === "lobby") renderSetup(true); return; }
   const stick = force || nearBottom();
-  const evs = currentEvents(S.events);
-  const lastNarr = evs.map(e => e.type).lastIndexOf("narration");
-  feed.innerHTML = evs.map((e, i) => eventHTML(e, i === lastNarr)).join("") + (isThinking() ? `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>The game master is writing…</div>` : "");
+  const items = feedItems(currentEvents(S.events));
+  const lastNarr = items.map(it => it.narr ? 1 : 0).lastIndexOf(1);
+  feed.innerHTML = items.map((it, i) => it.kind === "turn" ? turnHTML(it, i === lastNarr) : eventHTML(it.e, i === lastNarr)).join("") + pendingHTML();
   if (stick) requestAnimationFrame(toBottom);
 }
 
@@ -577,9 +606,63 @@ function currentEvents(evs) {
   return evs.filter((e, i) => e.type !== "character_created" || last[e.data?.player_id] === i);
 }
 
+// feedItems groups a player's action, its dice, the narration and what
+// changed into one turn. Turn markers are dropped: the dock says whose
+// turn it is.
+function feedItems(evs) {
+  const out = [];
+  let turn = null;
+  for (const e of evs) {
+    const d = e.data || {};
+    if (e.type === "player_action") { turn = { kind: "turn", act: e, resolved: null, narr: null, quests: [] }; out.push(turn); continue; }
+    if (turn && e.type === "action_resolved" && !turn.resolved) { turn.resolved = e; continue; }
+    if (turn && e.type === "narration" && !turn.narr && !d.setback) { turn.narr = e; continue; }
+    if (turn && e.type === "quest_updated") { turn.quests.push(e); continue; }
+    if (e.type === "turn_started" || e.type === "turn_budget" || e.type === "player_joined") continue;
+    turn = null;
+    out.push({ kind: "event", e, narr: e.type === "narration" && !!d.text });
+  }
+  return out;
+}
+
+function turnHTML(t, latest) {
+  const a = t.act.data || {}, me = mine(), you = me && a.character_id === me.id;
+  const r = t.resolved?.data || {}, n = t.narr?.data || {};
+  const c = S.view?.party?.find(p => p.id === a.character_id);
+  const rolls = (r.steps || []).flatMap(s => s.rolls || []).map(rollHTML).join("");
+  const notes = [];
+  (r.steps || []).forEach(s => { if (s.error) notes.push(`<div class="ev-note bad">${esc(s.error)}</div>`); });
+  (r.skipped || []).forEach(s => notes.push(`<div class="ev-note">Not this turn: ${esc(s.error)}</div>`));
+  const tags = (r.steps || []).flatMap(s => s.changes || []).concat(r.world_changes || []).map(x => `<span class="tag">${esc(x)}</span>`)
+    .concat(t.quests.map(q => `<span class="tag quest"><b>Quest</b>${esc(q.data?.text || q.data?.title)}</span>`));
+  return `<article class="turn-card ${you ? "you" : ""} ${latest ? "latest" : ""}">
+    <header><span class="avatar sm">${esc((c?.name || a.character || "?")[0])}${portrait(c)}</span><div><span class="by">${esc(you ? "You" : a.character)}</span><p>${esc(a.text)}</p></div></header>
+    ${rolls ? `<div class="rolls">${rolls}</div>` : ""}${notes.join("")}
+    ${n.text ? `<p class="ev-narr ${n.quick ? "quick" : ""} ${latest ? "latest" : ""}">${esc(n.text)}</p>` : ""}
+    ${tags.length ? `<div class="tags">${tags.join("")}</div>` : ""}
+  </article>`;
+}
+
+// pendingHTML shows the action in flight: what was said, the dice once
+// they are rolled, and which step the game master is on.
+function pendingHTML() {
+  if (!isThinking()) return "";
+  const p = S.progress, me = mine();
+  const text = p?.text || S.pendingText || "";
+  const who = p?.character_id ? S.view?.party?.find(c => c.id === p.character_id) : me;
+  const you = who && me && who.id === me.id;
+  const rolls = (p?.rolls || []).map(rollHTML).join("");
+  const stage = p?.stage === "narrating" ? "Describing what happens…" : "Reading what you do…";
+  return `<article class="turn-card pending ${you ? "you" : ""}">
+    ${text ? `<header><span class="avatar sm">${esc((who?.name || "?")[0])}${portrait(who)}</span><div><span class="by">${esc(you ? "You" : who?.name || "")}</span><p>${esc(text)}</p></div></header>` : ""}
+    ${rolls ? `<div class="rolls">${rolls}</div>` : ""}
+    <div class="thinking"><span class="dots"><i></i><i></i><i></i></span>${p ? stage : "The game master is writing…"}</div>
+  </article>`;
+}
+
 // isThinking: an action is in flight and its narration has not arrived.
 function isThinking() {
-  if (S.sending) return true;
+  if (S.sending || S.progress) return true;
   for (let i = S.events.length - 1; i >= 0; i--) {
     const t = S.events[i].type;
     if (t === "narration" || t === "enemy_turns" || t === "turn_started" || t === "turn_budget" || t === "campaign_ended") return false;
@@ -619,7 +702,7 @@ function eventHTML(e, latest) {
     }
     case "narration":
       if (d.skip && !d.text) return "";
-      return `<p class="ev-narr ${d.quick ? "quick" : ""} ${d.opening ? "opening" : ""} ${latest ? "latest" : ""}">${esc(d.text)}</p>`;
+      return `<div class="narr-wrap"><p class="ev-narr ${d.quick ? "quick" : ""} ${d.opening ? "opening" : ""} ${latest ? "latest" : ""}">${esc(d.text)}</p>${S.view?.you?.joined ? `<button class="jot" data-act="jot" data-text="${esc(d.text)}" title="Copy to your notes" aria-label="Copy to your notes">${ICON.plus}</button>` : ""}</div>`;
     case "enemy_turns": {
       const rolls = (d.turns || []).map(t => t.attack?.roll ? rollHTML({ ...t.attack.roll, label: t.attack.roll.label || t.enemy }) : "").join("");
       return `${rolls ? `<div class="rolls foe">${rolls}</div>` : ""}${d.narration ? `<p class="ev-narr">${esc(d.narration)}</p>` : ""}`;
@@ -640,7 +723,11 @@ function actionGroups() {
   const g = { look: [], talk: [], go: [], fight: [], use: [] };
   if (!enc) g.look.push({ label: "Look around", text: "I look around carefully" });
   for (const n of loc.npcs || []) if (n.alive !== false && !enc) g.talk.push({ label: n.name, sub: n.role, text: `I talk to ${n.name}: `, hint: { target_id: n.id } });
-  for (const x of loc.exits || []) if (x.state === "open") g.go.push({ label: x.to_name, sub: x.explored ? "explored" : "unexplored", text: enc ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}` });
+  // "known" and "open" exits can both be walked; a locked one is worth trying.
+  for (const x of loc.exits || []) {
+    if (x.state === "known" || x.state === "open") g.go.push({ label: x.to_name, sub: x.explored ? "explored" : "unexplored", text: enc ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}` });
+    else if (x.state === "locked" && !enc) g.go.push({ label: x.to_name, sub: "locked", text: `I try to get through ${x.label || "the way to " + x.to_name}` });
+  }
   for (const z of loc.zones || []) if (me && z.id !== me.zone_id) g.go.push({ label: z.name, sub: "move within", text: `I move to ${z.name}`, hint: { zone_id: z.id } });
   for (const e of v.encounter?.enemies || []) if (e.hp > 0) g.fight.push({ label: e.display, sub: `${e.hp}/${e.max_hp} HP`, text: `I attack ${e.display}`, hint: { target_id: e.id } });
   for (const i of loc.items || []) g.use.push({ label: `Take ${i.name}`, sub: i.effect, text: `I pick up the ${i.name}` });
@@ -658,6 +745,9 @@ function renderDock() {
     return;
   }
   const yours = !!v.you?.your_turn, b = v.budget || {};
+  // Alone at the table the turn bar says nothing new; it only appears once
+  // the action is spent, to offer moving on.
+  const solo = v.players.length <= 1, spent = b.action === 0;
   const pip = (name, n) => `<span class="pip ${n === 0 ? "spent" : ""}">${name}</span>`;
   const idle = v.turn_started ? Date.now() / 1000 - v.turn_started : 0;
   const groups = actionGroups();
@@ -666,12 +756,12 @@ function renderDock() {
   const kept = $("#say")?.value ?? S.composer;
   el._groups = groups;
   el.innerHTML = `<div class="dock-inner">
-    <div class="turn">${yours
+    ${solo && yours ? (spent ? `<div class="turn"><span class="grow">Action used. You can still move, or go on.</span></div>` : "") : `<div class="turn">${yours
       ? `<span class="you">Your turn</span><span class="grow"></span>${pip("Action", b.action)}${pip("Move", b.move)}${b.free === -1 ? "" : pip("Free", b.free)}`
-      : `<span class="grow">${v.active ? `Waiting for <b>${esc(v.active.name)}</b>` : ""}</span>${v.you?.joined && idle > 120 ? `<button class="btn small" data-act="skip">Skip their turn</button>` : ""}`}</div>
+      : `<span class="grow">${v.active ? `Waiting for <b>${esc(v.active.name)}</b>` : ""}</span>${v.you?.joined && idle > 120 ? `<button class="btn small" data-act="skip">Skip their turn</button>` : ""}`}</div>`}
     ${S.tray ? `<div class="tray">${groups[S.tray].map((o, i) => `<button class="opt" data-opt="${i}"><b>${esc(o.label)}</b>${o.sub ? `<span>${esc(o.sub)}</span>` : ""}</button>`).join("")}</div>` : ""}
     <div class="acts">${btn("look", "Look", ICON.look)}${btn("talk", "Talk", ICON.talk)}${btn("go", "Go", ICON.go)}${btn("fight", "Fight", ICON.fight)}${btn("use", "Use", ICON.use)}
-      ${yours ? `<button class="act" data-act="end-turn">${ICON.end}<span>End</span></button>` : ""}</div>
+      ${yours && (!solo || spent) ? `<button class="act" data-act="end-turn">${ICON.end}<span>${solo ? "Go on" : "End"}</span></button>` : ""}</div>
     <form class="say" id="say-form">
       <textarea id="say" rows="1" placeholder="${yours ? "Or say exactly what you do…" : "Wait for your turn…"}" ${yours && !S.sending ? "" : "disabled"} enterkeyhint="send">${esc(kept)}</textarea>
       <button class="send" aria-label="Send" ${yours && !S.sending ? "" : "disabled"}>${S.sending ? `<span class="spinner"></span>` : ICON.send}</button>
@@ -699,7 +789,7 @@ async function sendAction() {
   const ta = $("#say"), text = ta?.value.trim();
   if (!text || S.sending) return;
   const hint = S.hint; S.hint = {};
-  S.sending = true; S.composer = ""; S.tray = ""; ta.value = "";
+  S.sending = true; S.pendingText = text; S.composer = ""; S.tray = ""; ta.value = "";
   renderDock(); renderFeed(true);
   try {
     await api("POST", `/campaigns/${S.route}/actions`, { text, ...hint });
@@ -707,7 +797,7 @@ async function sendAction() {
     toast(e.message);
     S.composer = text;
   } finally {
-    S.sending = false;
+    S.sending = false; S.pendingText = "";
     await refreshView();
     renderFeed();
   }
@@ -722,12 +812,12 @@ function sceneHTML() {
   const zname = id => l.zones?.find(z => z.id === id)?.name || "";
   const tile = (attrs, title, sub, kind) => `<button class="tile ${kind}" ${attrs}><span class="kind">${kind}</span><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ""}</button>`;
   return `
-    <section class="scene-head">${cover(l.id || l.name || "place", "scene-art")}<div><h3>${esc(l.name)}</h3><p>${esc(l.description)}</p></div></section>
+    <section class="scene-head">${placeArt(l.id, "scene-art")}<div><h3>${esc(l.name)}</h3><p>${esc(l.description)}</p></div></section>
     ${l.zones?.length > 1 ? `<section><p class="eyebrow">Layout</p>${zoneMap()}</section>` : ""}
     ${v.encounter ? `<section><p class="eyebrow">Enemies · round ${v.encounter.round}</p><div class="tiles">${v.encounter.enemies.filter(e => e.hp > 0).map(e => tile(`data-fill="I attack ${esc(e.display)}" data-target="${esc(e.id)}"`, e.display, `${e.hp}/${e.max_hp} HP${e.ranged ? " · ranged" : ""} · ${zname(e.zone_id)}`, "foe")).join("")}</div></section>` : ""}
     ${l.npcs?.length ? `<section><p class="eyebrow">People</p><div class="tiles">${l.npcs.map(n => tile(`data-fill="I talk to ${esc(n.name)}: " data-target="${esc(n.id)}"`, n.name, `${n.role}${n.merchant ? " · sells goods" : ""}`, "person")).join("")}</div></section>` : ""}
     ${l.items?.length ? `<section><p class="eyebrow">Things</p><div class="tiles">${l.items.map(i => tile(`data-fill="I pick up the ${esc(i.name)}"`, i.name, i.effect, "item")).join("")}</div></section>` : ""}
-    ${l.exits?.length ? `<section><p class="eyebrow">Ways out</p><div class="tiles">${l.exits.map(x => tile(`data-fill="${x.state === "open" ? `I travel to ${esc(x.to_name)}` : `I try the ${esc(x.label)}`}"`, x.to_name, `${x.label}${x.state === "locked" ? " · locked" : ""}${x.explored ? "" : " · unexplored"}`, "exit")).join("")}</div></section>` : ""}`;
+    ${l.exits?.length ? `<section><p class="eyebrow">Ways out</p><div class="tiles">${l.exits.map(x => tile(`data-fill="${x.state !== "locked" ? `I travel to ${esc(x.to_name)}` : `I try the ${esc(x.label)}`}"`, x.to_name, `${x.label}${x.state === "locked" ? " · locked" : ""}${x.explored ? "" : " · unexplored"}`, "exit")).join("")}</div></section>` : ""}`;
 }
 
 function zoneMap() {
@@ -923,24 +1013,180 @@ function sheetHTML(full) {
   </article>`;
 }
 
-function journalHTML() {
-  const v = S.view;
-  if (!S.journal) {
-    api("GET", `/campaigns/${S.route}/journal`).then(j => { S.journal = j; if (sideKey() === "journal") renderSide(); }).catch(() => {});
-  }
-  const j = S.journal;
-  const quests = v.quests.filter(q => q.status !== "available" || q.is_main);
-  return `
-    <section><p class="eyebrow">Quests</p>${quests.length ? quests.map(q => `
-      <div class="quest-card"><div class="row spread"><b>${esc(q.title)}</b>${q.is_main ? `<span class="pill accent">Main</span>` : `<span class="pill">${esc(q.status)}</span>`}</div>
-        ${q.summary ? `<div class="muted small">${esc(q.summary)}</div>` : ""}
-        ${q.objectives.map(o => `<div class="objective ${o.done ? "done" : ""}"><i></i><span>${esc(o.text)}</span></div>`).join("")}
-        ${q.reward_gold || q.reward_xp ? `<div class="muted small">Reward: ${[q.reward_gold && q.reward_gold + " gold", q.reward_xp && q.reward_xp + " XP"].filter(Boolean).join(", ")}${q.giver_name ? " · from " + esc(q.giver_name) : ""}</div>` : ""}
-      </div>`).join("") : `<div class="muted">No quests yet.</div>`}</section>
-    ${j ? `${j.summary ? `<section><p class="eyebrow">The story so far</p><p class="muted">${esc(j.summary)}</p></section>` : ""}
-      <section><p class="eyebrow">Chronicle</p><ol class="chronicle">${j.chronicle.length ? j.chronicle.slice().reverse().map(c => `<li>${esc(c.text)}</li>`).join("") : `<li class="muted">Nothing recorded yet.</li>`}</ol></section>`
-    : `<div class="muted">Loading the journal…</div>`}`;
+// journal: a notebook with chapters. Quests, people, places and clues come
+// from the world record on the server; notes are the player's own.
+
+const CHAPTERS = [["quests", "Quests"], ["people", "People"], ["places", "Places"], ["clues", "Clues"], ["notes", "Notes"]];
+const MOOD = ["hostile", "unfriendly", "wary", "neutral", "friendly", "warm", "devoted"];
+const J = { tab: "quests", q: "", notes: null, notesFor: "", last: null, draft: "", editing: "", stale: false };
+
+function loadNotes() {
+  if (J.notesFor === S.route) return;
+  J.notesFor = S.route; J.notes = null;
+  if (!S.view?.you?.joined) { J.notes = []; return; }
+  api("GET", `/campaigns/${S.route}/notes`).then(r => { J.notes = r.notes; if (sideKey() === "journal") renderSide(); }).catch(() => { J.notes = []; });
 }
+
+async function addNote(text) {
+  const n = await api("POST", `/campaigns/${S.route}/notes`, { text });
+  (J.notes ||= []).push(n);
+  return n;
+}
+
+function journalHTML() {
+  if (!S.journal) {
+    api("GET", `/campaigns/${S.route}/journal`).then(j => { S.journal = j; J.last = j; if (sideKey() === "journal") renderSide(); }).catch(() => {});
+  }
+  loadNotes();
+  const j = S.journal || (J.last?.chronicle && J.lastFor === S.route ? J.last : null);
+  J.lastFor = S.route;
+  const v = S.view;
+  const quests = v.quests.filter(q => q.status !== "available" || q.is_main);
+  const count = { quests: quests.filter(q => q.status === "active" || q.status === "completed").length, people: j?.people?.length, places: j?.places?.filter(p => p.visited).length, clues: j?.chronicle?.length, notes: J.notes?.length };
+  const index = `<nav class="j-index" aria-label="Journal chapters">${CHAPTERS.map(([k, l]) => `<button class="j-tab ${J.tab === k ? "on" : ""}" data-act="jtab" data-k="${k}"><span>${l}</span><b>${count[k] ?? "·"}</b></button>`).join("")}</nav>`;
+  const find = J.tab === "quests" ? "" : `<label class="j-find">${ICON.look}<input id="j-find" type="search" placeholder="Search ${J.tab}" value="${esc(J.q)}" autocomplete="off"></label>`;
+  let body;
+  if (J.tab === "quests") body = questsChapter(quests);
+  else if (J.tab === "notes") body = notesChapter();
+  else if (!j) body = `<div class="muted">Opening the journal…</div>`;
+  else body = ({ people: peopleChapter, places: placesChapter, clues: cluesChapter })[J.tab](j);
+  return `<div class="journal">${index}${find}<div class="j-body">${body}</div></div>`;
+}
+
+const match = (...parts) => !J.q || parts.join(" ").toLowerCase().includes(J.q.toLowerCase());
+const none = what => `<div class="j-empty">${what}</div>`;
+
+function questsChapter(quests) {
+  if (!quests.length) return none("No quests yet. Talk to people and they will ask things of you.");
+  return quests.map(q => `
+    <div class="quest-card"><div class="row spread"><b>${esc(q.title)}</b>${q.is_main ? `<span class="pill accent">Main</span>` : `<span class="pill">${esc(q.status.replace("_", " "))}</span>`}</div>
+      ${q.summary ? `<div class="muted small">${esc(q.summary)}</div>` : ""}
+      ${q.objectives.map(o => `<div class="objective ${o.done ? "done" : ""}"><i></i><span>${esc(o.text)}</span></div>`).join("")}
+      ${q.reward_gold || q.reward_xp ? `<div class="muted small">Reward: ${[q.reward_gold && q.reward_gold + " gold", q.reward_xp && q.reward_xp + " XP"].filter(Boolean).join(", ")}${q.giver_name ? " · from " + esc(q.giver_name) : ""}</div>` : ""}
+    </div>`).join("");
+}
+
+function moodMeter(d) {
+  const i = Math.max(0, Math.min(6, d + 3));
+  return `<span class="mood" title="${MOOD[i]}">${MOOD.map((_, k) => `<i class="${k === i ? "on" : ""} ${k < 3 ? "neg" : k > 3 ? "pos" : ""}"></i>`).join("")}<em>${MOOD[i]}</em></span>`;
+}
+
+function peopleChapter(j) {
+  const ps = j.people.filter(p => match(p.name, p.role, p.desc, p.location_name));
+  if (!j.people.length) return none("Nobody yet. People you meet are written in here.");
+  if (!ps.length) return none(`Nobody matches “${esc(J.q)}”.`);
+  return ps.map(p => `
+    <article class="dossier ${p.alive ? "" : "dead"} ${p.here ? "here" : ""}">
+      <div class="mono">${esc(p.name[0])}</div>
+      <div class="grow">
+        <div class="d-head"><b>${esc(p.name)}</b>${p.here ? `<span class="tag here">here</span>` : ""}${p.alive ? "" : `<span class="tag">dead</span>`}${p.merchant ? `<span class="tag">trader</span>` : ""}</div>
+        <div class="d-sub">${esc(p.role || "")}${p.role ? " · " : ""}${p.met ? "spoke with at" : "seen at"} ${esc(p.location_name)}</div>
+        ${p.desc ? `<p>${esc(p.desc)}</p>` : ""}
+        ${p.quests?.length ? `<div class="d-sub">Gave you: ${p.quests.map(esc).join(", ")}</div>` : ""}
+        <div class="d-foot">${p.alive ? moodMeter(p.disposition) : ""}${p.here && p.alive && !S.view.encounter ? `<button class="btn small" data-fill="I talk to ${esc(p.name)}: " data-target="${esc(p.id)}">Talk</button>` : ""}</div>
+      </div>
+    </article>`).join("");
+}
+
+function dangerPips(n) { return `<span class="danger" title="danger ${n} of 5">${[1, 2, 3, 4, 5].map(k => `<i class="${k <= n ? "on" : ""}"></i>`).join("")}</span>`; }
+
+function placesChapter(j) {
+  const ps = j.places.filter(p => match(p.name, p.kind, p.hint, p.description, (p.people || []).join(" ")));
+  if (!j.places.length) return none("No places yet.");
+  if (!ps.length) return none(`No place matches “${esc(J.q)}”.`);
+  return ps.map(p => `
+    <article class="gazette ${p.visited ? "" : "rumor"} ${p.here ? "here" : ""}">
+      <div class="g-head"><b>${esc(p.name)}</b>${p.here ? `<span class="tag here">you are here</span>` : p.is_hub ? `<span class="tag">home</span>` : ""}<span class="grow"></span>${dangerPips(p.danger)}</div>
+      <div class="d-sub">${esc(p.kind)}${p.visited ? "" : " · not yet visited"}</div>
+      ${p.visited ? (p.description ? `<p>${esc(p.description)}</p>` : "") : p.hint ? `<p class="muted">Heard of: ${esc(p.hint)}</p>` : ""}
+      ${p.people?.length ? `<div class="d-sub">People: ${p.people.map(esc).join(", ")}</div>` : ""}
+    </article>`).join("");
+}
+
+function cluesChapter(j) {
+  const cs = j.chronicle.map((c, i) => ({ ...c, i })).filter(c => match(c.text, c.kind)).reverse();
+  return `${j.summary && !J.q ? `<section class="sofar"><p class="eyebrow">The story so far</p><p>${esc(j.summary)}</p></section>` : ""}
+    ${!j.chronicle.length ? none("Nothing recorded yet. Facts the story settles are written here.") : !cs.length ? none(`No clue matches “${esc(J.q)}”.`) : `<ol class="clues">${cs.map(c => `
+      <li><span class="when">${c.day ? `D${c.day}` : `T${c.turn}`}</span><p>${esc(c.text)}${c.kind ? ` <span class="tag">${esc(c.kind)}</span>` : ""}</p>
+        <button class="jot" data-act="jot" data-text="${esc(c.text)}" title="Copy to your notes" aria-label="Copy to your notes">${ICON.plus}</button></li>`).join("")}</ol>`}`;
+}
+
+function notesChapter() {
+  if (!S.view.you?.joined) return none("Join this story to keep notes.");
+  if (!J.notes) return `<div class="muted">Opening your notes…</div>`;
+  const ns = J.notes.filter(n => match(n.text)).slice().reverse();
+  const stamp = n => `Day ${n.day || 1} · ${esc(n.time || "")}`;
+  return `
+    <form class="n-new" id="n-new"><textarea id="n-text" class="textarea" rows="3" placeholder="Write it down before you forget: names, hunches, what someone wasn't telling you…">${esc(J.draft)}</textarea>
+      <div class="row"><span class="muted small grow">Only you can read these.</span><button class="btn small primary">Write</button></div></form>
+    ${!J.notes.length ? none("No notes yet. Tap + on a line of the story or a clue to copy it here.") : !ns.length ? none(`No note matches “${esc(J.q)}”.`) : `<div class="notes">${ns.map(n => J.editing === n.id ? `
+      <form class="note editing" data-note="${esc(n.id)}"><div class="n-stamp">${stamp(n)}</div><textarea class="textarea" id="n-edit" rows="4">${esc(n.text)}</textarea>
+        <div class="row"><button type="button" class="btn small ghost" data-act="note-del" data-id="${esc(n.id)}">Delete</button><span class="grow"></span><button type="button" class="btn small ghost" data-act="note-cancel">Cancel</button><button class="btn small primary">Save</button></div></form>` : `
+      <button class="note" data-act="note-edit" data-id="${esc(n.id)}"><div class="n-stamp">${stamp(n)}</div><p>${esc(n.text)}</p></button>`).join("")}</div>`}`;
+}
+
+// The side panel re-renders on every game event. Hold off while the player
+// is typing in the journal and catch up when they leave the field.
+function journalBusy() {
+  const a = document.activeElement;
+  return !!a && a.closest?.(".journal") && a.matches("input, textarea");
+}
+document.addEventListener("focusout", () => setTimeout(() => { if (J.stale && !journalBusy()) { J.stale = false; renderSide(); } }, 0));
+document.addEventListener("input", e => {
+  if (e.target.id === "j-find") {
+    J.q = e.target.value;
+    const pos = e.target.selectionStart;
+    renderJournalBody();
+    const f = $("#j-find"); if (f) { f.focus(); f.setSelectionRange(pos, pos); }
+  }
+  if (e.target.id === "n-text") J.draft = e.target.value;
+});
+function renderJournalBody() {
+  const el = $(".journal");
+  if (!el) return;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = journalHTML();
+  el.querySelector(".j-body").replaceWith(tmp.querySelector(".j-body"));
+  el.querySelector(".j-index").replaceWith(tmp.querySelector(".j-index"));
+}
+document.addEventListener("submit", async e => {
+  const f = e.target;
+  if (f.id === "n-new") {
+    e.preventDefault();
+    const text = $("#n-text").value.trim();
+    if (!text) return;
+    try { await addNote(text); J.draft = ""; renderSide(); } catch (er) { toast(er.message); }
+  } else if (f.dataset?.note) {
+    e.preventDefault();
+    const id = f.dataset.note, text = $("#n-edit").value.trim();
+    if (!text) return;
+    try {
+      await api("POST", `/campaigns/${S.route}/notes/${id}`, { text });
+      const n = J.notes.find(n => n.id === id); if (n) n.text = text;
+      J.editing = ""; renderSide();
+    } catch (er) { toast(er.message); }
+  }
+});
+document.addEventListener("click", async e => {
+  const t = e.target.closest("[data-act]");
+  if (!t) return;
+  switch (t.dataset.act) {
+    case "jtab": J.tab = t.dataset.k; J.q = ""; J.editing = ""; return renderSide();
+    case "note-edit": J.editing = t.dataset.id; renderSide(); return $("#n-edit")?.focus();
+    case "note-cancel": J.editing = ""; return renderSide();
+    case "note-del":
+      try {
+        await api("DELETE", `/campaigns/${S.route}/notes/${t.dataset.id}`);
+        J.notes = J.notes.filter(n => n.id !== t.dataset.id); J.editing = ""; renderSide();
+      } catch (er) { toast(er.message); }
+      return;
+    case "jot":
+      if (!S.view?.you?.joined) return toast("Join this story to keep notes.");
+      loadNotes();
+      try { await addNote(`“${t.dataset.text.slice(0, 3900)}”`); t.classList.add("done"); toast("Copied to your notes."); if (sideKey() === "journal" && J.tab === "notes") renderSide(); } catch (er) { toast(er.message); }
+      return;
+  }
+});
 
 function mapHTML() {
   if (!S.map) {
@@ -954,7 +1200,7 @@ function mapHTML() {
   const others = m.locations.filter(l => l.id !== here && !near.has(l.id));
   const row = (l, extra = "", fillText = "") => `<${fillText ? `button data-fill="${esc(fillText)}"` : "div"} class="row-item"><b>${esc(l.name)}${l.id === m.hub_id ? ` <span class="pill">home</span>` : ""}</b><span>${esc(l.kind || "")}${extra}</span></${fillText ? "button" : "div"}>`;
   return `
-    <section><p class="eyebrow">You are here</p>${byId[here] ? `<div class="here-card">${cover(here, "scene-art")}${row(byId[here])}</div>` : ""}</section>
+    <section><p class="eyebrow">You are here</p>${byId[here] ? `<div class="here-card">${placeArt(here, "scene-art")}${row(byId[here])}</div>` : ""}</section>
     ${near.size ? `<section><p class="eyebrow">Paths from here</p><div class="list">${[...near].map(([id, st]) => byId[id] ? row(byId[id], st === "locked" ? " · locked" : byId[id].visited ? " · visited" : " · not yet visited", st === "locked" ? "" : `I travel to ${byId[id].name}`) : "").join("")}</div></section>` : ""}
     ${others.length ? `<section><p class="eyebrow">Known places</p><div class="list">${others.map(l => row(l, l.visited ? " · visited" : "")).join("")}</div></section>` : ""}`;
 }
