@@ -313,21 +313,28 @@ func (s *Server) streamAuth(w http.ResponseWriter, r *http.Request, campaignID s
 // --- handlers
 
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
-	kits := []map[string]any{}
-	for _, k := range game.KitKeys() {
-		kit := game.Kits[k]
-		var items []game.ItemDef
-		for _, key := range kit.Items {
-			items = append(items, game.Catalog[key])
+	kitsFor := func(setting string) []map[string]any {
+		kits := []map[string]any{}
+		for _, k := range game.KitKeys() {
+			kit := game.KitFor(setting, k)
+			weapon, _ := game.ItemFor(setting, kit.Weapon)
+			armor, _ := game.ItemFor(setting, kit.Armor)
+			kits = append(kits, map[string]any{"key": kit.Key, "name": kit.Name, "desc": kit.Desc, "gold": kit.Gold, "weapon": weapon.Key, "armor": armor.Key,
+				"items": game.KitItems(setting, kit), "suggested": kit.Suggested})
 		}
-		kits = append(kits, map[string]any{"key": kit.Key, "name": kit.Name, "desc": kit.Desc, "gold": kit.Gold, "weapon": kit.Weapon, "armor": kit.Armor, "items": items, "suggested": kit.Suggested})
+		return kits
+	}
+	kits := kitsFor(game.SettingFantasy)
+	settings := []map[string]any{}
+	for _, s := range game.SettingList {
+		settings = append(settings, map[string]any{"key": s.Key, "name": s.Name, "desc": s.Desc, "kits": kitsFor(s.Key)})
 	}
 	catalog := []game.ItemDef{}
 	for _, k := range game.CatalogKeys() {
 		catalog = append(catalog, game.Catalog[k])
 	}
 	writeJSON(w, 200, map[string]any{
-		"abilities": game.Abilities, "standard_array": game.StandardArray, "proficiencies": 2, "kits": kits,
+		"abilities": game.Abilities, "standard_array": game.StandardArray, "proficiencies": 2, "kits": kits, "settings": settings,
 		"xp_table": game.XPTable, "max_level": game.MaxLevel, "dcs": []int{5, 10, 15, 20, 25}, "catalog": catalog,
 		"service_mode": s.ServiceMode(),
 	})

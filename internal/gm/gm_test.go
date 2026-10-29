@@ -871,3 +871,48 @@ func TestAmbushBeatWaitsOutsideTheSafeHub(t *testing.T) {
 		t.Fatal("ambush beat should fire away from the hub")
 	}
 }
+
+func TestCreateCampaignKeepsGearInTheSetting(t *testing.T) {
+	st, _ := store.Open(":memory:")
+	defer st.Close()
+	f := llm.NewFake()
+	g := New(f, st, Config{}, dice.New(1))
+	g.Log = log.New(io.Discard, "", 0)
+	spec := fallbackSpec("")
+	spec.Setting = "fantasy" // the premise's year should win
+	f.On("author_campaign", llm.Calls(llm.Call("create_campaign", spec)))
+	w, err := g.CreateCampaign(bg, "Innsmouth, 1932: the fishermen have stopped talking.")
+	must(t, err)
+	if w.Campaign.Setting != game.SettingPulp {
+		t.Fatalf("setting %q", w.Campaign.Setting)
+	}
+	if p := lastUser(f.Tagged("author_campaign")[0]); !strings.Contains(p, "pulp_crossbow") || strings.Contains(p, " longsword,") {
+		t.Fatalf("prompt should list pulp catalog keys: %s", p)
+	}
+	stocked := 0
+	for _, it := range w.Items {
+		if it.Owner.Kind == game.OwnerNPC {
+			stocked++
+			if d := game.Catalog[it.Key]; d.Setting != game.SettingPulp && d.Key != "rations" {
+				t.Errorf("merchant sells %s (%s) in a pulp game", it.Name, it.Key)
+			}
+		}
+	}
+	if stocked == 0 {
+		t.Fatal("no merchant stock")
+	}
+	got, err := st.Load(bg, w.Campaign.ID)
+	must(t, err)
+	if got.Campaign.Setting != game.SettingPulp {
+		t.Fatalf("setting not saved: %q", got.Campaign.Setting)
+	}
+	r := newRig(t, 0, 1)
+	r.f.On("author_character", llm.Calls(llm.Call("draft_character", map[string]any{"name": "Cal", "kit": "detective"})))
+	draft := r.g.DraftCharacter(bg, w, "a hard-drinking private detective")
+	if draft.Kit != "skirmisher" {
+		t.Fatalf("kit %q", draft.Kit)
+	}
+	if p := lastUser(r.f.Tagged("author_character")[0]); !strings.Contains(p, "Gumshoe") || !strings.Contains(p, "Setting: Pulp") {
+		t.Fatalf("draft prompt lacks the setting's kits: %s", p)
+	}
+}

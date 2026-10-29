@@ -49,6 +49,7 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 	l := w.Here()
 	line := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
 	sc := w.Campaign.Scene
+	line("SETTING: %s", settingLine(w.Setting()))
 	line("TIME: day %d, %s. Tension %d/10.", sc.Day, sc.TimeName(), sc.Tension)
 	line("LOCATION: %s [%s] (%s, danger %d). %s", l.Name, l.ID, l.Kind, l.Danger, l.Description)
 	if actor != nil {

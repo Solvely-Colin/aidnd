@@ -158,6 +158,7 @@ type CampaignView struct {
 	Title       string          `json:"title"`
 	Pitch       string          `json:"pitch"`
 	Premise     string          `json:"premise"`
+	Setting     string          `json:"setting"`
 	Status      string          `json:"status"`
 	Turn        int             `json:"turn"`
 	Setbacks    int             `json:"setbacks"`
@@ -314,7 +315,7 @@ func encounterView(w *game.World) *EncounterView {
 
 func campaignView(w *game.World, playerID string) CampaignView {
 	c := w.Campaign
-	v := CampaignView{ID: c.ID, Title: c.Title, Pitch: c.Pitch, Premise: c.Premise, Status: c.Status, Turn: c.Turn,
+	v := CampaignView{ID: c.ID, Title: c.Title, Pitch: c.Pitch, Premise: c.Premise, Setting: w.Setting(), Status: c.Status, Turn: c.Turn,
 		Setbacks: c.Setbacks, MaxSetbacks: c.MaxSetbacks, MaxPlayers: c.MaxPlayers,
 		Scene: SceneView{Day: c.Scene.Day, Time: c.Scene.TimeName(), Tension: c.Scene.Tension, Goal: c.Scene.Goal},
 		Party: []CharacterView{}, Players: []PlayerView{}, Quests: questsView(w), Encounter: encounterView(w)}
