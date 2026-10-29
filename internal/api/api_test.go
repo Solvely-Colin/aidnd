@@ -401,6 +401,59 @@ func TestMeta(t *testing.T) {
 	}
 }
 
+// checkSheets: every party member's full sheet is in the view, so players
+// can read each other's sheets.
+func checkSheets(t *testing.T, v map[string]any) {
+	t.Helper()
+	party := v["party"].([]any)
+	if len(party) != 2 {
+		t.Fatalf("party %d", len(party))
+	}
+	active := v["active"].(map[string]any)["character_id"]
+	for _, p := range party {
+		c := p.(map[string]any)
+		sum := 0.0
+		for _, part := range c["ac_parts"].([]any) {
+			sum += part.(map[string]any)["value"].(float64)
+		}
+		if sum != c["ac"].(float64) {
+			t.Errorf("%s: ac parts %v != ac %v", c["name"], sum, c["ac"])
+		}
+		atk := c["attack"].(map[string]any)
+		if atk["weapon"] == "" || atk["damage"] == "" || atk["bonus"].(float64) < 2 {
+			t.Errorf("%s: attack %v", c["name"], atk)
+		}
+		if lu := c["level_up"].(map[string]any); lu["level"].(float64) != 2 || lu["hp"].(float64) < 1 {
+			t.Errorf("%s: level_up %v", c["name"], lu)
+		}
+		if c["armor"] == nil || c["zone_name"] == "" {
+			t.Errorf("%s: armor %v zone %v", c["name"], c["armor"], c["zone_name"])
+		}
+		acting := false
+		for _, cd := range c["conditions"].([]any) {
+			if cd.(map[string]any)["key"] == "acting" {
+				acting = true
+			}
+		}
+		if acting != (c["id"] == active) {
+			t.Errorf("%s: acting condition %v, active %v", c["name"], acting, active)
+		}
+		weapons := 0
+		for _, it := range c["inventory"].([]any) {
+			it := it.(map[string]any)
+			if it["kind"] == "weapon" {
+				weapons++
+				if _, ok := it["to_hit"]; !ok {
+					t.Errorf("%s: %s has no to_hit", c["name"], it["name"])
+				}
+			}
+		}
+		if weapons == 0 {
+			t.Errorf("%s: no weapons carried", c["name"])
+		}
+	}
+}
+
 func TestJournalPeopleAndPlaces(t *testing.T) {
 	e := newEnv(t, "k")
 	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
@@ -479,57 +532,5 @@ func TestNotesArePrivate(t *testing.T) {
 	w, _ := e.g.Store.Load(t.Context(), id)
 	if b, _ := json.Marshal(w); strings.Contains(string(b), "PRIVATENOTE") {
 		t.Fatal("a note leaked into the world")
-	}
-}
-// checkSheets: every party member's full sheet is in the view, so players
-// can read each other's sheets.
-func checkSheets(t *testing.T, v map[string]any) {
-	t.Helper()
-	party := v["party"].([]any)
-	if len(party) != 2 {
-		t.Fatalf("party %d", len(party))
-	}
-	active := v["active"].(map[string]any)["character_id"]
-	for _, p := range party {
-		c := p.(map[string]any)
-		sum := 0.0
-		for _, part := range c["ac_parts"].([]any) {
-			sum += part.(map[string]any)["value"].(float64)
-		}
-		if sum != c["ac"].(float64) {
-			t.Errorf("%s: ac parts %v != ac %v", c["name"], sum, c["ac"])
-		}
-		atk := c["attack"].(map[string]any)
-		if atk["weapon"] == "" || atk["damage"] == "" || atk["bonus"].(float64) < 2 {
-			t.Errorf("%s: attack %v", c["name"], atk)
-		}
-		if lu := c["level_up"].(map[string]any); lu["level"].(float64) != 2 || lu["hp"].(float64) < 1 {
-			t.Errorf("%s: level_up %v", c["name"], lu)
-		}
-		if c["armor"] == nil || c["zone_name"] == "" {
-			t.Errorf("%s: armor %v zone %v", c["name"], c["armor"], c["zone_name"])
-		}
-		acting := false
-		for _, cd := range c["conditions"].([]any) {
-			if cd.(map[string]any)["key"] == "acting" {
-				acting = true
-			}
-		}
-		if acting != (c["id"] == active) {
-			t.Errorf("%s: acting condition %v, active %v", c["name"], acting, active)
-		}
-		weapons := 0
-		for _, it := range c["inventory"].([]any) {
-			it := it.(map[string]any)
-			if it["kind"] == "weapon" {
-				weapons++
-				if _, ok := it["to_hit"]; !ok {
-					t.Errorf("%s: %s has no to_hit", c["name"], it["name"])
-				}
-			}
-		}
-		if weapons == 0 {
-			t.Errorf("%s: no weapons carried", c["name"])
-		}
 	}
 }

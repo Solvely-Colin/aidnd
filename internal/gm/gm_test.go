@@ -1154,31 +1154,33 @@ func TestCreateCampaignKeepsGearInTheSetting(t *testing.T) {
 	}
 }
 
-func TestTakeActionPublishesProgressBeforeSaving(t *testing.T) {
-	r := newRig(t, 1, 1)
+func TestDockCheckRollsWithoutTheInterpreter(t *testing.T) {
+	r := newRig(t, 2, 1)
 	r.start(t)
-	var types []string
-	r.g.Publish = func(_ string, evs []store.Event) {
-		for _, e := range evs {
-			if e.Type == "progress" {
-				var d map[string]any
-				must(t, json.Unmarshal(e.Data, &d))
-				types = append(types, "progress:"+d["stage"].(string))
-				if e.ID != 0 {
-					t.Fatalf("progress event has id %d", e.ID)
-				}
-				continue
-			}
-			types = append(types, e.Type)
-		}
+	// a lock check needs a real locked way here
+	if _, err := r.g.TakeAction(bg, r.id, "u1", "I pick it", Hints{Check: &CheckHint{Purpose: "unlock", Exit: "nowhere"}}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("bad exit err %v", err)
 	}
-	r.act(t, "u1", "I look around carefully")
-	got := strings.Join(types, ",")
-	if !strings.HasPrefix(got, "progress:reading,progress:narrating,player_action,") {
-		t.Fatalf("publish order %s", got)
+	res, err := r.g.TakeAction(bg, r.id, "u1", "I search the square", Hints{Check: &CheckHint{Ability: "INT", Purpose: "search"}})
+	must(t, err)
+	if n := len(r.f.Tagged("interpret")); n != 0 {
+		t.Fatalf("interpreter called %d times for a dock check", n)
 	}
-	if n := len(r.events(t, "progress")); n != 0 {
-		t.Fatalf("%d progress events were saved", n)
+	rolls := res.Resolution.Rolls()
+	if len(rolls) != 1 || rolls[0].Kind != "check" || rolls[0].Against != "DC" || rolls[0].Parts[0].Label != "INT" {
+		t.Fatalf("rolls %+v", rolls)
+	}
+}
+
+func TestDockCheckAbilityOverridesTheInterpreter(t *testing.T) {
+	r := newRig(t, 2, 1)
+	w := r.start(t)
+	a := applyHints(w, game.Action{Kind: game.ActCheck, Ability: "STR", DC: 15}, Hints{Check: &CheckHint{Ability: "dex", Purpose: "other"}}, "I climb the wall")
+	if a.Ability != "DEX" || a.DC != 15 {
+		t.Fatalf("got %+v", a)
+	}
+	if h := describeHints(w, Hints{Check: &CheckHint{Ability: "DEX", Purpose: "other"}}); !strings.Contains(h, "DEX ability_check") {
+		t.Fatalf("hint %q", h)
 	}
 }
 
@@ -1235,32 +1237,30 @@ func TestRecordLoreRejectsPromiseToNobody(t *testing.T) {
 	}
 }
 
-func TestDockCheckRollsWithoutTheInterpreter(t *testing.T) {
-	r := newRig(t, 2, 1)
+func TestTakeActionPublishesProgressBeforeSaving(t *testing.T) {
+	r := newRig(t, 1, 1)
 	r.start(t)
-	// a lock check needs a real locked way here
-	if _, err := r.g.TakeAction(bg, r.id, "u1", "I pick it", Hints{Check: &CheckHint{Purpose: "unlock", Exit: "nowhere"}}); !errors.Is(err, ErrBadRequest) {
-		t.Fatalf("bad exit err %v", err)
+	var types []string
+	r.g.Publish = func(_ string, evs []store.Event) {
+		for _, e := range evs {
+			if e.Type == "progress" {
+				var d map[string]any
+				must(t, json.Unmarshal(e.Data, &d))
+				types = append(types, "progress:"+d["stage"].(string))
+				if e.ID != 0 {
+					t.Fatalf("progress event has id %d", e.ID)
+				}
+				continue
+			}
+			types = append(types, e.Type)
+		}
 	}
-	res, err := r.g.TakeAction(bg, r.id, "u1", "I search the square", Hints{Check: &CheckHint{Ability: "INT", Purpose: "search"}})
-	must(t, err)
-	if n := len(r.f.Tagged("interpret")); n != 0 {
-		t.Fatalf("interpreter called %d times for a dock check", n)
+	r.act(t, "u1", "I look around carefully")
+	got := strings.Join(types, ",")
+	if !strings.HasPrefix(got, "progress:reading,progress:narrating,player_action,") {
+		t.Fatalf("publish order %s", got)
 	}
-	rolls := res.Resolution.Rolls()
-	if len(rolls) != 1 || rolls[0].Kind != "check" || rolls[0].Against != "DC" || rolls[0].Parts[0].Label != "INT" {
-		t.Fatalf("rolls %+v", rolls)
-	}
-}
-
-func TestDockCheckAbilityOverridesTheInterpreter(t *testing.T) {
-	r := newRig(t, 2, 1)
-	w := r.start(t)
-	a := applyHints(w, game.Action{Kind: game.ActCheck, Ability: "STR", DC: 15}, Hints{Check: &CheckHint{Ability: "dex", Purpose: "other"}}, "I climb the wall")
-	if a.Ability != "DEX" || a.DC != 15 {
-		t.Fatalf("got %+v", a)
-	}
-	if h := describeHints(w, Hints{Check: &CheckHint{Ability: "DEX", Purpose: "other"}}); !strings.Contains(h, "DEX ability_check") {
-		t.Fatalf("hint %q", h)
+	if n := len(r.events(t, "progress")); n != 0 {
+		t.Fatalf("%d progress events were saved", n)
 	}
 }
