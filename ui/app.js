@@ -126,6 +126,36 @@ function cover(seed, cls = "") {
   </svg>`;
 }
 
+// ---- generated art. The Worker paints a cover for each story and a
+// portrait for each character the first time one is asked for. Until the
+// picture exists it answers 202, the image fails to load, and the drawn
+// cover or the initial underneath stays in view while we ask again.
+
+const ART = new Map(); // src -> "ok" | "gone" | tries so far
+const ART_TRIES = 15, ART_WAIT = 6000;
+const coverArt = id => artImg(`/img/${id}/cover`);
+const portrait = c => c?.id && S.route ? artImg(`/img/${S.route}/char/${c.id}`) : "";
+function artImg(src) {
+  const st = ART.get(src);
+  if (st === "gone") return "";
+  return `<img class="gen ${st === "ok" ? "on" : ""}" src="${src}" alt="" data-art="${src}">`;
+}
+const artEls = src => document.querySelectorAll(`img[data-art="${CSS.escape(src)}"]`);
+document.addEventListener("load", e => {
+  const src = e.target?.dataset?.art;
+  if (!src) return;
+  ART.set(src, "ok");
+  artEls(src).forEach(img => { if (img.naturalWidth) img.classList.add("on"); });
+}, true);
+document.addEventListener("error", e => {
+  const src = e.target?.dataset?.art, st = src && ART.get(src);
+  if (!src || st === "ok" || st === "gone" || st === "wait") return;
+  const tries = (typeof st === "number" ? st : 0) + 1;
+  if (tries >= ART_TRIES) { ART.set(src, "gone"); artEls(src).forEach(img => img.remove()); return; }
+  ART.set(src, "wait");
+  setTimeout(() => { ART.set(src, tries); artEls(src).forEach(img => { img.src = `${src}?try=${tries}`; }); }, ART_WAIT);
+}, true);
+
 // ---- routing
 
 function go(hash) { if (location.hash !== hash) location.hash = hash; else route(); }
@@ -210,7 +240,7 @@ async function renderHome() {
 
 function storyCard(c) {
   return `<button class="story-card" data-open="${esc(c.id)}">
-    <div class="art">${cover(c.id)}${statusPill(c.status)}</div>
+    <div class="art">${cover(c.id)}${coverArt(c.id)}${statusPill(c.status)}</div>
     <div class="body"><h3>${esc(c.title)}</h3>${c.pitch ? `<p>${esc(c.pitch)}</p>` : ""}
       <div class="meta"><span>${c.players}/${c.max_players} players</span><span>${ago(c.updated_at)}</span></div></div>
   </button>`;
@@ -318,7 +348,7 @@ function renderSetup(soft) {
   const allReady = v.players.length > 0 && v.players.every(p => p.character_id);
   app.innerHTML = `
   <div class="page setup">
-    <div class="setup-hero">${cover(S.route, "hero-art")}
+    <div class="setup-hero">${cover(S.route, "hero-art")}${coverArt(S.route)}
       <button class="icon-btn on-art" data-act="home" aria-label="Back">${ICON.back}</button>
       <div class="setup-title"><span class="pill">Gathering the party</span><h1>${esc(v.title)}</h1></div>
     </div>
@@ -344,7 +374,7 @@ function partyRow() {
   return seats.map(p => {
     if (!p) return `<div class="seat empty"><div class="avatar lg">+</div><b>Open seat</b><span>Share the play code</span></div>`;
     const c = v.party.find(x => x.id === p.character_id);
-    return `<div class="seat ${c ? "ready" : ""}"><div class="avatar lg">${esc((c?.name || p.name)[0] || "?")}</div>
+    return `<div class="seat ${c ? "ready" : ""}"><div class="avatar lg">${esc((c?.name || p.name)[0] || "?")}${portrait(c)}</div>
       <b>${esc(c ? c.name : p.name)}</b><span>${c ? esc(c.class) : "Making a character…"}</span></div>`;
   }).join("");
 }
@@ -366,7 +396,7 @@ function readyHTML(c) {
   return `<section class="section">
     <div class="section-head"><h2>Your character</h2><button class="btn small" data-act="edit">Edit</button></div>
     <div class="panel-card char-card">
-      <div class="avatar xl">${esc(c.name[0])}</div>
+      <div class="avatar xl">${esc(c.name[0])}${portrait(c)}</div>
       <div class="grow"><h3>${esc(c.name)}</h3><div class="muted small">${esc(c.class)} · ${esc(c.pronouns || "they/them")} · ${esc(kitName(c.kit))}</div>
       ${c.backstory ? `<p class="muted">${esc(c.backstory)}</p>` : ""}</div>
     </div>
@@ -476,7 +506,7 @@ function renderHud() {
     <button class="icon-btn" data-act="home" aria-label="Back">${ICON.back}</button>
     <div class="titles"><h1>${esc(v.title)}</h1><div class="sub">${v.scene ? `Day ${v.scene.day} · ${esc(v.scene.time)}` : ""}</div></div>
     <div class="party-mini">${v.party.map(c => `<button class="mini ${v.active?.character_id === c.id ? "acting" : ""} ${c.down ? "down" : ""}" data-tab="you" title="${esc(c.name)} ${c.hp}/${c.max_hp}">
-      <span class="avatar sm">${esc(c.name[0])}</span>${ring(c.hp, c.max_hp)}</button>`).join("")}</div>
+      <span class="avatar sm">${esc(c.name[0])}${portrait(c)}</span>${ring(c.hp, c.max_hp)}</button>`).join("")}</div>
     ${me ? `<span class="hp ${me.hp <= me.max_hp / 3 ? "low" : ""}">${ICON.heart}${me.hp}<small>/${me.max_hp}</small></span>` : ""}`;
 }
 
@@ -490,7 +520,7 @@ function renderRail() {
   $("#rail").innerHTML = `
     <p class="rail-title">Party</p>
     ${v.party.map(c => `<div class="member ${v.active?.character_id === c.id ? "acting" : ""} ${c.id === me?.id ? "me" : ""}">
-      <div class="avatar">${esc(c.name[0])}</div>
+      <div class="avatar">${esc(c.name[0])}${portrait(c)}</div>
       <div class="grow"><b>${esc(c.name)}${c.id === me?.id ? ` <span class="muted">(you)</span>` : ""}</b><span>${esc(c.class)} · lvl ${c.level ?? 1}</span>${hpbar(c.hp, c.max_hp)}</div>
       <span class="num">${c.hp}</span></div>`).join("")}
     ${v.encounter ? `<p class="rail-title">Enemies · round ${v.encounter.round}</p>${v.encounter.enemies.map(e => `<div class="member foe ${e.hp <= 0 ? "down" : ""}"><div class="avatar">${esc(e.display[0])}</div>
@@ -559,7 +589,7 @@ function eventHTML(e, latest) {
   switch (e.type) {
     case "player_action": {
       const you = me && d.character_id === me.id;
-      return `<div class="ev-act ${you ? "you" : ""}"><span class="avatar sm">${esc((you ? me.name : d.character || "?")[0])}</span><div><span class="by">${esc(you ? "You" : d.character)}</span><p>${esc(d.text)}</p></div></div>`;
+      return `<div class="ev-act ${you ? "you" : ""}"><span class="avatar sm">${esc((you ? me.name : d.character || "?")[0])}${portrait(S.view?.party?.find(p => p.id === d.character_id))}</span><div><span class="by">${esc(you ? "You" : d.character)}</span><p>${esc(d.text)}</p></div></div>`;
     }
     case "action_resolved": {
       let h = "";
@@ -720,7 +750,7 @@ function youHTML() {
   const c = mine();
   if (!c) return `<div class="muted">You are watching this story.</div>`;
   return `
-    <section class="sheet-head"><div class="avatar xl">${esc(c.name[0])}</div>
+    <section class="sheet-head"><div class="avatar xl">${esc(c.name[0])}${portrait(c)}</div>
       <div class="grow"><h3>${esc(c.name)}</h3><div class="muted small">${esc(c.class)} · level ${c.level} · ${esc(c.pronouns || "they/them")}</div></div></section>
     <section class="vitals">
       <div class="vital big"><span class="k">Health</span><span class="v">${c.hp}<small>/${c.max_hp}</small></span>${hpbar(c.hp, c.max_hp)}</div>
