@@ -228,7 +228,7 @@ func bossTurn(w *World, r *dice.Roller, l *Location, e *Enemy, targets []*Charac
 	if z := crowdedZone(w, l); z != "" {
 		b.Charging = &Telegraph{Zone: z, Round: round(w)}
 		out = append(out, EnemyTurn{EnemyID: e.ID, Enemy: e.Display(), Kind: "telegraph", ToZone: z,
-			Text: fmt.Sprintf("%s readies %s at %s: on its next turn everyone still there takes %s (%s save DC %d for half). Get clear!",
+			Text: fmt.Sprintf("%s readies %s at %s: on its next turn everyone still there takes %s (%s save DC %d for half). Get clear, or Dodge for advantage on the save!",
 				e.Display(), b.Move.Name, ZoneName(l, z), b.Move.Dice, b.Move.Save, b.Move.DC)})
 	}
 	return out

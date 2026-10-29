@@ -199,6 +199,9 @@ func saveEdge(c *Character, a Ability, why string) []string {
 	if a == STR && c.Conditions.Has(CondRaging) {
 		adv = append(adv, "raging")
 	}
+	if a == DEX && c.Conditions.Has(CondDodging) {
+		adv = append(adv, "dodging")
+	}
 	if a == DEX && c.HasFeature("danger_sense") {
 		adv = append(adv, "danger sense")
 	}
