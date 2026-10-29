@@ -355,11 +355,12 @@ type EnemyTurn struct {
 	ToZone   string         `json:"to_zone,omitempty"`
 	Text     string         `json:"text"`
 	// Save is the target's save against the attack's condition, if any;
-	// Conditions lists start/end-of-turn effects on the enemy itself.
+	// Before and After are condition effects on the enemy itself.
 	Save       *Roll    `json:"save,omitempty"`
 	Inflicted  string   `json:"inflicted,omitempty"`
-	Conditions []string `json:"conditions,omitempty"`
-	Rolls      []Roll   `json:"rolls,omitempty"` // the enemy's own saves
+	Before []string `json:"before,omitempty"` // start of its turn: stunned, standing up
+	After  []string `json:"after,omitempty"`  // end of its turn: saves, wearing off
+	Rolls  []Roll   `json:"rolls,omitempty"`  // the enemy's own saves
 }
 
 // enemiesActingNow spreads the enemies over the round: each acts once per
@@ -412,7 +413,7 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 		start, canMove := startEnemyTurn(e)
 		et := enemyAct(w, r, l, e, targets, start, canMove)
 		end := endEnemyTurn(r, e)
-		et.Conditions = append(start.Changes, end.Changes...)
+		et.Before, et.After = start.Changes, end.Changes
 		et.Rolls = end.Rolls
 		changes = append(changes, start.Changes...)
 		if et.Kind == "attack" || et.Kind == "move" {
