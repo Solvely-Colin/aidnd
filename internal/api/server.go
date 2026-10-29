@@ -86,6 +86,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /campaigns/{id}/npcs/{nid}", s.auth(s.handleNPC))
 	mux.HandleFunc("GET /campaigns/{id}/quests", s.auth(s.handleQuests))
 	mux.HandleFunc("GET /campaigns/{id}/journal", s.auth(s.handleJournal))
+	mux.HandleFunc("GET /campaigns/{id}/notes", s.auth(s.handleNotes))
+	mux.HandleFunc("POST /campaigns/{id}/notes", s.auth(s.handleAddNote))
+	mux.HandleFunc("POST /campaigns/{id}/notes/{nid}", s.auth(s.handleEditNote))
+	mux.HandleFunc("DELETE /campaigns/{id}/notes/{nid}", s.auth(s.handleDeleteNote))
 	mux.HandleFunc("POST /campaigns/{id}/stream-token", s.auth(s.handleStreamToken))
 	mux.HandleFunc("GET /campaigns/{id}/events", s.handleEvents)
 	mux.HandleFunc("GET /campaigns/{id}/log", s.auth(s.handleLog))
@@ -164,7 +168,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h.Set("Access-Control-Allow-Origin", origin)
 			h.Set("Vary", "Origin")
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Player-ID, Last-Event-ID")
-			h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -620,7 +624,8 @@ func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	j := JournalView{Summary: wld.Campaign.Summary, Chronicle: wld.Chronicle, Quests: questsView(wld), Setbacks: wld.Campaign.Setbacks}
+	j := JournalView{Summary: wld.Campaign.Summary, Chronicle: wld.Chronicle, Quests: questsView(wld), Setbacks: wld.Campaign.Setbacks,
+		People: journalPeople(wld), Places: journalPlaces(wld)}
 	if j.Chronicle == nil {
 		j.Chronicle = []game.ChronicleEntry{}
 	}
@@ -655,4 +660,113 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 		last = evs[len(evs)-1].ID
 	}
 	writeJSON(w, 200, map[string]any{"events": evs, "last_id": last})
+}
+
+// --- player notes: private to their author, never shown to the model.
+
+// MaxNoteLen caps one note, in bytes.
+const MaxNoteLen = 4000
+
+// notePlayer loads the campaign and checks the caller has a seat in it.
+func (s *Server) notePlayer(r *http.Request) (*game.World, string, error) {
+	wld, err := s.store.Load(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return nil, "", err
+	}
+	p := wld.Player(whoFrom(r).PlayerID)
+	if p == nil {
+		return nil, "", gm.ErrForbidden
+	}
+	return wld, p.ID, nil
+}
+
+func noteText(r *http.Request) (string, error) {
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := decode(r, &body); err != nil {
+		return "", err
+	}
+	t := strings.TrimSpace(body.Text)
+	if t == "" {
+		return "", fmt.Errorf("%w: note text is empty", gm.ErrBadRequest)
+	}
+	if len(t) > MaxNoteLen {
+		return "", fmt.Errorf("%w: notes are limited to %d characters", gm.ErrBadRequest, MaxNoteLen)
+	}
+	return t, nil
+}
+
+func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
+	wld, pid, err := s.notePlayer(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	notes, err := s.store.Notes(r.Context(), wld.Campaign.ID, pid)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"notes": notes})
+}
+
+func (s *Server) handleAddNote(w http.ResponseWriter, r *http.Request) {
+	wld, pid, err := s.notePlayer(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	text, err := noteText(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	have, err := s.store.Notes(r.Context(), wld.Campaign.ID, pid)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if len(have) >= store.MaxNotes {
+		s.fail(w, gm.Conflict("the journal is full (%d notes); delete some first", store.MaxNotes))
+		return
+	}
+	c := wld.Campaign
+	n, err := s.store.AddNote(r.Context(), c.ID, store.Note{PlayerID: pid, Text: text, Turn: c.Turn, Day: c.Scene.Day, Time: c.Scene.TimeName()})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 201, n)
+}
+
+func (s *Server) handleEditNote(w http.ResponseWriter, r *http.Request) {
+	wld, pid, err := s.notePlayer(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	text, err := noteText(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.store.UpdateNote(r.Context(), wld.Campaign.ID, pid, r.PathValue("nid"), text); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
+	wld, pid, err := s.notePlayer(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.store.DeleteNote(r.Context(), wld.Campaign.ID, pid, r.PathValue("nid")); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
 }

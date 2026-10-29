@@ -399,3 +399,84 @@ func TestMeta(t *testing.T) {
 		}
 	}
 }
+
+func TestJournalPeopleAndPlaces(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/start", nil, "k", "")
+	e.fake.On("interpret", llm.Calls(llm.Call("talk_to", map[string]any{"npc": "Tamsin Hale", "text": "hello"})))
+	e.do("POST", "/campaigns/"+id+"/actions", map[string]string{"text": "hello Tamsin"}, "k", "u1")
+	w, _ := e.g.Store.Load(t.Context(), id)
+	antagonist := w.NPC(w.Campaign.AntagonistID).Name
+
+	var j JournalView
+	if err := json.Unmarshal(e.do("GET", "/campaigns/"+id+"/journal", nil, "k", "u1").body, &j); err != nil {
+		t.Fatal(err)
+	}
+	var tamsin *JournalPerson
+	for i, p := range j.People {
+		if p.Name == antagonist {
+			t.Errorf("journal lists the antagonist %q away from the lair", antagonist)
+		}
+		if p.Name == "Tamsin Hale" {
+			tamsin = &j.People[i]
+		}
+	}
+	if tamsin == nil || !tamsin.Met || !tamsin.Here || tamsin.LocationName == "" {
+		t.Fatalf("tamsin %+v in %+v", tamsin, j.People)
+	}
+	if len(j.Places) < 2 || !j.Places[0].Here || j.Places[0].ID != w.Campaign.HubID || j.Places[0].Description == "" {
+		t.Fatalf("places %+v", j.Places)
+	}
+	for _, p := range j.Places {
+		if !p.Visited && p.Description != "" {
+			t.Errorf("unvisited %s shows its description", p.Name)
+		}
+	}
+}
+
+func TestNotesArePrivate(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ben"}, "k", "u2")
+	base := "/campaigns/" + id + "/notes"
+	if r := e.do("POST", base, map[string]string{"text": "hi"}, "k", "u3"); r.code != 403 {
+		t.Fatalf("outsider wrote a note: %d", r.code)
+	}
+	if r := e.do("POST", base, map[string]string{"text": "  "}, "k", "u1"); r.code != 400 {
+		t.Fatalf("empty note %d", r.code)
+	}
+	r := e.do("POST", base, map[string]string{"text": "Tamsin flinched at the bell"}, "k", "u1")
+	if r.code != 201 {
+		t.Fatalf("add %d %s", r.code, r.body)
+	}
+	nid := r.json(t)["id"].(string)
+	if n := e.do("GET", base, nil, "k", "u2").json(t)["notes"].([]any); len(n) != 0 {
+		t.Fatalf("u2 sees %v", n)
+	}
+	if r := e.do("POST", base+"/"+nid, map[string]string{"text": "mine now"}, "k", "u2"); r.code != 404 {
+		t.Fatalf("u2 edited u1's note: %d", r.code)
+	}
+	if r := e.do("POST", base+"/"+nid, map[string]string{"text": "Tamsin flinched twice"}, "k", "u1"); r.code != 200 {
+		t.Fatalf("edit %d", r.code)
+	}
+	n := e.do("GET", base, nil, "k", "u1").json(t)["notes"].([]any)
+	if len(n) != 1 || n[0].(map[string]any)["text"] != "Tamsin flinched twice" {
+		t.Fatalf("notes %v", n)
+	}
+	if r := e.do("DELETE", base+"/"+nid, nil, "k", "u1"); r.code != 200 {
+		t.Fatalf("delete %d", r.code)
+	}
+	if r := e.do("DELETE", base+"/"+nid, nil, "k", "u1"); r.code != 404 {
+		t.Fatalf("second delete %d", r.code)
+	}
+	// the narrator never sees notes: nothing about them reaches the world
+	e.do("POST", base, map[string]string{"text": "PRIVATENOTE"}, "k", "u1")
+	w, _ := e.g.Store.Load(t.Context(), id)
+	if b, _ := json.Marshal(w); strings.Contains(string(b), "PRIVATENOTE") {
+		t.Fatal("a note leaked into the world")
+	}
+}
