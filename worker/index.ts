@@ -5,6 +5,7 @@
 // bridges below, which run here in the Workers runtime and hold the keys.
 
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
+import { parseArtPath, serveArt, type CampaignInfo } from "./art";
 
 export { ContainerProxy };
 
@@ -12,6 +13,9 @@ export interface Env {
 	ASSETS: Fetcher;
 	GAME: DurableObjectNamespace<GameServer>;
 	DB: D1Database;
+	AI: Ai;
+	ART: R2Bucket;
+	ART_DAILY_LIMIT?: string;
 	LLM_MODEL: string;
 	LLM_BASE_URL: string;
 	LLM_REASONING_EFFORT: string;
@@ -214,8 +218,19 @@ export async function proxyToGame(req: Request, env: Env, s: Session): Promise<R
 	return getContainer(env.GAME, "main").fetch(fwd);
 }
 
+// loadCampaign reads a campaign view for an art prompt.
+async function loadCampaign(req: Request, env: Env, s: Session, id: string): Promise<CampaignInfo | null> {
+	const u = new URL(req.url);
+	const r = await getContainer(env.GAME, "main").fetch(
+		new Request(`${u.origin}/campaigns/${encodeURIComponent(id)}`, {
+			headers: { Authorization: `Bearer ${env.APP_SECRET}`, "X-Player-ID": s.p },
+		}),
+	);
+	return r.ok ? ((await r.json()) as CampaignInfo) : null;
+}
+
 export default {
-	async fetch(req: Request, env: Env): Promise<Response> {
+	async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const { pathname } = new URL(req.url);
 		if (pathname === "/auth/login" && req.method === "POST") return login(req, env);
 		if (pathname === "/auth/logout" && req.method === "POST") {
@@ -228,6 +243,12 @@ export default {
 		if (pathname.startsWith("/api/")) {
 			if (!s) return Response.json({ error: "Sign in first." }, { status: 401 });
 			return proxyToGame(req, env, s);
+		}
+		if (pathname.startsWith("/img/")) {
+			if (!s) return new Response(null, { status: 401 });
+			const t = parseArtPath(pathname);
+			if (!t) return new Response(null, { status: 404 });
+			return serveArt(t, env, ctx, () => loadCampaign(req, env, s, t.campaign));
 		}
 		if (pathname.startsWith("/auth/")) return Response.json({ error: "not found" }, { status: 404 });
 		return env.ASSETS.fetch(req);

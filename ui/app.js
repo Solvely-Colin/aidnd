@@ -6,14 +6,25 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const app = $("#app");
 
+const svg = (d, w = 1.8) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const ICON = {
-  back: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>`,
-  send: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`,
-  scene: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>`,
-  you: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>`,
-  book: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M9 7h6"/></svg>`,
-  close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
-  quill: `<svg class="quill" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M40 6C26 8 16 18 12 34l-2 8 6-5c14-3 22-14 24-31z"/><path d="M12 34l12-12M18 30h8"/></svg>`,
+  back: svg(`<path d="M15 18l-6-6 6-6"/>`, 2),
+  send: svg(`<path d="M5 12h14M13 6l6 6-6 6"/>`, 2.2),
+  story: svg(`<path d="M4 5h16M4 10h16M4 15h10M4 20h7"/>`),
+  scene: svg(`<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>`),
+  you: svg(`<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>`),
+  book: svg(`<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M9 7h6"/>`),
+  map: svg(`<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/>`),
+  close: svg(`<path d="M6 6l12 12M18 6L6 18"/>`, 2),
+  plus: svg(`<path d="M12 5v14M5 12h14"/>`, 2),
+  look: svg(`<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>`),
+  talk: svg(`<path d="M4 5h16v11H9l-5 4z"/>`),
+  go: svg(`<path d="M5 12h12M13 6l6 6-6 6"/>`),
+  fight: svg(`<path d="M14.5 4H20v5.5L9 20.5 3.5 15z"/><path d="M5 13l6 6M3 21l3-3"/>`),
+  use: svg(`<path d="M6 8h12l-1 12H7z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>`),
+  end: svg(`<path d="M6 6h12v12H6z"/>`),
+  heart: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z"/></svg>`,
+  logo: `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13z" fill="var(--accent)"/><path d="M16 8 23 20H9z" fill="var(--bg)"/></svg>`,
 };
 
 const PREMISES = [
@@ -38,14 +49,19 @@ const S = {
   lastId: 0,
   es: null,
   draft: null,       // character being edited
+  step: 0,           // character builder step
+  composing: false,  // new story form open on home
   sending: false,
-  panel: "scene",    // scene | you | journal | map
-  panelOpen: false,
+  tab: "story",      // phone: story | scene | you | journal | map
+  panel: "scene",    // wide side column: scene | you | journal | map
+  tray: "",          // open action group in the dock
   journal: null,
   map: null,
   hint: {},
   composer: "",
 };
+
+const wide = () => innerWidth >= 1000;
 
 // ---- api
 
@@ -79,6 +95,67 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.remove(), 3800);
 }
 
+// ---- cover art: a small landscape drawn from the story's id, so every
+// story has its own picture without any image generation.
+
+function hash(s) { let h = 2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+const COVERS = [
+  ["#16201b", "#24352c", "#33503f", "#c8f53c"],
+  ["#1f1716", "#352321", "#55322c", "#ff7a59"],
+  ["#141b26", "#1f2b3d", "#2d4260", "#7cc4ff"],
+  ["#1d1a12", "#322c1b", "#4f4426", "#f5c542"],
+  ["#1a1a1a", "#2a2a2a", "#404040", "#f2f2f0"],
+];
+function cover(seed, cls = "") {
+  let h = hash(seed);
+  const rnd = () => { h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0; return (h % 1000) / 1000; };
+  const [sky, far, near, glow] = COVERS[hash(seed) % COVERS.length];
+  const ridge = (base, amp, n) => {
+    let d = `M0 ${base}`;
+    for (let i = 1; i <= n; i++) d += ` L${(i * 400) / n} ${base - rnd() * amp}`;
+    return d + " L400 225 L0 225Z";
+  };
+  const mx = 60 + rnd() * 280, my = 40 + rnd() * 50, mr = 18 + rnd() * 22;
+  const stars = Array.from({ length: 14 }, () => `<circle cx="${(rnd() * 400).toFixed(0)}" cy="${(rnd() * 110).toFixed(0)}" r="${(0.6 + rnd()).toFixed(1)}" fill="${glow}" opacity="${(0.3 + rnd() * 0.5).toFixed(2)}"/>`).join("");
+  return `<svg class="cover ${cls}" viewBox="0 0 400 225" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <rect width="400" height="225" fill="${sky}"/>${stars}
+    <circle cx="${mx}" cy="${my}" r="${mr}" fill="${glow}"/>
+    <path d="${ridge(150, 60, 7)}" fill="${far}"/>
+    <path d="${ridge(185, 45, 11)}" fill="${near}"/>
+    <path d="M0 205 H400 V225 H0Z" fill="${sky}" opacity=".9"/>
+  </svg>`;
+}
+
+// ---- generated art. The Worker paints a cover for each story and a
+// portrait for each character the first time one is asked for. Until the
+// picture exists it answers 202, the image fails to load, and the drawn
+// cover or the initial underneath stays in view while we ask again.
+
+const ART = new Map(); // src -> "ok" | "gone" | tries so far
+const ART_TRIES = 15, ART_WAIT = 6000;
+const coverArt = id => artImg(`/img/${id}/cover`);
+const portrait = c => c?.id && S.route ? artImg(`/img/${S.route}/char/${c.id}`) : "";
+function artImg(src) {
+  const st = ART.get(src);
+  if (st === "gone") return "";
+  return `<img class="gen ${st === "ok" ? "on" : ""}" src="${src}" alt="" data-art="${src}">`;
+}
+const artEls = src => document.querySelectorAll(`img[data-art="${CSS.escape(src)}"]`);
+document.addEventListener("load", e => {
+  const src = e.target?.dataset?.art;
+  if (!src) return;
+  ART.set(src, "ok");
+  artEls(src).forEach(img => { if (img.naturalWidth) img.classList.add("on"); });
+}, true);
+document.addEventListener("error", e => {
+  const src = e.target?.dataset?.art, st = src && ART.get(src);
+  if (!src || st === "ok" || st === "gone" || st === "wait") return;
+  const tries = (typeof st === "number" ? st : 0) + 1;
+  if (tries >= ART_TRIES) { ART.set(src, "gone"); artEls(src).forEach(img => img.remove()); return; }
+  ART.set(src, "wait");
+  setTimeout(() => { ART.set(src, tries); artEls(src).forEach(img => { img.src = `${src}?try=${tries}`; }); }, ART_WAIT);
+}, true);
+
 // ---- routing
 
 function go(hash) { if (location.hash !== hash) location.hash = hash; else route(); }
@@ -96,7 +173,7 @@ async function route() {
 
 function leaveCampaign() {
   S.es?.close();
-  Object.assign(S, { es: null, view: null, events: [], lastId: 0, draft: null, journal: null, map: null, panelOpen: false, composer: "", hint: {} });
+  Object.assign(S, { es: null, view: null, events: [], lastId: 0, draft: null, step: 0, journal: null, map: null, tab: "story", tray: "", composer: "", hint: {} });
 }
 
 // ---- sign in
@@ -104,16 +181,16 @@ function leaveCampaign() {
 function renderSignin(err = "") {
   app.innerHTML = `
   <div class="signin">
-    <form class="card stack" id="signin">
-      <div>
-        <h1>aidnd</h1>
-        <p>An AI game master for you and your friends.</p>
-      </div>
-      <label class="field"><span>Your name</span><input class="input" name="name" autocomplete="nickname" maxlength="40" required value="${esc(localName())}"></label>
-      <label class="field"><span>Play code</span><input class="input" name="code" type="password" autocomplete="current-password" required></label>
-      <div class="error">${esc(err)}</div>
-      <button class="btn primary block">Sign in</button>
-    </form>
+    <div class="signin-art">${cover("aidnd-sign-in")}<div class="signin-tag">Tell a story. Roll the dice.<br>Let the game master keep score.</div></div>
+    <div class="signin-side">
+      <form id="signin" class="signin-form">
+        <div class="signin-head">${ICON.logo}<h1>aidnd</h1><p>An AI game master for you and your friends.</p></div>
+        <label class="field"><span>Your name</span><input class="input" name="name" autocomplete="nickname" maxlength="40" required value="${esc(localName())}"></label>
+        <label class="field"><span>Play code</span><input class="input" name="code" type="password" autocomplete="current-password" required></label>
+        <div class="error">${esc(err)}</div>
+        <button class="btn primary block">Sign in</button>
+      </form>
+    </div>
   </div>`;
   $("#signin").onsubmit = async e => {
     e.preventDefault();
@@ -134,40 +211,48 @@ function localName() { try { return localStorage.getItem("aidnd-name") || ""; } 
 
 // ---- home
 
+function topbar(inner) { return `<header class="topbar">${inner}</header>`; }
+
 async function renderHome() {
   app.innerHTML = `
   <div class="page">
-    <header class="topbar">
-      <div class="titles"><span class="brand">ai<b>dnd</b></span></div>
-      <button class="btn small ghost" data-act="signout">Sign out</button>
-    </header>
-    <main class="wrap stack">
-      <div class="hero"><h2>Welcome back, ${esc(S.me.name)}.</h2><p>Pick up a story, join a friend's table, or start something new.</p></div>
-      <div id="lists" class="stack"><div class="muted">Loading your stories…</div></div>
-      <section class="card stack" id="new">
-        <p class="eyebrow">Start a new story</p>
-        <textarea class="textarea serif" id="premise" rows="3" placeholder="What is this story about? A place, a mood, a mystery…"></textarea>
-        <div class="chips">${PREMISES.map(p => `<button class="chip" data-premise="${esc(p)}">${esc(p)}</button>`).join("")}</div>
-        <div class="row spread"><span class="muted" style="font-size:13px">The game master writes the world. This takes about a minute.</span>
-          <button class="btn primary" data-act="create">Create story</button></div>
-      </section>
+    ${topbar(`<span class="brand">${ICON.logo}aidnd</span><span class="grow"></span>
+      <button class="me-btn" data-act="signout" title="Sign out">${esc(S.me.name)}<span class="avatar sm">${esc(S.me.name[0] || "?")}</span></button>`)}
+    <main class="wrap wide-wrap">
+      <div class="hero"><h2>Your table</h2><p>Pick up a story, join a friend's, or start a new one.</p></div>
+      ${S.composing ? newStoryHTML() : ""}
+      <div id="lists"><div class="shelf">${`<div class="story-card skeleton"></div>`.repeat(2)}</div></div>
     </main>
   </div>`;
+  if (S.composing) $("#premise")?.focus();
   try {
     const [mine, all] = await Promise.all([api("GET", "/me/campaigns"), api("GET", "/campaigns")]);
     if (S.route) return;
     const mineIds = new Set(mine.campaigns.map(c => c.id));
     const open = all.campaigns.filter(c => c.status === "lobby" && !mineIds.has(c.id) && c.players < c.max_players);
-    const card = c => `<button class="game-card" data-open="${esc(c.id)}">
-        <div class="row spread"><h3>${esc(c.title)}</h3>${statusPill(c.status)}</div>
-        ${c.pitch ? `<p>${esc(c.pitch)}</p>` : ""}
-        <span class="muted" style="font-size:12.5px">${c.players}/${c.max_players} players · ${ago(c.updated_at)}</span>
-      </button>`;
+    const newTile = S.composing ? "" : `<button class="story-card new-tile" data-act="compose"><span class="plus">${ICON.plus}</span><b>New story</b><span>The game master writes the world in about a minute.</span></button>`;
     $("#lists").innerHTML = `
-      ${mine.campaigns.length ? `<section class="stack"><p class="eyebrow">Your stories</p>${mine.campaigns.map(card).join("")}</section>` : ""}
-      ${open.length ? `<section class="stack"><p class="eyebrow">Open tables</p>${open.map(card).join("")}</section>` : ""}
-      ${!mine.campaigns.length && !open.length ? `<div class="muted">No stories yet. Start one below.</div>` : ""}`;
+      <section class="section"><div class="section-head"><h2>Your stories</h2><span class="count">${mine.campaigns.length}</span></div>
+        <div class="shelf">${newTile}${mine.campaigns.map(storyCard).join("")}</div></section>
+      ${open.length ? `<section class="section"><div class="section-head"><h2>Open tables</h2><span class="count">${open.length}</span></div><div class="shelf">${open.map(storyCard).join("")}</div></section>` : ""}`;
   } catch (e) { $("#lists").innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+}
+
+function storyCard(c) {
+  return `<button class="story-card" data-open="${esc(c.id)}">
+    <div class="art">${cover(c.id)}${coverArt(c.id)}${statusPill(c.status)}</div>
+    <div class="body"><h3>${esc(c.title)}</h3>${c.pitch ? `<p>${esc(c.pitch)}</p>` : ""}
+      <div class="meta"><span>${c.players}/${c.max_players} players</span><span>${ago(c.updated_at)}</span></div></div>
+  </button>`;
+}
+
+function newStoryHTML() {
+  return `<section class="compose" id="new">
+    <div class="compose-head"><h3>New story</h3><button class="icon-btn" data-act="compose-close" aria-label="Close">${ICON.close}</button></div>
+    <textarea class="textarea" id="premise" rows="3" placeholder="What is this story about? A place, a mood, a mystery…"></textarea>
+    <div class="chips">${PREMISES.map(p => `<button class="chip" data-premise="${esc(p)}">${esc(p)}</button>`).join("")}</div>
+    <div class="compose-foot"><span class="muted">Takes about a minute.</span><button class="btn primary" data-act="create">Create story</button></div>
+  </section>`;
 }
 
 function statusPill(s) {
@@ -185,11 +270,12 @@ async function createCampaign() {
   const premise = $("#premise").value.trim();
   if (!premise) { $("#premise").focus(); return toast("Write a line about the story first."); }
   const started = Date.now();
-  $("#new").innerHTML = `<div class="writing">${ICON.quill}<h3>Writing your world…</h3><p class="muted"><span id="elapsed">0</span>s · places, people, secrets</p></div>`;
+  $("#new").innerHTML = `<div class="writing"><span class="dots"><i></i><i></i><i></i></span><h3>Writing your world</h3><p class="muted"><span id="elapsed">0</span>s · places, people, secrets</p></div>`;
   const t = setInterval(() => { const el = $("#elapsed"); if (el) el.textContent = Math.round((Date.now() - started) / 1000); }, 1000);
   try {
     const c = await api("POST", "/campaigns", { premise });
     await api("POST", `/campaigns/${c.id}/players`, { name: S.me.name });
+    S.composing = false;
     go(`#/c/${c.id}`);
   } catch (e) { toast(e.message); renderHome(); }
   finally { clearInterval(t); }
@@ -198,11 +284,11 @@ async function createCampaign() {
 // ---- campaign
 
 async function openCampaign(id) {
-  if (!S.view) app.innerHTML = `<div class="signin"><span class="spinner muted"></span></div>`;
+  if (!S.view) app.innerHTML = `<div class="center-msg"><span class="spinner muted"></span></div>`;
   try {
     S.view = await api("GET", `/campaigns/${id}`);
   } catch (e) {
-    app.innerHTML = `<div class="signin"><div class="card stack"><div class="error">${esc(e.message)}</div><button class="btn" onclick="location.hash='#/'">Back home</button></div></div>`;
+    app.innerHTML = `<div class="center-msg"><div class="card stack"><div class="error">${esc(e.message)}</div><button class="btn" onclick="location.hash='#/'">Back home</button></div></div>`;
     return;
   }
   if (!S.meta) api("GET", "/meta").then(m => { S.meta = m; if (S.view?.status === "lobby") render(); }).catch(() => {});
@@ -255,66 +341,65 @@ function mine() {
 function renderSetup(soft) {
   const v = S.view, me = mine();
   if (soft && S.draft) {
-    // Keep the editor as it is; only the party list changes.
-    const p = $("#party"); if (p) p.innerHTML = partyRows();
+    // Keep the builder as it is; only the party row changes.
+    const p = $("#party"); if (p) p.innerHTML = partyRow();
     return;
   }
   const allReady = v.players.length > 0 && v.players.every(p => p.character_id);
   app.innerHTML = `
-  <div class="page">
-    <header class="topbar">
-      <button class="icon-btn" data-act="home" aria-label="Back">${ICON.back}</button>
-      <div class="titles"><h1>${esc(v.title)}</h1><div class="sub">Gathering the party</div></div>
-    </header>
-    <main class="wrap stack">
-      <section class="card stack">
-        <p class="eyebrow">The story</p>
-        <p class="pitch">${esc(v.pitch || v.premise)}</p>
+  <div class="page setup">
+    <div class="setup-hero">${cover(S.route, "hero-art")}${coverArt(S.route)}
+      <button class="icon-btn on-art" data-act="home" aria-label="Back">${ICON.back}</button>
+      <div class="setup-title"><span class="pill">Gathering the party</span><h1>${esc(v.title)}</h1></div>
+    </div>
+    <main class="wrap">
+      <p class="pitch">${esc(v.pitch || v.premise)}</p>
+      <section class="section">
+        <div class="section-head"><h2>Party</h2><span class="count">${v.players.length}/${v.max_players}</span></div>
+        <div class="party-row" id="party">${partyRow()}</div>
+        ${!v.you?.joined ? `<button class="btn primary block" data-act="join">Join as ${esc(S.me.name)}</button>` : ""}
       </section>
-      <section class="card stack">
-        <div class="row spread"><p class="eyebrow" style="margin:0">Party</p><span class="muted" style="font-size:13px">${v.players.length}/${v.max_players} seats</span></div>
-        <div class="party-list" id="party">${partyRows()}</div>
-        ${!v.you?.joined ? `<button class="btn primary" data-act="join">Join as ${esc(S.me.name)}</button>` : ""}
-      </section>
-      ${v.you?.joined ? (S.draft ? editorHTML() : me ? readyHTML(me) : conceptHTML()) : ""}
-      ${v.you?.joined ? `<section class="stack">
-        <button class="btn primary block" data-act="start" ${allReady ? "" : "disabled"}>Begin the story</button>
-        <span class="muted" style="font-size:13px;text-align:center">${allReady ? "Everyone is ready. Anyone at the table can begin." : "Starts once every player has a character. Friends can join with the same play code."}</span>
-      </section>` : ""}
+      ${v.you?.joined ? (S.draft ? builderHTML() : me ? readyHTML(me) : conceptHTML()) : ""}
     </main>
+    ${v.you?.joined && !S.draft ? `<div class="start-bar"><div class="start-inner">
+      <span class="muted">${allReady ? "Everyone is ready." : "Waiting for every player to make a character."}</span>
+      <button class="btn primary" data-act="start" ${allReady ? "" : "disabled"}>Begin the story</button></div></div>` : ""}
   </div>`;
-  wireEditor();
+  wireBuilder();
 }
 
-function partyRows() {
+function partyRow() {
   const v = S.view;
-  if (!v.players.length) return `<div class="muted">No one has joined yet.</div>`;
-  return v.players.map(p => {
+  const seats = Array.from({ length: v.max_players }, (_, i) => v.players[i]);
+  return seats.map(p => {
+    if (!p) return `<div class="seat empty"><div class="avatar lg">+</div><b>Open seat</b><span>Share the play code</span></div>`;
     const c = v.party.find(x => x.id === p.character_id);
-    return `<div class="party-row"><div class="avatar">${esc((c?.name || p.name)[0] || "?")}</div>
-      <div class="who"><b>${esc(c ? c.name : p.name)}</b><span>${c ? `${esc(c.class)} · played by ${esc(p.name)}` : `${esc(p.name)} is making a character…`}</span></div>
-      ${c ? `<span class="pill accent">Ready</span>` : `<span class="pill">Not ready</span>`}</div>`;
+    return `<div class="seat ${c ? "ready" : ""}"><div class="avatar lg">${esc((c?.name || p.name)[0] || "?")}${portrait(c)}</div>
+      <b>${esc(c ? c.name : p.name)}</b><span>${c ? esc(c.class) : "Making a character…"}</span></div>`;
   }).join("");
 }
 
 function conceptHTML() {
   const pick = CONCEPTS[Math.floor(Math.random() * CONCEPTS.length)];
-  return `<section class="card stack">
-    <p class="eyebrow">Your character</p>
-    <label class="field"><span>Who are you?</span>
-      <textarea class="textarea serif" id="concept" rows="3" placeholder="e.g. ${esc(pick)}"></textarea></label>
-    <span class="muted" style="font-size:13px">Describe them in a sentence: age, trade, a flaw, a want. The game master drafts a sheet you can change.</span>
-    <button class="btn primary" data-act="draft">Draft my character</button>
+  return `<section class="section">
+    <div class="section-head"><h2>Your character</h2></div>
+    <div class="panel-card stack">
+      <label class="field"><span>Describe them in a sentence</span>
+        <textarea class="textarea" id="concept" rows="3" placeholder="e.g. ${esc(pick)}"></textarea></label>
+      <span class="muted small">Age, trade, a flaw, a want. The game master drafts a sheet you can change.</span>
+      <button class="btn primary" data-act="draft">Draft my character</button>
+    </div>
   </section>`;
 }
 
 function readyHTML(c) {
-  return `<section class="card stack">
-    <div class="row spread"><p class="eyebrow" style="margin:0">Your character</p><button class="btn small" data-act="edit">Edit</button></div>
-    <div class="row" style="gap:14px"><div class="avatar" style="width:48px;height:48px;font-size:20px">${esc(c.name[0])}</div>
-      <div><div class="serif" style="font-size:20px;font-weight:600">${esc(c.name)}</div>
-      <div class="muted" style="font-size:13px">${esc(c.class)} · ${esc(c.pronouns || "they/them")} · ${esc(kitName(c.kit))}</div></div></div>
-    ${c.backstory ? `<p class="serif" style="margin:0;color:var(--text-2)">${esc(c.backstory)}</p>` : ""}
+  return `<section class="section">
+    <div class="section-head"><h2>Your character</h2><button class="btn small" data-act="edit">Edit</button></div>
+    <div class="panel-card char-card">
+      <div class="avatar xl">${esc(c.name[0])}${portrait(c)}</div>
+      <div class="grow"><h3>${esc(c.name)}</h3><div class="muted small">${esc(c.class)} · ${esc(c.pronouns || "they/them")} · ${esc(kitName(c.kit))}</div>
+      ${c.backstory ? `<p class="muted">${esc(c.backstory)}</p>` : ""}</div>
+    </div>
   </section>`;
 }
 
@@ -324,44 +409,57 @@ const ABIL_NAME = { STR: "Strength", DEX: "Dexterity", CON: "Constitution", INT:
 const mod = n => Math.floor((n - 10) / 2);
 const signed = n => (n >= 0 ? "+" : "") + n;
 
-function editorHTML() {
-  const d = S.draft, arr = S.meta?.standard_array || [15, 14, 13, 12, 10, 8];
-  const kits = S.meta?.kits || [];
-  return `<section class="card stack" id="editor">
-    <p class="eyebrow">Your character</p>
-    <div class="grid2">
-      <label class="field"><span>Name</span><input class="input" id="d-name" value="${esc(d.name)}" maxlength="40"></label>
-      <label class="field"><span>Pronouns</span><input class="input" id="d-pron" value="${esc(d.pronouns || "they/them")}" maxlength="20"></label>
-    </div>
-    <label class="field"><span>Calling</span><input class="input" id="d-class" value="${esc(d.class)}" placeholder="Private eye, occultist, boxer…"></label>
-    <div class="field"><span>Kit</span>
-      <div class="kits">${kits.map(k => `<button class="kit ${k.key === d.kit ? "on" : ""}" data-kit="${esc(k.key)}"><b>${esc(k.name)}</b><span>${esc(k.desc)}</span></button>`).join("")}</div></div>
-    <div class="field"><span>Abilities <span style="text-transform:none;letter-spacing:0;font-weight:500">· pick values, star two strengths</span></span>
+// The builder walks through four steps; every step edits the same draft.
+const STEPS = ["Who", "Kit", "Abilities", "Story"];
+
+function builderHTML() {
+  const d = S.draft, i = S.step;
+  const body = [
+    () => `<div class="grid2">
+        <label class="field"><span>Name</span><input class="input" id="d-name" value="${esc(d.name)}" maxlength="40"></label>
+        <label class="field"><span>Pronouns</span><input class="input" id="d-pron" value="${esc(d.pronouns || "they/them")}" maxlength="20"></label>
+      </div>
+      <label class="field"><span>Calling</span><input class="input" id="d-class" value="${esc(d.class)}" placeholder="Private eye, occultist, boxer…"></label>`,
+    () => `<div class="kits">${(S.meta?.kits || []).map(k => `<button class="kit ${k.key === d.kit ? "on" : ""}" data-kit="${esc(k.key)}"><b>${esc(k.name)}</b><span>${esc(k.desc)}</span></button>`).join("")}</div>`,
+    () => {
+      const arr = S.meta?.standard_array || [15, 14, 13, 12, 10, 8];
+      return `<p class="muted small">Pick a value for each, then star your two strengths.</p>
       <div class="abilities">${ABIL.map(a => {
         const v = d.scores?.[a] ?? 10, prof = (d.proficient || []).includes(a);
         return `<div class="ability ${prof ? "is-prof" : ""}" title="${ABIL_NAME[a]}">
           <button class="prof" data-prof="${a}" aria-label="Proficient in ${ABIL_NAME[a]}">${prof ? "★" : "☆"}</button>
-          <div class="name">${a}</div>
+          <div class="name">${ABIL_NAME[a]}</div>
           <select data-ab="${a}" aria-label="${ABIL_NAME[a]}">${arr.map(x => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("")}</select>
           <div class="mod">${signed(mod(v))}</div></div>`;
-      }).join("")}</div></div>
-    <label class="field"><span>Backstory</span><textarea class="textarea serif" id="d-back" rows="4">${esc(d.backstory)}</textarea></label>
-    <div class="error" id="d-err"></div>
-    <div class="row spread">
-      <button class="btn ghost" data-act="cancel-draft">Cancel</button>
-      <button class="btn primary" data-act="save-char">Save character</button>
+      }).join("")}</div>`;
+    },
+    () => `<label class="field"><span>Backstory</span><textarea class="textarea" id="d-back" rows="6">${esc(d.backstory)}</textarea></label>`,
+  ][i]();
+  return `<section class="section builder" id="editor">
+    <div class="steps">${STEPS.map((s, n) => `<button class="step ${n === i ? "on" : n < i ? "done" : ""}" data-step="${n}"><i></i><span>${s}</span></button>`).join("")}</div>
+    <div class="panel-card stack">
+      <h3>${["Who are they?", "Pick a kit", "Set abilities", "Their story"][i]}</h3>
+      ${body}
+      <div class="error" id="d-err"></div>
+    </div>
+    <div class="builder-foot">
+      <button class="btn ghost" data-act="${i === 0 ? "cancel-draft" : "step-back"}">${i === 0 ? "Cancel" : "Back"}</button>
+      <span class="muted small">${i + 1} of ${STEPS.length}</span>
+      ${i < STEPS.length - 1 ? `<button class="btn primary" data-act="step-next">Next</button>` : `<button class="btn primary" data-act="save-char">Save character</button>`}
     </div>
   </section>`;
 }
 
 function readEditor() {
   const d = S.draft;
-  if (!$("#editor")) return d;
-  d.name = $("#d-name").value; d.pronouns = $("#d-pron").value; d.class = $("#d-class").value; d.backstory = $("#d-back").value;
+  if (!d) return d;
+  const val = id => $(id)?.value;
+  if ($("#d-name")) { d.name = val("#d-name"); d.pronouns = val("#d-pron"); d.class = val("#d-class"); }
+  if ($("#d-back")) d.backstory = val("#d-back");
   return d;
 }
 
-function wireEditor() {
+function wireBuilder() {
   document.querySelectorAll("[data-ab]").forEach(sel => sel.onchange = () => {
     const d = readEditor(), a = sel.dataset.ab, nv = +sel.value, old = d.scores[a];
     // Keep the standard array a permutation: swap with whoever had the value.
@@ -373,37 +471,81 @@ function wireEditor() {
 }
 
 // ---- play
+//
+// Phones get one view at a time with a bottom nav (story, scene, you,
+// journal, map). Wide screens show the party rail, the story and a side
+// column together.
 
 function renderPlay() {
-  const v = S.view;
   app.innerHTML = `
-  <div class="play">
-    <header class="topbar" id="chrome"></header>
-    <div class="play-main">
-      <div class="feed-scroll" id="scroll"><div class="feed" id="feed"></div></div>
-      <aside class="panel" id="panel" ${S.panelOpen ? "" : "data-docked"}></aside>
+  <div class="play" data-view="${S.tab}">
+    <header class="hud" id="hud"></header>
+    <div class="play-body">
+      <aside class="rail" id="rail"></aside>
+      <section class="story">
+        <div class="scene-bar" id="scene-bar"></div>
+        <div class="feed-scroll" id="scroll"><div class="feed" id="feed"></div></div>
+        <footer class="dock" id="dock"></footer>
+      </section>
+      <aside class="side" id="side"></aside>
     </div>
-    <footer class="composer" id="composer"></footer>
-  </div>
-  ${S.panelOpen ? `<div class="panel-backdrop" data-act="close-panel"></div>` : ""}`;
+    <nav class="bottom-nav" id="nav"></nav>
+  </div>`;
   renderChrome();
   renderFeed(true);
 }
 
 function renderChrome() {
+  if (!$("#hud")) return;
+  renderHud(); renderRail(); renderSceneBar(); renderDock(); renderSide(); renderNav();
+}
+
+function renderHud() {
   const v = S.view, me = mine();
-  const loc = v.location;
-  const chrome = $("#chrome");
-  if (!chrome) return;
-  chrome.innerHTML = `
+  $("#hud").innerHTML = `
     <button class="icon-btn" data-act="home" aria-label="Back">${ICON.back}</button>
-    <div class="titles"><h1>${esc(v.title)}</h1>
-      <div class="sub">${esc(loc?.name || "")}${v.scene ? ` · Day ${v.scene.day}, ${esc(v.scene.time)}` : ""}${v.encounter ? ` · <span style="color:var(--bad)">Combat, round ${v.encounter.round}</span>` : ""}</div></div>
-    <button class="icon-btn hide-wide" data-panel="scene" aria-label="Scene">${ICON.scene}</button>
-    <button class="icon-btn hide-wide" data-panel="journal" aria-label="Journal">${ICON.book}</button>
-    ${me ? `<button class="pill ${me.hp <= me.max_hp / 3 ? "bad" : ""}" data-panel="you" style="cursor:pointer">♥ ${me.hp}/${me.max_hp}</button>` : ""}`;
-  renderComposer();
-  renderPanel();
+    <div class="titles"><h1>${esc(v.title)}</h1><div class="sub">${v.scene ? `Day ${v.scene.day} · ${esc(v.scene.time)}` : ""}</div></div>
+    <div class="party-mini">${v.party.map(c => `<button class="mini ${v.active?.character_id === c.id ? "acting" : ""} ${c.down ? "down" : ""}" data-tab="you" title="${esc(c.name)} ${c.hp}/${c.max_hp}">
+      <span class="avatar sm">${esc(c.name[0])}${portrait(c)}</span>${ring(c.hp, c.max_hp)}</button>`).join("")}</div>
+    ${me ? `<span class="hp ${me.hp <= me.max_hp / 3 ? "low" : ""}">${ICON.heart}${me.hp}<small>/${me.max_hp}</small></span>` : ""}`;
+}
+
+function ring(hp, max) {
+  const p = Math.max(0, Math.min(1, hp / max)), c = 2 * Math.PI * 17;
+  return `<svg class="ring ${p <= .34 ? "low" : ""}" viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/><circle class="fill" cx="20" cy="20" r="17" stroke-dasharray="${(c * p).toFixed(1)} ${c.toFixed(1)}"/></svg>`;
+}
+
+function renderRail() {
+  const v = S.view, me = mine();
+  $("#rail").innerHTML = `
+    <p class="rail-title">Party</p>
+    ${v.party.map(c => `<div class="member ${v.active?.character_id === c.id ? "acting" : ""} ${c.id === me?.id ? "me" : ""}">
+      <div class="avatar">${esc(c.name[0])}${portrait(c)}</div>
+      <div class="grow"><b>${esc(c.name)}${c.id === me?.id ? ` <span class="muted">(you)</span>` : ""}</b><span>${esc(c.class)} · lvl ${c.level ?? 1}</span>${hpbar(c.hp, c.max_hp)}</div>
+      <span class="num">${c.hp}</span></div>`).join("")}
+    ${v.encounter ? `<p class="rail-title">Enemies · round ${v.encounter.round}</p>${v.encounter.enemies.map(e => `<div class="member foe ${e.hp <= 0 ? "down" : ""}"><div class="avatar">${esc(e.display[0])}</div>
+      <div class="grow"><b>${esc(e.display)}</b>${e.hp > 0 ? hpbar(e.hp, e.max_hp) : "<span>Defeated</span>"}</div><span class="num">${Math.max(0, e.hp)}</span></div>`).join("")}` : ""}`;
+}
+
+function renderSceneBar() {
+  const v = S.view, l = v.location || {};
+  $("#scene-bar").innerHTML = `
+    <div class="where"><span class="label">${v.encounter ? `<b class="combat">Combat · round ${v.encounter.round}</b>` : "You are in"}</span><h2>${esc(l.name || "")}</h2></div>
+    <button class="chip" data-tab="scene">${(l.npcs?.length || 0) + (l.items?.length || 0)} here · ${l.exits?.length || 0} ways out</button>`;
+}
+
+function renderNav() {
+  const tabs = [["story", "Story", ICON.story], ["scene", "Scene", ICON.scene], ["you", "You", ICON.you], ["journal", "Journal", ICON.book], ["map", "Map", ICON.map]];
+  $("#nav").innerHTML = tabs.map(([k, l, ic]) => `<button class="nav-item ${S.tab === k ? "on" : ""}" data-tab="${k}">${ic}<span>${l}</span></button>`).join("");
+}
+
+function renderSide() {
+  const el = $("#side");
+  if (!el) return;
+  const key = wide() ? S.panel : (S.tab === "story" ? S.panel : S.tab);
+  const tabs = [["scene", "Scene"], ["you", "You"], ["journal", "Journal"], ["map", "Map"]];
+  el.innerHTML = `<div class="side-tabs">${tabs.map(([k, l]) => `<button class="tab ${key === k ? "on" : ""}" data-panel="${k}">${l}</button>`).join("")}</div>
+    <div class="side-body">${({ scene: sceneHTML, you: youHTML, journal: journalHTML, map: mapHTML })[key]()}</div>`;
 }
 
 // feed
@@ -415,7 +557,9 @@ function renderFeed(force) {
   const feed = $("#feed");
   if (!feed) { if (S.view?.status === "lobby") renderSetup(true); return; }
   const stick = force || nearBottom();
-  feed.innerHTML = currentEvents(S.events).map(eventHTML).join("") + (isThinking() ? `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>The story unfolds…</div>` : "");
+  const evs = currentEvents(S.events);
+  const lastNarr = evs.map(e => e.type).lastIndexOf("narration");
+  feed.innerHTML = evs.map((e, i) => eventHTML(e, i === lastNarr)).join("") + (isThinking() ? `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>The game master is writing…</div>` : "");
   if (stick) requestAnimationFrame(toBottom);
 }
 
@@ -442,84 +586,90 @@ function rollHTML(r) {
   if (r.kind === "encounter") return "";
   const tier = r.tier || "";
   if (r.kind === "damage" || r.kind === "heal") {
-    return `<span class="roll" title="${esc(r.expr)} [${(r.dice || []).join(", ")}]"><span class="die">${r.total}</span>${esc(r.label || r.kind)}</span>`;
+    return `<div class="die-card ${r.kind}" title="${esc(r.expr)} [${(r.dice || []).join(", ")}]"><span class="face">${r.total}</span><span class="what">${esc(r.label || r.kind)}<small>${esc(r.expr || "")}</small></span></div>`;
   }
-  const crit = tier === "critical_success" ? " · critical!" : tier === "critical_failure" ? " · fumble" : "";
-  return `<span class="roll ${esc(tier)}" title="d20 ${r.natural} ${signed(r.mod)} = ${r.total} vs ${r.target}"><span class="die">${r.total}</span>${esc(r.label)} <span class="muted">vs ${r.target}${crit}</span></span>`;
+  const word = { critical_success: "Critical!", success: "Success", failure: "Miss", critical_failure: "Fumble" }[tier] || "";
+  return `<div class="die-card ${esc(tier)}" title="d20 ${r.natural} ${signed(r.mod)} = ${r.total} vs ${r.target}"><span class="face d20">${r.total}</span>
+    <span class="what">${esc(r.label)}<small>d20 ${r.natural} ${signed(r.mod)} vs ${r.target}${word ? ` · ${word}` : ""}</small></span></div>`;
 }
 
-function eventHTML(e) {
+function eventHTML(e, latest) {
   const d = e.data || {}, me = mine();
   switch (e.type) {
     case "player_action": {
       const you = me && d.character_id === me.id;
-      return `<div class="ev-you ${you ? "" : "ev-other"}"><div class="bubble"><span class="by">${esc(you ? "You" : d.character)}</span>${esc(d.text)}</div></div>`;
+      return `<div class="ev-act ${you ? "you" : ""}"><span class="avatar sm">${esc((you ? me.name : d.character || "?")[0])}${portrait(S.view?.party?.find(p => p.id === d.character_id))}</span><div><span class="by">${esc(you ? "You" : d.character)}</span><p>${esc(d.text)}</p></div></div>`;
     }
     case "action_resolved": {
       let h = "";
       const rolls = (d.steps || []).flatMap(s => s.rolls || []).map(rollHTML).join("");
       if (rolls) h += `<div class="rolls">${rolls}</div>`;
       const notes = [];
-      (d.steps || []).forEach(s => { if (s.error) notes.push(`<div class="ev-note bad"><span class="ic">✕</span>${esc(s.error)}</div>`); });
-      (d.skipped || []).forEach(s => notes.push(`<div class="ev-note"><span class="ic">⤼</span>Not this turn: ${esc(s.error)}</div>`));
+      (d.steps || []).forEach(s => { if (s.error) notes.push(`<div class="ev-note bad">${esc(s.error)}</div>`); });
+      (d.skipped || []).forEach(s => notes.push(`<div class="ev-note">Not this turn: ${esc(s.error)}</div>`));
       const changes = (d.steps || []).flatMap(s => s.changes || []).concat(d.world_changes || []);
-      if (changes.length) h += `<div class="changes">${changes.map(c => `<div>${esc(c)}</div>`).join("")}</div>`;
+      if (changes.length) h += `<ul class="changes">${changes.map(c => `<li>${esc(c)}</li>`).join("")}</ul>`;
       return h + notes.join("");
     }
     case "narration":
       if (d.skip && !d.text) return "";
-      return `<p class="ev-narr ${d.quick ? "quick" : ""} ${d.opening ? "opening" : ""}">${esc(d.text)}</p>`;
+      return `<p class="ev-narr ${d.quick ? "quick" : ""} ${d.opening ? "opening" : ""} ${latest ? "latest" : ""}">${esc(d.text)}</p>`;
     case "enemy_turns": {
       const rolls = (d.turns || []).map(t => t.attack?.roll ? rollHTML({ ...t.attack.roll, label: t.attack.roll.label || t.enemy }) : "").join("");
-      return `${rolls ? `<div class="rolls">${rolls}</div>` : ""}${d.narration ? `<p class="ev-narr">${esc(d.narration)}</p>` : ""}`;
+      return `${rolls ? `<div class="rolls foe">${rolls}</div>` : ""}${d.narration ? `<p class="ev-narr">${esc(d.narration)}</p>` : ""}`;
     }
-    case "quest_updated": return `<div class="ev-note quest"><span class="ic">✦</span>${esc(d.text || d.title)}</div>`;
-    case "location_changed": return `<div class="ev-sys">${esc(d.name)}</div>`;
-    case "turn_started": return me && d.character_id === me.id ? `<div class="ev-sys">Your turn</div>` : `<div class="ev-sys">${esc(d.name)}'s turn</div>`;
-    case "campaign_ended": return `<div class="ev-sys">${d.status === "completed" ? "The story is complete" : "The story ends in failure"}</div>`;
-    case "character_created": return `<div class="ev-note"><span class="ic">+</span>${esc(d.name)} the ${esc(d.class)} joins the party</div>`;
+    case "quest_updated": return `<div class="ev-quest"><span>Quest</span>${esc(d.text || d.title)}</div>`;
+    case "location_changed": return `<div class="ev-place">${esc(d.name)}</div>`;
+    case "turn_started": return `<div class="ev-sys">${me && d.character_id === me.id ? "Your turn" : `${esc(d.name)}'s turn`}</div>`;
+    case "campaign_ended": return `<div class="ev-place">${d.status === "completed" ? "The story is complete" : "The story ends in failure"}</div>`;
+    case "character_created": return `<div class="ev-note">${esc(d.name)} the ${esc(d.class)} joins the party</div>`;
     default: return "";
   }
 }
 
-// composer
+// dock: grouped actions above the free-text box
 
-function suggestions() {
-  const v = S.view, loc = v.location || {}, me = mine(), out = [];
-  if (!v.you?.your_turn) return out;
-  for (const e of v.encounter?.enemies || []) if (e.hp > 0) out.push({ label: `Attack ${e.display}`, text: `I attack ${e.display}`, hint: { target_id: e.id } });
-  if (!v.encounter) out.push({ label: "Look around", text: "I look around carefully" });
-  for (const n of loc.npcs || []) if (n.alive !== false && !v.encounter) out.push({ label: `Talk to ${n.name}`, text: `I talk to ${n.name}: `, hint: { target_id: n.id } });
-  for (const i of loc.items || []) out.push({ label: `Take ${i.name}`, text: `I pick up the ${i.name}` });
-  for (const x of loc.exits || []) if (x.state === "open") out.push({ label: `Go to ${x.to_name}`, text: v.encounter ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}` });
-  if (me && me.hp < me.max_hp && !v.encounter) out.push({ label: "Rest", text: "I rest for a while" });
-  return out.slice(0, 10);
+function actionGroups() {
+  const v = S.view, loc = v.location || {}, me = mine(), enc = !!v.encounter;
+  const g = { look: [], talk: [], go: [], fight: [], use: [] };
+  if (!enc) g.look.push({ label: "Look around", text: "I look around carefully" });
+  for (const n of loc.npcs || []) if (n.alive !== false && !enc) g.talk.push({ label: n.name, sub: n.role, text: `I talk to ${n.name}: `, hint: { target_id: n.id } });
+  for (const x of loc.exits || []) if (x.state === "open") g.go.push({ label: x.to_name, sub: x.explored ? "explored" : "unexplored", text: enc ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}` });
+  for (const z of loc.zones || []) if (me && z.id !== me.zone_id) g.go.push({ label: z.name, sub: "move within", text: `I move to ${z.name}`, hint: { zone_id: z.id } });
+  for (const e of v.encounter?.enemies || []) if (e.hp > 0) g.fight.push({ label: e.display, sub: `${e.hp}/${e.max_hp} HP`, text: `I attack ${e.display}`, hint: { target_id: e.id } });
+  for (const i of loc.items || []) g.use.push({ label: `Take ${i.name}`, sub: i.effect, text: `I pick up the ${i.name}` });
+  for (const i of me?.inventory || []) if (i.kind === "consumable") g.use.push({ label: i.name, sub: i.effect, text: `I use the ${i.name}` });
+  if (me && me.hp < me.max_hp && !enc) g.use.push({ label: "Rest", sub: "recover", text: "I rest for a while" });
+  return g;
 }
 
-function renderComposer() {
-  const v = S.view, el = $("#composer");
+function renderDock() {
+  const v = S.view, el = $("#dock");
   if (!el) return;
   const ended = v.status === "completed" || v.status === "failed";
   if (ended) {
-    el.innerHTML = `<div class="composer-inner"><div class="turnline"><span class="grow">${v.status === "completed" ? "The story is complete." : "The story has ended."}</span><button class="btn small" data-act="home">Back home</button></div></div>`;
+    el.innerHTML = `<div class="dock-inner"><div class="turn"><span class="grow">${v.status === "completed" ? "The story is complete." : "The story has ended."}</span><button class="btn small" data-act="home">Back home</button></div></div>`;
     return;
   }
   const yours = !!v.you?.your_turn, b = v.budget || {};
-  const slot = (name, n) => `<span class="slot ${n === 0 ? "spent" : ""}">${name}${n > 1 ? " " + n : ""}</span>`;
+  const pip = (name, n) => `<span class="pip ${n === 0 ? "spent" : ""}">${name}</span>`;
   const idle = v.turn_started ? Date.now() / 1000 - v.turn_started : 0;
-  const turn = yours
-    ? `<span class="you">Your turn</span><span class="grow"></span><span class="budget">${slot("Action", b.action)}${slot("Move", b.move)}${b.free === -1 ? "" : slot("Free", b.free)}</span>`
-    : `<span class="grow">${v.active ? `Waiting for <b>${esc(v.active.name)}</b>…` : ""}</span>${v.you?.joined && idle > 120 ? `<button class="btn small ghost" data-act="skip">Skip their turn</button>` : ""}`;
-  const sug = suggestions();
+  const groups = actionGroups();
+  if (S.tray && !groups[S.tray]?.length) S.tray = "";
+  const btn = (k, label, ic) => groups[k].length || k === "end" ? `<button class="act ${S.tray === k ? "on" : ""}" data-group="${k}" ${yours ? "" : "disabled"}>${ic}<span>${label}</span></button>` : "";
   const kept = $("#say")?.value ?? S.composer;
-  el.innerHTML = `<div class="composer-inner">
-    <div class="turnline">${turn}</div>
-    ${sug.length ? `<div class="suggest">${sug.map((s, i) => `<button class="chip" data-sug="${i}">${esc(s.label)}</button>`).join("")}${yours ? `<button class="chip" data-act="end-turn">End turn</button>` : ""}</div>` : ""}
+  el._groups = groups;
+  el.innerHTML = `<div class="dock-inner">
+    <div class="turn">${yours
+      ? `<span class="you">Your turn</span><span class="grow"></span>${pip("Action", b.action)}${pip("Move", b.move)}${b.free === -1 ? "" : pip("Free", b.free)}`
+      : `<span class="grow">${v.active ? `Waiting for <b>${esc(v.active.name)}</b>` : ""}</span>${v.you?.joined && idle > 120 ? `<button class="btn small" data-act="skip">Skip their turn</button>` : ""}`}</div>
+    ${S.tray ? `<div class="tray">${groups[S.tray].map((o, i) => `<button class="opt" data-opt="${i}"><b>${esc(o.label)}</b>${o.sub ? `<span>${esc(o.sub)}</span>` : ""}</button>`).join("")}</div>` : ""}
+    <div class="acts">${btn("look", "Look", ICON.look)}${btn("talk", "Talk", ICON.talk)}${btn("go", "Go", ICON.go)}${btn("fight", "Fight", ICON.fight)}${btn("use", "Use", ICON.use)}
+      ${yours ? `<button class="act" data-act="end-turn">${ICON.end}<span>End</span></button>` : ""}</div>
     <form class="say" id="say-form">
-      <textarea id="say" rows="1" placeholder="${yours ? "What do you do?" : "Wait for your turn…"}" ${yours && !S.sending ? "" : "disabled"} enterkeyhint="send">${esc(kept)}</textarea>
+      <textarea id="say" rows="1" placeholder="${yours ? "Or say exactly what you do…" : "Wait for your turn…"}" ${yours && !S.sending ? "" : "disabled"} enterkeyhint="send">${esc(kept)}</textarea>
       <button class="send" aria-label="Send" ${yours && !S.sending ? "" : "disabled"}>${S.sending ? `<span class="spinner"></span>` : ICON.send}</button>
     </form></div>`;
-  el._sug = sug;
   const ta = $("#say");
   autosize(ta);
   ta.oninput = () => { S.composer = ta.value; autosize(ta); };
@@ -529,11 +679,12 @@ function renderComposer() {
 function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 140) + "px"; }
 
 function fill(text, hint = {}) {
+  if (!wide() && S.tab !== "story") { S.tab = "story"; S.tray = ""; renderPlay(); }
   const ta = $("#say");
   if (!ta || ta.disabled) return toast("It is not your turn yet.");
   S.hint = hint;
   ta.value = text; S.composer = text; autosize(ta);
-  if (S.panelOpen && innerWidth < 980) { S.panelOpen = false; renderPlay(); }
+  if (S.tray) { S.tray = ""; renderDock(); }
   const t = $("#say"); t.focus(); t.setSelectionRange(t.value.length, t.value.length);
 }
 
@@ -541,8 +692,8 @@ async function sendAction() {
   const ta = $("#say"), text = ta?.value.trim();
   if (!text || S.sending) return;
   const hint = S.hint; S.hint = {};
-  S.sending = true; S.composer = ""; ta.value = "";
-  renderComposer(); renderFeed(true);
+  S.sending = true; S.composer = ""; S.tray = ""; ta.value = "";
+  renderDock(); renderFeed(true);
   try {
     await api("POST", `/campaigns/${S.route}/actions`, { text, ...hint });
   } catch (e) {
@@ -555,38 +706,21 @@ async function sendAction() {
   }
 }
 
-// side panel
-
-function renderPanel() {
-  const el = $("#panel");
-  if (!el) return;
-  const tabs = [["scene", "Scene"], ["you", "You"], ["journal", "Journal"], ["map", "Map"]];
-  el.innerHTML = `<div class="panel-head"><div class="tabs">${tabs.map(([k, l]) => `<button class="tab ${S.panel === k ? "on" : ""}" data-panel="${k}">${l}</button>`).join("")}</div>
-    <button class="icon-btn close" data-act="close-panel" aria-label="Close">${ICON.close}</button></div>
-    <div class="panel-body">${({ scene: sceneHTML, you: youHTML, journal: journalHTML, map: mapHTML })[S.panel]()}</div>`;
-}
+// side column / phone tabs
 
 function hpbar(hp, max) { const p = Math.max(0, Math.min(1, hp / max)); return `<div class="hpbar ${p <= .34 ? "low" : ""}"><i style="width:${p * 100}%"></i></div>`; }
 
 function sceneHTML() {
   const v = S.view, l = v.location || {};
   const zname = id => l.zones?.find(z => z.id === id)?.name || "";
+  const tile = (attrs, title, sub, kind) => `<button class="tile ${kind}" ${attrs}><span class="kind">${kind}</span><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ""}</button>`;
   return `
-    <section><h3>${esc(l.name)}</h3><p class="serif" style="margin:0;color:var(--text-2)">${esc(l.description)}</p></section>
-    ${l.zones?.length > 1 ? `<section>${zoneMap()}</section>` : ""}
-    ${v.encounter ? `<section><p class="eyebrow">Enemies · round ${v.encounter.round}</p><div class="list">${v.encounter.enemies.map(e => `
-      <button class="item" data-fill="I attack ${esc(e.display)}" data-target="${esc(e.id)}" ${e.hp <= 0 ? "disabled" : ""}>
-        <div class="main"><b>${esc(e.display)}</b><span>${e.hp > 0 ? `${e.hp}/${e.max_hp} HP${e.ranged ? " · ranged" : ""} · ${esc(zname(e.zone_id))}` : "Defeated"}</span>${e.hp > 0 ? hpbar(e.hp, e.max_hp) : ""}</div></button>`).join("")}</div></section>` : ""}
-    ${l.npcs?.length ? `<section><p class="eyebrow">People here</p><div class="list">${l.npcs.map(n => `
-      <button class="item" data-fill="I talk to ${esc(n.name)}: " data-target="${esc(n.id)}"><div class="avatar">${esc(n.name[0])}</div>
-        <div class="main"><b>${esc(n.name)}</b><span>${esc(n.role)}${n.merchant ? " · sells goods" : ""}</span></div></button>`).join("")}</div></section>` : ""}
-    ${l.items?.length ? `<section><p class="eyebrow">You notice</p><div class="list">${l.items.map(i => `
-      <button class="item" data-fill="I pick up the ${esc(i.name)}"><div class="main"><b>${esc(i.name)}</b>${i.effect ? `<span>${esc(i.effect)}</span>` : ""}</div></button>`).join("")}</div></section>` : ""}
-    ${l.exits?.length ? `<section><p class="eyebrow">Ways out</p><div class="list">${l.exits.map(x => `
-      <button class="item" data-fill="${x.state === "open" ? `I travel to ${esc(x.to_name)}` : `I try the ${esc(x.label)}`}"><div class="main"><b>${esc(x.to_name)}</b><span>${esc(x.label)}${x.state === "locked" ? " · locked" : ""}${x.explored ? "" : " · unexplored"}</span></div></button>`).join("")}</div></section>` : ""}
-    <section><p class="eyebrow">Party</p><div class="list">${v.party.map(c => `
-      <div class="item"><div class="avatar">${esc(c.name[0])}</div><div class="main"><b>${esc(c.name)}${v.active?.character_id === c.id ? ` <span class="pill accent" style="margin-left:4px">acting</span>` : ""}</b>
-        <span>${esc(c.class)} · ${c.hp}/${c.max_hp} HP${c.down ? " · down" : ""}${zname(c.zone_id) ? " · " + esc(zname(c.zone_id)) : ""}</span>${hpbar(c.hp, c.max_hp)}</div></div>`).join("")}</div></section>`;
+    <section class="scene-head">${cover(l.id || l.name || "place", "scene-art")}<div><h3>${esc(l.name)}</h3><p>${esc(l.description)}</p></div></section>
+    ${l.zones?.length > 1 ? `<section><p class="eyebrow">Layout</p>${zoneMap()}</section>` : ""}
+    ${v.encounter ? `<section><p class="eyebrow">Enemies · round ${v.encounter.round}</p><div class="tiles">${v.encounter.enemies.filter(e => e.hp > 0).map(e => tile(`data-fill="I attack ${esc(e.display)}" data-target="${esc(e.id)}"`, e.display, `${e.hp}/${e.max_hp} HP${e.ranged ? " · ranged" : ""} · ${zname(e.zone_id)}`, "foe")).join("")}</div></section>` : ""}
+    ${l.npcs?.length ? `<section><p class="eyebrow">People</p><div class="tiles">${l.npcs.map(n => tile(`data-fill="I talk to ${esc(n.name)}: " data-target="${esc(n.id)}"`, n.name, `${n.role}${n.merchant ? " · sells goods" : ""}`, "person")).join("")}</div></section>` : ""}
+    ${l.items?.length ? `<section><p class="eyebrow">Things</p><div class="tiles">${l.items.map(i => tile(`data-fill="I pick up the ${esc(i.name)}"`, i.name, i.effect, "item")).join("")}</div></section>` : ""}
+    ${l.exits?.length ? `<section><p class="eyebrow">Ways out</p><div class="tiles">${l.exits.map(x => tile(`data-fill="${x.state === "open" ? `I travel to ${esc(x.to_name)}` : `I try the ${esc(x.label)}`}"`, x.to_name, `${x.label}${x.state === "locked" ? " · locked" : ""}${x.explored ? "" : " · unexplored"}`, "exit")).join("")}</div></section>` : ""}`;
 }
 
 function zoneMap() {
@@ -610,7 +744,7 @@ function zoneMap() {
   (v.encounter?.enemies || []).filter(e => e.hp > 0).forEach(e => add(e.zone_id, { fill: "var(--bad)", name: e.display }));
   zones.forEach(z => {
     const p = pos[z.id], short = z.name.length > 15 ? z.name.slice(0, 14) + "…" : z.name;
-    s += `<g data-fill="I move to ${esc(z.name)}" data-zone="${esc(z.id)}" style="cursor:pointer"><rect class="zone ${z.id === me?.zone_id ? "mine" : ""}" x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="10"/>
+    s += `<g data-fill="I move to ${esc(z.name)}" data-zone="${esc(z.id)}" style="cursor:pointer"><rect class="zone ${z.id === me?.zone_id ? "mine" : ""}" x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="8"/>
       <title>${esc(z.name)}${z.desc ? ": " + esc(z.desc) : ""}</title><text x="${p.x + 8}" y="${p.y + 16}">${esc(short)}${z.cover ? " ◆" : ""}</text>`;
     (tokens[z.id] || []).forEach((t, i) => {
       const tx = p.x + 16 + (i % 4) * 22, ty = p.y + 38 + Math.floor(i / 4) * 20;
@@ -618,50 +752,50 @@ function zoneMap() {
     });
     s += `</g>`;
   });
-  return s + `</svg><div class="muted" style="font-size:12px">Gold is you, blue are allies, red are enemies. Tap a zone to move.</div>`;
+  return s + `</svg><div class="muted small">Lime is you, blue are allies, red are enemies. Tap a zone to move.</div>`;
 }
 
 function youHTML() {
   const c = mine();
   if (!c) return `<div class="muted">You are watching this story.</div>`;
   return `
-    <section><div class="row" style="gap:14px"><div class="avatar" style="width:52px;height:52px;font-size:22px">${esc(c.name[0])}</div>
-      <div><h3>${esc(c.name)}</h3><div class="muted" style="font-size:13px">${esc(c.class)} · level ${c.level} · ${esc(c.pronouns || "they/them")}</div></div></div></section>
-    <section><div class="row spread" style="font-size:13px"><span>Health ${c.hp}/${c.max_hp}${c.down ? " · down" : ""}</span><span class="muted">XP ${c.xp}${c.next_level_xp ? " / " + c.next_level_xp : ""}</span></div>${hpbar(c.hp, c.max_hp)}</section>
-    <section class="statgrid">
-      <div class="stat"><div class="k">ARMOR</div><div class="v">${c.ac}</div></div>
-      <div class="stat"><div class="k">GOLD</div><div class="v">${c.gold}</div></div>
-      <div class="stat"><div class="k">PROF</div><div class="v">${signed(c.proficiency_bonus)}</div></div>
+    <section class="sheet-head"><div class="avatar xl">${esc(c.name[0])}${portrait(c)}</div>
+      <div class="grow"><h3>${esc(c.name)}</h3><div class="muted small">${esc(c.class)} · level ${c.level} · ${esc(c.pronouns || "they/them")}</div></div></section>
+    <section class="vitals">
+      <div class="vital big"><span class="k">Health</span><span class="v">${c.hp}<small>/${c.max_hp}</small></span>${hpbar(c.hp, c.max_hp)}</div>
+      <div class="vital"><span class="k">Armor</span><span class="v">${c.ac}</span></div>
+      <div class="vital"><span class="k">Gold</span><span class="v">${c.gold}</span></div>
+      <div class="vital"><span class="k">XP</span><span class="v">${c.xp}${c.next_level_xp ? `<small>/${c.next_level_xp}</small>` : ""}</span></div>
     </section>
-    <section class="statgrid">${ABIL.map(a => `<div class="stat ${c.proficient.includes(a) ? "prof" : ""}" title="${ABIL_NAME[a]}"><div class="k">${a}${c.proficient.includes(a) ? " ★" : ""}</div><div class="v">${c.scores[a]}</div><div class="m">${signed(c.modifiers[a])}</div></div>`).join("")}</section>
-    ${c.weapon ? `<section><p class="eyebrow">Weapon</p><div class="item"><div class="main"><b>${esc(c.weapon.name)}</b><span>${esc(c.weapon.damage)} · ${esc(c.weapon.reach)}</span></div></div></section>` : ""}
+    <section class="statgrid">${ABIL.map(a => `<div class="stat ${c.proficient.includes(a) ? "prof" : ""}" title="${ABIL_NAME[a]}"><div class="k">${a}</div><div class="v">${signed(c.modifiers[a])}</div><div class="m">${c.scores[a]}</div></div>`).join("")}</section>
+    ${c.weapon ? `<section><p class="eyebrow">Weapon</p><div class="row-item"><b>${esc(c.weapon.name)}</b><span>${esc(c.weapon.damage)} · ${esc(c.weapon.reach)}</span></div></section>` : ""}
     <section><p class="eyebrow">Carrying</p><div class="list">${c.inventory.map(i => `
-      <button class="item" data-fill="${i.equipped ? `I use the ${esc(i.name)}` : `I ${i.kind === "consumable" ? "use" : "equip"} the ${esc(i.name)}`}"><div class="main"><b>${esc(i.name)}${i.equipped ? ` <span class="pill" style="margin-left:4px">equipped</span>` : ""}</b>${i.effect ? `<span>${esc(i.effect)}</span>` : ""}</div></button>`).join("") || `<div class="muted">Nothing.</div>`}</div></section>
-    ${c.backstory ? `<section><p class="eyebrow">Backstory</p><p class="serif" style="margin:0;color:var(--text-2)">${esc(c.backstory)}</p></section>` : ""}`;
+      <button class="row-item" data-fill="${i.equipped ? `I use the ${esc(i.name)}` : `I ${i.kind === "consumable" ? "use" : "equip"} the ${esc(i.name)}`}"><b>${esc(i.name)}${i.equipped ? ` <span class="pill">equipped</span>` : ""}</b>${i.effect ? `<span>${esc(i.effect)}</span>` : ""}</button>`).join("") || `<div class="muted">Nothing.</div>`}</div></section>
+    ${c.backstory ? `<section><p class="eyebrow">Backstory</p><p class="muted">${esc(c.backstory)}</p></section>` : ""}`;
 }
 
 function journalHTML() {
   const v = S.view;
   if (!S.journal) {
-    api("GET", `/campaigns/${S.route}/journal`).then(j => { S.journal = j; if (S.panel === "journal") renderPanel(); }).catch(() => {});
+    api("GET", `/campaigns/${S.route}/journal`).then(j => { S.journal = j; if (sideKey() === "journal") renderSide(); }).catch(() => {});
   }
   const j = S.journal;
   const quests = v.quests.filter(q => q.status !== "available" || q.is_main);
   return `
     <section><p class="eyebrow">Quests</p>${quests.length ? quests.map(q => `
-      <div class="card" style="padding:14px;display:grid;gap:6px"><div class="row spread"><b class="serif" style="font-size:16px">${esc(q.title)}</b>${q.is_main ? `<span class="pill accent">Main</span>` : `<span class="pill">${esc(q.status)}</span>`}</div>
-        ${q.summary ? `<div class="muted" style="font-size:13px">${esc(q.summary)}</div>` : ""}
-        ${q.objectives.map(o => `<div class="objective ${o.done ? "done" : ""}"><span>${o.done ? "☑" : "☐"}</span><span>${esc(o.text)}</span></div>`).join("")}
-        ${q.reward_gold || q.reward_xp ? `<div class="muted" style="font-size:12px">Reward: ${[q.reward_gold && q.reward_gold + " gold", q.reward_xp && q.reward_xp + " XP"].filter(Boolean).join(", ")}${q.giver_name ? " · from " + esc(q.giver_name) : ""}</div>` : ""}
+      <div class="quest-card"><div class="row spread"><b>${esc(q.title)}</b>${q.is_main ? `<span class="pill accent">Main</span>` : `<span class="pill">${esc(q.status)}</span>`}</div>
+        ${q.summary ? `<div class="muted small">${esc(q.summary)}</div>` : ""}
+        ${q.objectives.map(o => `<div class="objective ${o.done ? "done" : ""}"><i></i><span>${esc(o.text)}</span></div>`).join("")}
+        ${q.reward_gold || q.reward_xp ? `<div class="muted small">Reward: ${[q.reward_gold && q.reward_gold + " gold", q.reward_xp && q.reward_xp + " XP"].filter(Boolean).join(", ")}${q.giver_name ? " · from " + esc(q.giver_name) : ""}</div>` : ""}
       </div>`).join("") : `<div class="muted">No quests yet.</div>`}</section>
-    ${j ? `${j.summary ? `<section><p class="eyebrow">The story so far</p><p class="serif" style="margin:0;color:var(--text-2)">${esc(j.summary)}</p></section>` : ""}
-      <section><p class="eyebrow">Chronicle</p>${j.chronicle.length ? j.chronicle.slice().reverse().map(c => `<div class="ev-note"><span class="ic">·</span>${esc(c.text)}</div>`).join("") : `<div class="muted">Nothing recorded yet.</div>`}</section>`
+    ${j ? `${j.summary ? `<section><p class="eyebrow">The story so far</p><p class="muted">${esc(j.summary)}</p></section>` : ""}
+      <section><p class="eyebrow">Chronicle</p><ol class="chronicle">${j.chronicle.length ? j.chronicle.slice().reverse().map(c => `<li>${esc(c.text)}</li>`).join("") : `<li class="muted">Nothing recorded yet.</li>`}</ol></section>`
     : `<div class="muted">Loading the journal…</div>`}`;
 }
 
 function mapHTML() {
   if (!S.map) {
-    api("GET", `/campaigns/${S.route}/map`).then(m => { S.map = m; if (S.panel === "map") renderPanel(); }).catch(() => {});
+    api("GET", `/campaigns/${S.route}/map`).then(m => { S.map = m; if (sideKey() === "map") renderSide(); }).catch(() => {});
     return `<div class="muted">Unfolding the map…</div>`;
   }
   const m = S.map, here = m.current_id;
@@ -669,36 +803,47 @@ function mapHTML() {
   const near = new Map();
   m.edges.forEach(e => { if (e.a === here) near.set(e.b, e.state); if (e.b === here) near.set(e.a, e.state); });
   const others = m.locations.filter(l => l.id !== here && !near.has(l.id));
-  const row = (l, extra = "", fillText = "") => `<${fillText ? `button data-fill="${esc(fillText)}"` : "div"} class="item"><div class="main"><b>${esc(l.name)}${l.id === m.hub_id ? ` <span class="pill" style="margin-left:4px">home</span>` : ""}</b><span>${esc(l.kind || "")}${extra}</span></div></${fillText ? "button" : "div"}>`;
+  const row = (l, extra = "", fillText = "") => `<${fillText ? `button data-fill="${esc(fillText)}"` : "div"} class="row-item"><b>${esc(l.name)}${l.id === m.hub_id ? ` <span class="pill">home</span>` : ""}</b><span>${esc(l.kind || "")}${extra}</span></${fillText ? "button" : "div"}>`;
   return `
-    <section><p class="eyebrow">You are here</p>${byId[here] ? row(byId[here]) : ""}</section>
+    <section><p class="eyebrow">You are here</p>${byId[here] ? `<div class="here-card">${cover(here, "scene-art")}${row(byId[here])}</div>` : ""}</section>
     ${near.size ? `<section><p class="eyebrow">Paths from here</p><div class="list">${[...near].map(([id, st]) => byId[id] ? row(byId[id], st === "locked" ? " · locked" : byId[id].visited ? " · visited" : " · not yet visited", st === "locked" ? "" : `I travel to ${byId[id].name}`) : "").join("")}</div></section>` : ""}
     ${others.length ? `<section><p class="eyebrow">Known places</p><div class="list">${others.map(l => row(l, l.visited ? " · visited" : "")).join("")}</div></section>` : ""}`;
 }
 
+function sideKey() { return wide() ? S.panel : (S.tab === "story" ? S.panel : S.tab); }
+
 // ---- actions
 
+let lastWide = wide();
+addEventListener("resize", () => { if (wide() !== lastWide) { lastWide = wide(); if ($("#hud")) renderPlay(); } });
+
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-kit],[data-prof],[data-panel],[data-sug],[data-fill]");
+  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-kit],[data-prof],[data-panel],[data-tab],[data-group],[data-opt],[data-step],[data-fill]");
   if (!t) return;
   const act = t.dataset.act;
   if (t.dataset.open) return go(`#/c/${t.dataset.open}`);
   if (t.dataset.premise) { $("#premise").value = t.dataset.premise; return; }
   if (t.dataset.kit) { readEditor().kit = t.dataset.kit; return renderSetup(); }
+  if (t.dataset.step) { readEditor(); S.step = +t.dataset.step; return renderSetup(); }
   if (t.dataset.prof) {
     const d = readEditor(), a = t.dataset.prof, p = d.proficient || (d.proficient = []);
     if (p.includes(a)) p.splice(p.indexOf(a), 1);
     else { p.push(a); if (p.length > 2) p.shift(); }
     return renderSetup();
   }
-  if (t.dataset.panel) {
-    const wide = innerWidth >= 980;
-    if (!wide && S.panelOpen && S.panel === t.dataset.panel && !t.classList.contains("tab")) { S.panelOpen = false; return renderPlay(); }
-    S.panel = t.dataset.panel;
-    if (!wide && !S.panelOpen) { S.panelOpen = true; return renderPlay(); }
-    return renderPanel();
+  if (t.dataset.tab) {
+    if (wide()) { if (t.dataset.tab !== "story") { S.panel = t.dataset.tab; renderSide(); } return; }
+    S.tab = t.dataset.tab; if (S.tab !== "story") S.panel = S.tab;
+    return renderPlay();
   }
-  if (t.dataset.sug) { const s = $("#composer")._sug[+t.dataset.sug]; return fill(s.text, s.hint); }
+  if (t.dataset.panel) { S.panel = t.dataset.panel; if (!wide()) S.tab = t.dataset.panel; return wide() ? renderSide() : renderPlay(); }
+  if (t.dataset.group) {
+    const g = t.dataset.group, opts = $("#dock")._groups[g];
+    if (opts.length === 1 && g === "look") return fill(opts[0].text, opts[0].hint);
+    S.tray = S.tray === g ? "" : g;
+    return renderDock();
+  }
+  if (t.dataset.opt) { const o = $("#dock")._groups[S.tray][+t.dataset.opt]; return fill(o.text, o.hint); }
   if (t.dataset.fill) {
     const hint = t.dataset.target ? { target_id: t.dataset.target } : t.dataset.zone ? { zone_id: t.dataset.zone } : {};
     return fill(t.dataset.fill, hint);
@@ -707,8 +852,9 @@ document.addEventListener("click", async e => {
     switch (act) {
       case "signout": await fetch("/auth/logout", { method: "POST" }); S.me = null; leaveCampaign(); S.route = ""; location.hash = ""; return renderSignin();
       case "home": return go("#/");
+      case "compose": S.composing = true; return renderHome();
+      case "compose-close": S.composing = false; return renderHome();
       case "create": return createCampaign();
-      case "close-panel": S.panelOpen = false; return renderPlay();
       case "join":
         t.disabled = true;
         await api("POST", `/campaigns/${S.route}/players`, { name: S.me.name });
@@ -719,14 +865,18 @@ document.addEventListener("click", async e => {
         try {
           const r = await api("POST", `/campaigns/${S.route}/characters/draft`, { concept });
           S.draft = { ...r.character, concept, proficient: r.character.proficient || [] };
+          S.step = 0;
         } finally { renderSetup(); }
         return;
       }
       case "edit": {
         const c = mine();
         S.draft = { name: c.name, class: c.class, kit: c.kit, pronouns: c.pronouns, backstory: c.backstory || "", concept: c.concept || "", scores: { ...c.scores }, proficient: [...c.proficient] };
+        S.step = 0;
         return renderSetup();
       }
+      case "step-next": readEditor(); S.step = Math.min(STEPS.length - 1, S.step + 1); return renderSetup();
+      case "step-back": readEditor(); S.step = Math.max(0, S.step - 1); return renderSetup();
       case "cancel-draft": S.draft = null; return renderSetup();
       case "save-char": {
         const d = readEditor();
