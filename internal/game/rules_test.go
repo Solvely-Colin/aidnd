@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -180,5 +181,26 @@ func TestNormPronouns(t *testing.T) {
 		if got := NormPronouns(in); got != want {
 			t.Errorf("NormPronouns(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestArmorClassParts(t *testing.T) {
+	f := newFixture(t)
+	for _, c := range []*Character{f.aria, f.bram} {
+		sum := 0
+		for _, p := range ArmorClassParts(f.w, c) {
+			sum += p.Value
+		}
+		if sum != ArmorClass(f.w, c) {
+			t.Fatalf("%s parts sum %d, AC %d", c.Name, sum, ArmorClass(f.w, c))
+		}
+	}
+	got := fmt.Sprint(ArmorClassParts(f.w, f.aria)) // chain mail ignores DEX
+	if !strings.Contains(got, "16") || strings.Contains(got, "DEX") || !strings.Contains(got, "2}") {
+		t.Fatalf("aria parts %s", got)
+	}
+	f.aria.Armor = ""
+	if p := ArmorClassParts(f.w, f.aria); p[0].Label != "Base" || p[0].Value != 10 {
+		t.Fatalf("unarmored %v", p)
 	}
 }
