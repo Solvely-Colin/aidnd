@@ -305,12 +305,10 @@ func reactionStrike(w *World, r *dice.Roller, c *Character, e *Enemy, kind strin
 		re.Text = fmt.Sprintf("%s %s %s and misses", c.Name, verb, e.Display())
 		return re
 	}
-	e.HP = max(0, e.HP-out.Damage.Total)
-	re.Text = fmt.Sprintf("%s %s %s and hits for %d damage (%d/%d HP)", c.Name, verb, e.Display(), out.Damage.Total, e.HP, e.MaxHP)
-	if e.HP == 0 {
-		for _, ch := range defeat(w, e, false) {
-			re.Text += "; " + ch
-		}
+	lines := hurtEnemy(w, c, e, out.Damage.Total)
+	re.Text = fmt.Sprintf("%s %s %s and hits for %d damage%s", c.Name, verb, e.Display(), out.Damage.Total, lines[0])
+	for _, ch := range lines[1:] {
+		re.Text += "; " + ch
 	}
 	return re
 }

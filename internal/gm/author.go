@@ -29,6 +29,8 @@ type CampaignSpec struct {
 		Role   string `json:"role"`
 		Desc   string `json:"desc"`
 		Motive string `json:"motive"`
+		// Move is the signature attack they announce a turn ahead.
+		Move string `json:"signature_move"`
 	} `json:"antagonist"`
 	Hub struct {
 		Name        string `json:"name"`
@@ -97,10 +99,11 @@ func createCampaignTool() llm.Tool {
 		"danger": num("1 mild .. 4 deadly", 1, 4), "connects_to": str("name of the hub or another place it connects to")}, "name", "hint", "kind", "danger", "connects_to")
 	return tool("create_campaign", "Create the campaign skeleton.", obj(map[string]any{
 		"title": str("campaign title"), "pitch": str("two-sentence player-facing pitch"),
-		"setting":    enum("era the premise is set in: "+settingsLine(), game.SettingKeys()...),
-		"antagonist": obj(map[string]any{"name": str("name"), "role": str("what they are"), "desc": str("public description"), "motive": str("SECRET: their plan")}, "name", "role", "motive"),
-		"hub":        obj(map[string]any{"name": str("starting town or base"), "kind": enum("kind", game.KindTown, game.KindBuilding), "description": str("2-3 sentences")}, "name", "description"),
-		"hub_npcs":   arr(npc, "2-4 NPCs at the hub; include one merchant and one quest giver"),
+		"setting": enum("era the premise is set in: "+settingsLine(), game.SettingKeys()...),
+		"antagonist": obj(map[string]any{"name": str("name"), "role": str("what they are"), "desc": str("public description"), "motive": str("SECRET: their plan"),
+			"signature_move": str("their deadliest attack, 2-4 words, fitting the setting (e.g. Tide of Bones, Tommy-Gun Sweep)")}, "name", "role", "motive"),
+		"hub":      obj(map[string]any{"name": str("starting town or base"), "kind": enum("kind", game.KindTown, game.KindBuilding), "description": str("2-3 sentences")}, "name", "description"),
+		"hub_npcs": arr(npc, "2-4 NPCs at the hub; include one merchant and one quest giver"),
 		"cast": arr(obj(map[string]any{"name": str("name, e.g. The Returned Fishermen"), "role": str("what they are"), "desc": str("one sentence"),
 			"disposition": num("-3..3", -3, 3), "at": str("hub or place name where they are")}, "name", "role", "at"),
 			"every other person, group, creature or body that the objectives, beats or lore say the party can find, talk to or examine (0-4). Anything not listed here or in hub_npcs does not exist in the game"),
@@ -267,7 +270,7 @@ func (g *GM) buildCampaign(id, premise string, spec CampaignSpec) (*game.World, 
 	}
 	ant := game.AddNPC(w, lair.ID, game.NPCSpec{Name: spec.Antagonist.Name, Role: firstOf(spec.Antagonist.Role, "villain"), Desc: spec.Antagonist.Desc, Disposition: -3})
 	ant.Antagonist = true
-	ant.Stats = &game.StatBlock{MaxHP: 45, AC: 15, AttackBonus: 6, Damage: "2d6+3"}
+	ant.Stats = &game.StatBlock{MaxHP: 45, AC: 15, AttackBonus: 6, Damage: "2d6+3", AsBoss: &game.BossSpec{Move: trim(spec.Antagonist.Move, 40)}}
 	w.Campaign.AntagonistID = ant.ID
 	// main quest; force the finale to be defeating the antagonist
 	objs := spec.MainQuest.Objectives
@@ -444,7 +447,7 @@ func fallbackSpec(premise string) CampaignSpec {
 	raw := `{
 	 "title": "The Bell Beneath Harrowmere",
 	 "pitch": "Something rings under the old mere at night, and the dead are listening. Find the source before the town of Harrowmere joins them.",
-	 "antagonist": {"name": "Morwen the Pale", "role": "necromancer", "desc": "A gaunt woman in grey whom nobody remembers arriving.", "motive": "Morwen is ringing the sunken bell to wake the drowned army of the old kingdom and claim it."},
+	 "antagonist": {"name": "Morwen the Pale", "role": "necromancer", "desc": "A gaunt woman in grey whom nobody remembers arriving.", "motive": "Morwen is ringing the sunken bell to wake the drowned army of the old kingdom and claim it.", "signature_move": "Tide of Bones"},
 	 "hub": {"name": "Harrowmere", "kind": "town", "description": "A damp lakeside town of slate roofs and nervous fishermen. The bell's toll carries over the water each midnight."},
 	 "hub_npcs": [
 	  {"name": "Tamsin Hale", "role": "blacksmith", "desc": "Broad, soot-streaked, and blunt.", "disposition": 1, "merchant": true, "stock": ["healing_potion","healing_potion","longsword","shortbow","leather","shield","torch"]},

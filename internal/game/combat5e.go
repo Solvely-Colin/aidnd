@@ -327,6 +327,8 @@ func strike(w *World, r *dice.Roller, c *Character, e *Enemy, wpn *Item, o strik
 		res.Total -= res.Mod
 		res.Mod = 0
 	}
+	res.Mod += wpn.Bonus
+	res.Total += wpn.Bonus
 	ab := weaponAbility(c, wpn)
 	if c.Conditions.Has(CondRaging) && ab == STR && d == 0 {
 		res.Mod += 2
@@ -338,6 +340,12 @@ func strike(w *World, r *dice.Roller, c *Character, e *Enemy, wpn *Item, o strik
 	st.Rolls = append(st.Rolls, dr)
 	total += res.Total
 	// riders
+	if wpn.has(PropFlame) {
+		addDmg("Flame", "1d6", 0)
+	}
+	if wpn.has(PropHoly) {
+		addDmg("Radiance", "1d10", 0)
+	}
 	if c.HasFeature("sneak_attack") && (wpn.Finesse || InferReach(wpn) == ReachRanged && !IsFocus(wpn)) && (ch.Edge == dice.Advantage || allyNear(w, c, e)) && ch.Edge != dice.Disadvantage && onceThisTurn(w, c, "sneak_attack") {
 		addDmg("Sneak Attack", fmt.Sprintf("%dd6", (c.Level+1)/2), 0)
 	}
@@ -423,6 +431,7 @@ func hurtEnemy(w *World, c *Character, e *Enemy, dmg int) []string {
 	if dmg > 0 && e.Conditions.remove(CondAsleep) && e.HP > 0 {
 		out = append(out, e.Display()+" snaps awake")
 	}
+	out = append(out, bossPhase(w, e)...)
 	if e.HP == 0 {
 		out = append(out, defeat(w, e, false)...)
 		if c != nil && c.HasFeature("dark_ones_blessing") {
@@ -543,6 +552,10 @@ func endConcentration(w *World, c *Character) {
 // guardians and moonbeam burn foes, and the round's reactions reset.
 func StartTurnEffects(w *World, r *dice.Roller, c *Character) ConditionTick {
 	var t ConditionTick
+	w.RefreshMagic()
+	if w.InCombat() {
+		t.Changes = append(t.Changes, regenTick(r, c)...)
+	}
 	if c.Conc == nil || !w.InCombat() || c.Down() {
 		return t
 	}
@@ -551,11 +564,11 @@ func StartTurnEffects(w *World, r *dice.Roller, c *Character) ConditionTick {
 	case "spirit_guardians":
 		st := &Step{}
 		areaSave(w, r, c, s, c.Conc.Level, c.ZoneID, st)
-		t.Changes, t.Rolls = st.Changes, st.Rolls
+		t.Changes, t.Rolls = append(t.Changes, st.Changes...), st.Rolls
 	case "moonbeam":
 		st := &Step{}
 		areaSave(w, r, c, s, c.Conc.Level, c.Conc.Zone, st)
-		t.Changes, t.Rolls = st.Changes, st.Rolls
+		t.Changes, t.Rolls = append(t.Changes, st.Changes...), st.Rolls
 	}
 	return t
 }

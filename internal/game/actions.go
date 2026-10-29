@@ -197,6 +197,8 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 	}
 	budget := &w.Campaign.Turns.Budget
 	tradedWith := map[string]bool{}
+	w.RefreshMagic()
+	defer w.RefreshMagic()
 	stopped := false
 	for i, a := range actions {
 		if stopped || w.Campaign.Status != StatusActive {
@@ -870,12 +872,21 @@ func npcAsEnemy(w *World, n *NPC) *Enemy {
 	}
 	ClampStatBlock(&sb, CapsFor(max(1, w.Here().Danger), w.PartyLevel()))
 	sb.Inflicts, _ = NormalizeInflict(sb.Inflicts, w.Here().Danger)
+	// the antagonist (and any NPC authored as one) fights as a boss
+	boss := sb.AsBoss
+	if boss == nil && (n.Antagonist || n.ID == w.Campaign.AntagonistID) {
+		boss = &BossSpec{}
+	}
+	sb.AsBoss = nil
 	if w.InCombat() {
 		e := &Enemy{ID: w.NewID("foe"), Name: n.Name, NPCID: n.ID, StatBlock: sb, HP: sb.MaxHP, ZoneID: n.ZoneID}
+		if boss != nil && !hasBoss(w) {
+			makeBoss(w, e, *boss)
+		}
 		w.Encounter.Enemies = append(w.Encounter.Enemies, e)
 		return e
 	}
-	enc, _, err := StartEncounter(w, []EnemySpec{{Name: n.Name, NPCID: n.ID, HP: sb.MaxHP, AC: sb.AC, AttackBonus: sb.AttackBonus, Damage: sb.Damage, Ranged: sb.Ranged, Inflicts: sb.Inflicts}})
+	enc, _, err := StartEncounter(w, []EnemySpec{{Name: n.Name, NPCID: n.ID, HP: sb.MaxHP, AC: sb.AC, AttackBonus: sb.AttackBonus, Damage: sb.Damage, Ranged: sb.Ranged, Inflicts: sb.Inflicts, Boss: boss}})
 	if err != nil {
 		return nil
 	}
@@ -1072,6 +1083,7 @@ func endEncounter(w *World) []string {
 		danger = max(1, l.Danger)
 	}
 	changes := append([]string{"The fight is won"}, StabilizeDying(w)...)
+	changes = append(changes, rollLoot(w)...)
 	w.Encounter = nil
 	ClearFightConditions(w)
 	for _, c := range w.Characters {

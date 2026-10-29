@@ -129,7 +129,7 @@ func ArmorClassParts(w *World, c *Character) []ACPart {
 		case a.DexCap > 0 && dex > a.DexCap:
 			dex = a.DexCap
 		}
-		parts[0] = ACPart{Label: a.Name, Value: a.AC}
+		parts[0] = ACPart{Label: a.Name, Value: a.AC + a.Bonus}
 	}
 	if dex != 0 {
 		parts = append(parts, ACPart{Label: string(DEX), Value: dex})
@@ -153,9 +153,12 @@ func ArmorClassParts(w *World, c *Character) []ACPart {
 	}
 	for _, it := range w.ItemsOf(OwnerCharacter, c.ID) {
 		if it.Kind == ItemShield {
-			parts = append(parts, ACPart{Label: it.Name, Value: it.AC})
+			parts = append(parts, ACPart{Label: it.Name, Value: it.AC + it.Bonus})
 			break
 		}
+	}
+	if c.boons.AC > 0 {
+		parts = append(parts, ACPart{Label: "Protection", Value: c.boons.AC})
 	}
 	if armor != nil && c.HasPick("defense") {
 		parts = append(parts, ACPart{Label: "Defense style", Value: 1})
@@ -244,6 +247,9 @@ func AttackParts(c *Character, wpn *Item) []RollPart {
 	}
 	if c.Conditions.Has(CondSacred) {
 		ps = append(ps, RollPart{Label: "Sacred Weapon", Value: max(1, c.Mod(CHA))})
+	}
+	if wpn != nil && wpn.Bonus != 0 {
+		ps = append(ps, RollPart{Label: fmt.Sprintf("Magic %+d", wpn.Bonus), Value: wpn.Bonus})
 	}
 	return ps
 }

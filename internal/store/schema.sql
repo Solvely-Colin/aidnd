@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS items (
     effect      TEXT NOT NULL DEFAULT '',
     owner_kind  TEXT NOT NULL DEFAULT '',
     owner_id    TEXT NOT NULL DEFAULT '',
+    extra       TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (campaign_id, id)
 );
 CREATE INDEX IF NOT EXISTS items_by_owner ON items(campaign_id, owner_kind, owner_id);
@@ -265,9 +266,23 @@ CREATE TABLE IF NOT EXISTS events (
     type        TEXT NOT NULL DEFAULT '',
     actor       TEXT NOT NULL DEFAULT '',
     data        TEXT NOT NULL DEFAULT '{}',
-    created_at  INTEGER NOT NULL DEFAULT 0
+    created_at  INTEGER NOT NULL DEFAULT 0,
+    undone      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS events_by_campaign ON events(campaign_id, id);
+
+-- The world as it was before each turn, for the DM console's rewind. Only
+-- the latest few are kept.
+CREATE TABLE IF NOT EXISTS snapshots (
+    campaign_id TEXT NOT NULL,
+    seq         INTEGER NOT NULL DEFAULT 0,
+    event_id    INTEGER NOT NULL DEFAULT 0,
+    turn        INTEGER NOT NULL DEFAULT 0,
+    label       TEXT NOT NULL DEFAULT '',
+    world       TEXT NOT NULL DEFAULT '{}',
+    created_at  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (campaign_id, seq)
+);
 
 -- Free-form notes a player keeps for themselves. Not part of the world, so
 -- Save never rewrites them, and only their author can read them.

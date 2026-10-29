@@ -43,6 +43,8 @@ func richWorld(t *testing.T) *game.World {
 	smith.Remember("met the party")
 	smith.Stats = &game.StatBlock{MaxHP: 9, AC: 12, AttackBonus: 2, Damage: "1d6"}
 	game.NewItem(w, "longsword", game.Owner{Kind: game.OwnerNPC, ID: smith.ID})
+	game.NewMagicGear(w, "longsword", "weapon_flame", game.Owner{Kind: game.OwnerNPC, ID: smith.ID})
+	game.NewWondrous(w, "amulet_of_health", game.Owner{Kind: game.OwnerNPC, ID: smith.ID})
 	w.Players = []*game.Player{{ID: "u1", Name: "Ann", Token: "secret-token"}}
 	_, err := game.CreateCharacter(w, "u1", game.CharacterSpec{Name: "Aria", Kit: "skirmisher",
 		Scores: map[string]int{"STR": 8, "DEX": 15, "CON": 14, "INT": 13, "WIS": 12, "CHA": 10}, Proficient: []string{"DEX", "CHA"}})
@@ -57,6 +59,8 @@ func richWorld(t *testing.T) *game.World {
 	_, _, err = game.StartEncounter(w, []game.EnemySpec{{Name: "Bandit", Count: 2, HP: 7, AC: 12, AttackBonus: 3, Damage: "1d6", Ranged: true, Inflicts: game.CondPoisoned}})
 	must(t, err)
 	w.Encounter.Enemies[0].HP = 3
+	w.Encounter.Enemies[0].Boss = &game.Boss{Phase: 1, Resist: 2, Attacks: 2, Phases: []game.BossPhase{{At: 100, Name: "Composed"}, {At: 50, Name: "Enraged", Attack: 1}},
+		Move: game.BossMove{Name: "Bell Toll", Dice: "4d6", Save: game.DEX, DC: 13}, Charging: &game.Telegraph{Zone: "z1", Round: 1}}
 	w.Encounter.Enemies[1].Conditions = game.Conditions{{Kind: game.CondProne}}
 	w.Characters[0].Conditions = game.Conditions{{Kind: game.CondPoisoned, Rounds: 2, SaveDC: 11, Save: game.CON, Source: "Bandit", SourceID: w.Encounter.Enemies[0].ID}}
 	w.Lore = []*game.Lore{{ID: "lore1", Title: "Vex's plan", Text: "He wants the bell.", Keywords: []string{"bell"}, AlwaysOn: true, LastTrigger: -100}}

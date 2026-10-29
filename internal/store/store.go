@@ -289,8 +289,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, it := range w.Items {
-		if err := insert(ctx, tx, "items", []string{"campaign_id", "id", "ord", "key", "name", "kind", "description", "value", "damage", "ability", "finesse", "reach", "ac", "dex_cap", "effect", "owner_kind", "owner_id"},
-			id, it.ID, i, it.Key, it.Name, it.Kind, it.Desc, it.Value, it.Damage, string(it.Ability), it.Finesse, int(it.Reach), it.AC, it.DexCap, it.Effect, string(it.Owner.Kind), it.Owner.ID); err != nil {
+		if err := insert(ctx, tx, "items", []string{"campaign_id", "id", "ord", "key", "name", "kind", "description", "value", "damage", "ability", "finesse", "reach", "ac", "dex_cap", "effect", "owner_kind", "owner_id", "extra"},
+			id, it.ID, i, it.Key, it.Name, it.Kind, it.Desc, it.Value, it.Damage, string(it.Ability), it.Finesse, int(it.Reach), it.AC, it.DexCap, it.Effect, string(it.Owner.Kind), it.Owner.ID, js(it.ItemExtra)); err != nil {
 			return err
 		}
 	}
@@ -431,17 +431,17 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.NPCs = append(w.NPCs, n)
 			return errors.Join(unjs(mem, &n.Memory), unjs(stats, &n.Stats), unjs(keeps, &n.Keeps))
 		}),
-		q(`SELECT id, key, name, kind, description, value, damage, ability, finesse, reach, ac, dex_cap, effect, owner_kind, owner_id
+		q(`SELECT id, key, name, kind, description, value, damage, ability, finesse, reach, ac, dex_cap, effect, owner_kind, owner_id, extra
 			FROM items WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			it := &game.Item{}
-			var ab, ok string
+			var ab, ok, extra string
 			var reach int
-			if err := r.Scan(&it.ID, &it.Key, &it.Name, &it.Kind, &it.Desc, &it.Value, &it.Damage, &ab, &it.Finesse, &reach, &it.AC, &it.DexCap, &it.Effect, &ok, &it.Owner.ID); err != nil {
+			if err := r.Scan(&it.ID, &it.Key, &it.Name, &it.Kind, &it.Desc, &it.Value, &it.Damage, &ab, &it.Finesse, &reach, &it.AC, &it.DexCap, &it.Effect, &ok, &it.Owner.ID, &extra); err != nil {
 				return err
 			}
 			it.Ability, it.Reach, it.Owner.Kind = game.Ability(ab), game.Reach(reach), game.OwnerKind(ok)
 			w.Items = append(w.Items, it)
-			return nil
+			return unjs(extra, &it.ItemExtra)
 		}),
 		q(`SELECT id, title, summary, giver_id, is_main, status, objectives, reward_gold, reward_xp, reward_items, accepted_turn
 			FROM quests WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
@@ -511,6 +511,7 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 	if err := errors.Join(steps...); err != nil {
 		return nil, fmt.Errorf("load %s: %w", id, err)
 	}
+	w.RefreshMagic()
 	return w, nil
 }
 
@@ -558,7 +559,7 @@ func (s *Store) Events(ctx context.Context, campaignID string, after int64, limi
 		limit = 1000
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id, campaign_id, type, actor, data, created_at FROM events
-		WHERE campaign_id = ? AND id > ? ORDER BY id LIMIT ?`, campaignID, after, limit)
+		WHERE campaign_id = ? AND id > ? AND undone = 0 ORDER BY id LIMIT ?`, campaignID, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +580,7 @@ func (s *Store) Events(ctx context.Context, campaignID string, after int64, limi
 // RecentEvents returns the last n events of the given types (all if none),
 // oldest first. Used to build compact LLM context.
 func (s *Store) RecentEvents(ctx context.Context, campaignID string, n int, types ...string) ([]Event, error) {
-	query := `SELECT id, campaign_id, type, actor, data, created_at FROM events WHERE campaign_id = ?`
+	query := `SELECT id, campaign_id, type, actor, data, created_at FROM events WHERE campaign_id = ? AND undone = 0`
 	args := []any{campaignID}
 	if len(types) > 0 {
 		query += ` AND type IN (` + strings.TrimSuffix(strings.Repeat("?,", len(types)), ",") + `)`

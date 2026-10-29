@@ -211,6 +211,10 @@ func (g *GM) actorFor(w *game.World, playerID string) (*game.Character, error) {
 // (outside one), and save.
 func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Character, playerID, text string, hints Hints, actions []game.Action, recent []string) (*TurnResult, error) {
 	campaignID := w.Campaign.ID
+	// keep the world as it was, for the DM console's rewind
+	if err := g.Store.SaveSnapshot(ctx, w, actor.Name+": "+trim(text, 120)); err != nil {
+		g.logf("snapshot: %v", err)
+	}
 	// 2. resolve
 	onArrive, ambush := g.arrivalHooks(ctx, w)
 	prevLoc := w.Campaign.LocationID

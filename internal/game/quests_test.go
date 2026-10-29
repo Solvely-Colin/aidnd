@@ -207,6 +207,13 @@ func TestAntagonistDefeatCompletesCampaign(t *testing.T) {
 	}
 	f.villain.Stats = &StatBlock{MaxHP: 4, AC: 5, AttackBonus: 2, Damage: "1d6"}
 	f.villain.ZoneID = f.aria.ZoneID
+	// the antagonist fights as a boss; wear it down first
+	boss := NPCJoinsFight(f.w, f.villain)
+	if boss == nil || boss.Boss == nil {
+		t.Fatal("antagonist should be a boss")
+	}
+	boss.HP = 1
+	f.w.Campaign.Turns.Budget = FullBudget(true)
 	r = Resolve(f.ctx(10, 6), f.aria, []Action{{Kind: ActAttack, Target: "Vex"}, {Kind: ActLook}})
 	if f.w.Campaign.Status != StatusCompleted || !r.CampaignEnded || f.villain.Alive {
 		t.Fatalf("campaign %s ended=%v %v %s", f.w.Campaign.Status, r.CampaignEnded, r.Changes, stepErr(r, 0))

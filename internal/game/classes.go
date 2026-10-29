@@ -365,7 +365,7 @@ func (c *Character) CastAbility() Ability {
 
 // SpellDC is 8 + proficiency + casting modifier (+1 with Innate Sorcery).
 func SpellDC(c *Character) int {
-	dc := 8 + ProficiencyBonus(c.Level) + c.Mod(c.CastAbility())
+	dc := 8 + ProficiencyBonus(c.Level) + c.Mod(c.CastAbility()) + c.boons.Spell
 	if c.Conditions.Has(CondSorcery) {
 		dc++
 	}
@@ -375,14 +375,18 @@ func SpellDC(c *Character) int {
 // SpellAttackParts is the spell attack modifier's parts.
 func SpellAttackParts(c *Character) []RollPart {
 	a := c.CastAbility()
-	return []RollPart{{Label: string(a), Value: c.Mod(a)}, {Label: "Proficiency", Value: ProficiencyBonus(c.Level)}}
+	ps := []RollPart{{Label: string(a), Value: c.Mod(a)}, {Label: "Proficiency", Value: ProficiencyBonus(c.Level)}}
+	if c.boons.Spell > 0 {
+		ps = append(ps, RollPart{Label: "Magic focus", Value: c.boons.Spell})
+	}
+	return ps
 }
 
 // SaveMod is c's saving throw modifier for a: the ability plus
 // proficiency in the class's two saves (any proficient ability on old
 // sheets).
 func (c *Character) SaveMod(a Ability) int {
-	m := c.Mod(a)
+	m := c.Mod(a) + c.boons.Saves
 	if c.SaveProficient(a) {
 		m += ProficiencyBonus(c.Level)
 	}
