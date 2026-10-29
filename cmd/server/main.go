@@ -78,6 +78,8 @@ func main() {
 	}
 	defer st.Close()
 	apiKey := os.Getenv("API_KEY")
+	// Players roll their own d20s in the real app (service mode); the dev
+	// table has no roll button, so open mode rolls at once.
 	g := gm.New(client, st, gm.Config{
 		SceneTurnCap:        envInt("SCENE_TURN_CAP", 10),
 		MaxPlayers:          envInt("MAX_PLAYERS", 4),
@@ -86,7 +88,7 @@ func main() {
 		LoreBudget:          envInt("LORE_BUDGET", 1800),
 		DebugDirector:       envBool("DEBUG_DIRECTOR", false),
 		SkipAfterSeconds:    envInt("SKIP_AFTER_SECONDS", 120),
-		PlayerDice:          envBool("PLAYER_DICE", true),
+		PlayerDice:          envBool("PLAYER_DICE", apiKey != ""),
 	}, dice.New(time.Now().UnixNano()))
 	g.Log = logger
 	cfg := api.Config{APIKey: apiKey}

@@ -23,6 +23,7 @@ puts players in front of aidnd. All bodies are JSON. Errors are always
 | `OBJECTIVE_CHECK_EVERY` | 1 | How often (in turns) the judge checks freeform objectives. |
 | `LORE_BUDGET` | 1800 | Characters of lore given to the narrator per turn. |
 | `SKIP_AFTER_SECONDS` | 120 | Another player may skip an idle turn after this long. |
+| `PLAYER_DICE` | on when `LLM_API_KEY` is set | Players roll their own d20s (see Rolling your own dice). Off means the engine rolls everything at once. |
 | `DEBUG_DIRECTOR` | false | Logs director beats and pacing decisions. |
 
 ```sh
@@ -83,14 +84,17 @@ they/them, and drafts fill it from the concept.
 | `GET /meta` | anyone | Abilities, standard array, kits with items (fantasy), `settings` (each with its own kits), item catalog, XP table, DCs, `service_mode`. |
 | `GET /campaigns` | any caller | All campaigns: `{campaigns: [{id, title, pitch, status, players, max_players, updated_at}]}` |
 | `GET /me/campaigns` | player | Campaigns this player has joined. |
-| `POST /campaigns` | any caller | `{premise}` → 201 campaign view. |
+| `POST /campaigns` | any caller | `{premise, lethality?}` → 201 campaign view. `lethality` is `standard` (three failed death saves kill) or `story` (they leave you stable). |
 | `GET /campaigns/{id}` | any caller | Campaign view, personalised by `you` when a player id is known. |
 | `POST /campaigns/{id}/players` | player | `{name}` → `{player, created, token?}` (201 when new). |
 | `POST /campaigns/{id}/characters/draft` | joined player | `{concept}` → `{character: spec}` |
 | `POST /campaigns/{id}/characters` | joined player | `{character}` or `{concept}` → character view. |
 | `GET /campaigns/{id}/characters/{cid}` | any caller | Character view. |
 | `POST /campaigns/{id}/start` | joined player / service | Starts the game. |
-| `POST /campaigns/{id}/actions` | active player | `{text, target_id?, zone_id?, check?}` → turn result. |
+| `POST /campaigns/{id}/actions` | active player | `{text, target_id?, zone_id?, check?, act?}` → turn result, or a pending turn when the player rolls their own dice. |
+| `POST /campaigns/{id}/roll` | acting player | Rolls the d20s for the caller's pending turn or death save and resolves it → turn result. |
+| `POST /campaigns/{id}/roll/cancel` | acting player | Takes back a pending turn before the roll (not a death save). |
+| `POST /campaigns/{id}/me/dice` | joined player | `{auto_roll}`: true lets the engine roll for this player. |
 | `POST /campaigns/{id}/skip` | player / service | Ends the active turn. See Skipping. |
 | `GET /campaigns/{id}/map` | any caller | Known places and passable/locked paths only. |
 | `GET /campaigns/{id}/locations/{lid}` | any caller | A visited or known location; 404 otherwise. |
@@ -187,7 +191,10 @@ and the main quest only shows objectives up to the first one not yet done.
 
 ## Turns
 
-Only the active player may act. One message may contain several actions
+In a fight only the active player may act. Outside fights there is no turn
+order: any conscious player may act whenever they like, each message is its
+own turn with a fresh budget, and skipping is refused (`free_roam` in the
+campaign view). One message may contain several actions
 ("I step behind the cart and shoot the archer"); the engine pays for each
 from the turn budget:
 
@@ -196,7 +203,7 @@ from the turn budget:
 | free | look, say, equip, drop, pick up, accept or turn in a quest; outside combat also reposition, talk and trade |
 | move | move to a zone, travel, reposition in combat (a second move spends the action as a dash) |
 | none | end turn ("I wait", "done") |
-| action | attack, subdue, ability checks (search, unlock, force), use item, rest, flee through an exit in combat; in combat also talk and trade |
+| action | attack, subdue, ability checks (search, unlock, force, stabilize), use item, rest, dodge, disengage, help, hide, ready, shove, grapple, flee through an exit in combat; in combat also talk and trade |
 
 In combat a turn has 1 action, 1 move and 3 free actions. Outside combat
 free actions are unlimited. Spending the action ends the turn, but the rest
@@ -214,7 +221,54 @@ With purpose `search`, `unlock` or `force` (the last two need a locked
 `exit` that is not `sealed`) the engine rolls exactly that check and the
 interpreter is skipped; a bad exit is a 400. With purpose `other` the
 ability is fixed and the interpreter still sets the DC from the text. The
-engine always rolls the dice.
+engine always rolls the dice. `check.skill` names one of the 18 skills
+(`perception`, `sleight_of_hand`, ...); the bonus is the skill's ability
+plus proficiency (doubled with expertise).
+
+`act` is a tactic picked from a button: `{kind, target?, method?}` with
+kind `dodge`, `disengage`, `help` (target an ally), `hide`, `ready`,
+`shove` (method `prone` or `push`) or `grapple`. It skips the interpreter
+like a called check.
+
+### Tactics and reactions
+
+- **Dodge**: attacks against you have disadvantage until your next turn.
+- **Disengage**: leaving a zone draws no opportunity attacks this turn.
+- **Help**: an ally's next attack or check has advantage.
+- **Hide**: Stealth against the best enemy passive Perception
+  (10 + half its attack bonus). Hidden, you can't be targeted and your next
+  attack has advantage; attacking reveals you.
+- **Ready**: you strike the first enemy that enters your zone.
+- **Shove / grapple**: the enemy saves (STR, its save bonus) against
+  8 + your STR + proficiency. Shove knocks prone or pushes to a neighbouring
+  zone; a grapple restrains until you move or go down.
+- Leaving a zone with an enemy in it draws one opportunity attack per enemy
+  per round, and characters get the same against an enemy moving away.
+- On arrival the best passive Perception may spot hidden exits
+  (DC 15 + danger). Ambushers roll Stealth against it; if they win, they
+  act first.
+
+### Rolling your own dice
+
+With `PLAYER_DICE` on, a turn that needs the acting character's d20 is not
+resolved at once. The engine dry-runs it on a copy of the world and answers
+`{pending: {kind: "action", character_id, text, preview: [{kind, label,
+slot, error, rolls: [{label, kind, mod, parts, target, against, edge}]}]}}`
+and the event `action_pending`. `POST /roll` then rolls and resolves the
+turn for real (the dice are decided at that moment, not in the preview);
+`POST /roll/cancel` takes it back (`action_cancelled`). The campaign view
+lists open ones in `pending`. Players with `auto_roll` skip this.
+
+### Dying
+
+At 0 HP in a fight a character is dying: on each of their turns they make
+a death save (d20: 10+ succeeds, a 1 counts twice, a 20 brings them back
+with 1 HP). Three successes make them stable; three failures kill them in
+a `standard` campaign and leave them stable in a `story` one. A death save
+is a pending roll (`kind: "death_save"`) for players who roll their own
+dice, and is rolled automatically otherwise (event `death_save`). Healing
+or a DC 10 Medicine `stabilize` check helps. A dead character's player can
+build a new one, who joins at the party's location with the same XP.
 
 ### Turn result
 

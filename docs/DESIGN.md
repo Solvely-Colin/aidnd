@@ -103,6 +103,24 @@ Engine state on characters and enemies (`Conditions`), never set by the model di
   character's turn passes automatically (enemies still act). The end of a fight clears
   everything but poison; rests and setbacks clear all; going down clears all.
 
+## Wave 1 table rules (2026-10-29)
+
+- **Skills.** 18 5e skills. Characters store `skills` and `expertise` in the
+  `extra` JSON column; sheets from before skills use their kit's list, and a
+  sheet proficient in a whole ability still counts it for that ability's
+  skills. Passive Perception is 10 + Perception.
+- **Death saves** replace "down until healed" in fights. Outside a fight,
+  0 HP is stable. Lethality is per campaign (`standard` or `story`).
+- **Tactics** are stances on the condition list (dodging, disengaged,
+  hidden, helped) that end at the start of the bearer's next turn.
+  Reactions (opportunity and readied attacks) resolve inside the engine, one
+  per creature per round.
+- **Player-rolled dice.** The interpreter's plan is dry-run on a JSON copy
+  of the world with a throwaway roller to build the preview; nothing from
+  the dry run is kept. The real roll happens on `POST /roll`, so the preview
+  can't be farmed for good dice.
+- **Free play.** Outside fights there is no turn order; whoever writes acts.
+
 ## Changes from the live play-test (deepseek-v4.1-flash)
 
 - Quests stay completable whatever the author names: an obtain/deliver item that exists
