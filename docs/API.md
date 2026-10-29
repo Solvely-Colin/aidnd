@@ -80,7 +80,7 @@ they/them, and drafts fill it from the concept.
 | Method & path | Who | Notes |
 |---|---|---|
 | `GET /healthz` | anyone | `{"ok": true}` |
-| `GET /meta` | anyone | Abilities, standard array, kits with items, item catalog, XP table, DCs, `service_mode`. |
+| `GET /meta` | anyone | Abilities, standard array, kits with items (fantasy), `settings` (each with its own kits), item catalog, XP table, DCs, `service_mode`. |
 | `GET /campaigns` | any caller | All campaigns: `{campaigns: [{id, title, pitch, status, players, max_players, updated_at}]}` |
 | `GET /me/campaigns` | player | Campaigns this player has joined. |
 | `POST /campaigns` | any caller | `{premise}` → 201 campaign view. |
@@ -125,6 +125,7 @@ and the main quest only shows objectives up to the first one not yet done.
 ```jsonc
 {
   "id": "c_...", "title": "...", "pitch": "...", "premise": "...",
+  "setting": "fantasy | gaslight | pulp | modern | future",  // pick kits from /meta settings
   "status": "lobby | active | completed | failed",
   "turn": 12, "setbacks": 0, "max_setbacks": 3, "max_players": 4,
   "scene": {"day": 1, "time": "evening", "tension": 2, "goal": "..."},
@@ -161,10 +162,10 @@ from the turn budget:
 
 | Slot | Actions |
 |---|---|
-| free | look, say, equip, drop, pick up, accept or turn in a quest, reposition outside combat |
+| free | look, say, equip, drop, pick up, accept or turn in a quest; outside combat also reposition, talk and trade |
 | move | move to a zone, travel, reposition in combat (a second move spends the action as a dash) |
 | none | end turn ("I wait", "done") |
-| action | attack, subdue, ability checks (search, unlock, force), use item, give, talk, trade, rest, flee through an exit in combat |
+| action | attack, subdue, ability checks (search, unlock, force), use item, rest, flee through an exit in combat; in combat also talk and trade |
 
 In combat a turn has 1 action, 1 move and 3 free actions. Outside combat
 free actions are unlimited. Spending the action ends the turn, but the rest

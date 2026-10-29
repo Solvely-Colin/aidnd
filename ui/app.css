@@ -238,6 +238,7 @@ a { color: var(--accent); }
 .kit { text-align: left; border: 1px solid var(--line-2); background: transparent; border-radius: var(--r-md); padding: 12px; }
 .kit b { display: block; font-size: 15px; }
 .kit span { font-size: 12.5px; color: var(--text-3); line-height: 1.35; display: block; margin-top: 3px; }
+.kit .kit-items { font-size: 11.5px; margin-top: 6px; color: var(--text-2); }
 .kit.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .abilities { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .ability { border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 12px; position: relative; display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 8px; }

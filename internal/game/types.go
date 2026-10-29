@@ -523,6 +523,7 @@ type Campaign struct {
 	Title        string    `json:"title"`
 	Premise      string    `json:"premise"`
 	Pitch        string    `json:"pitch,omitempty"`
+	Setting      string    `json:"setting,omitempty"` // see SettingList; "" means infer from premise
 	Status       string    `json:"status"`
 	HubID        string    `json:"hub_id"`
 	LairID       string    `json:"lair_id"`

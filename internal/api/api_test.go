@@ -384,4 +384,18 @@ func TestMeta(t *testing.T) {
 	if len(m["kits"].([]any)) != 6 || len(m["standard_array"].([]any)) != 6 || len(m["xp_table"].([]any)) != 5 {
 		t.Fatalf("meta %v", m)
 	}
+	settings := m["settings"].([]any)
+	if len(settings) != 5 {
+		t.Fatalf("settings %v", settings)
+	}
+	for _, sv := range settings {
+		s := sv.(map[string]any)
+		if s["key"] != "pulp" {
+			continue
+		}
+		gum := s["kits"].([]any)[1].(map[string]any)
+		if gum["name"] != "Gumshoe" || gum["weapon"] != "pulp_crossbow" {
+			t.Fatalf("pulp skirmisher %v", gum)
+		}
+	}
 }

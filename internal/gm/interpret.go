@@ -10,13 +10,13 @@ import (
 	"github.com/Solvely-Colin/aidnd/internal/llm"
 )
 
-const interpreterSystem = `You translate a player's message in a turn-based fantasy game into 1-4 tool calls, in the order the player wants them.
+const interpreterSystem = `You translate a player's message in a turn-based tabletop game into 1-4 tool calls, in the order the player wants them.
 Rules:
 - Call tools only; never write prose.
 - Use only ids that appear in the state below. Never invent ids.
 - Compound intents need multiple calls: "I charge and finish it" = reposition + attack. "I run to the door and leave" = reposition + move. "I look around and then attack the archer" = look + attack.
 - Going somewhere else ("on to the wreck", "head back to town", "lead us to X") always needs move with that exit's id, or travel for a far place already visited. Outside combat an exit can be taken from any zone, so no reposition is needed first.
-- FREE actions: look, say, equip, drop, pick_up, accept_quest, turn_in_quest (and reposition outside combat). MOVE: move through an exit, travel, reposition in combat. ACTION: everything else. Spending the ACTION ends the turn, but the moves and free actions after it in the same message still happen, so always emit every step the player asked for. Buying several things from one merchant is one buy call per item and costs one action in total.
+- FREE actions: look, say, equip, drop, pick_up, accept_quest, turn_in_quest (and outside combat: reposition, talk_to, buy, sell). MOVE: move through an exit, travel, reposition in combat. ACTION: everything else. Spending the ACTION ends the turn, but the moves and free actions after it in the same message still happen, so always emit every step the player asked for. Buying several things is one buy call per item; in combat several buys from one merchant cost one action in total.
 - Respect LEFT THIS TURN; if the player asks for more than is left, still emit their steps in order (the engine reports what could not be done).
 - Attacks need the target in reach: melee = same zone, thrown = 1 zone, bows/foci/holy symbols = 2 zones. If the target is out of reach, reposition first.
 - Questions like "what do I see?" or "what's in the room?" are look. Talking to an NPC in a conversation is talk_to; a passing remark is say. Outside combat talk_to walks the actor over to the NPC, so no reposition is needed first. "I talk to X: <question>" is one talk_to with that question as text.

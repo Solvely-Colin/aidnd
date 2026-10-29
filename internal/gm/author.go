@@ -12,7 +12,8 @@ import (
 	"github.com/Solvely-Colin/aidnd/internal/store"
 )
 
-const authorSystem = `You are the world author for a turn-based fantasy tabletop game run by a rules engine.
+const authorSystem = `You are the world author for a turn-based tabletop game run by a rules engine.
+The campaign has a setting (an era); keep every name, item and creature true to it.
 You only produce structured content by calling the tool you are given. Keep names short and evocative,
 descriptions concrete (2-3 sentences), and everything consistent with the campaign premise and canon.
 Use plain language. Never decide what the player characters do.`
@@ -21,6 +22,7 @@ Use plain language. Never decide what the player characters do.`
 type CampaignSpec struct {
 	Title      string `json:"title"`
 	Pitch      string `json:"pitch"`
+	Setting    string `json:"setting"`
 	Antagonist struct {
 		Name   string `json:"name"`
 		Role   string `json:"role"`
@@ -94,6 +96,7 @@ func createCampaignTool() llm.Tool {
 		"danger": num("1 mild .. 4 deadly", 1, 4), "connects_to": str("name of the hub or another place it connects to")}, "name", "hint", "kind", "danger", "connects_to")
 	return tool("create_campaign", "Create the campaign skeleton.", obj(map[string]any{
 		"title": str("campaign title"), "pitch": str("two-sentence player-facing pitch"),
+		"setting":    enum("era the premise is set in: "+settingsLine(), game.SettingKeys()...),
 		"antagonist": obj(map[string]any{"name": str("name"), "role": str("what they are"), "desc": str("public description"), "motive": str("SECRET: their plan")}, "name", "role", "motive"),
 		"hub":        obj(map[string]any{"name": str("starting town or base"), "kind": enum("kind", game.KindTown, game.KindBuilding), "description": str("2-3 sentences")}, "name", "description"),
 		"hub_npcs":   arr(npc, "2-4 NPCs at the hub; include one merchant and one quest giver"),
@@ -129,10 +132,11 @@ func (g *GM) CreateCampaign(ctx context.Context, premise string) (*game.World, e
 		premise = premise[:1000]
 	}
 	id := g.NewID()
+	guess := game.InferSetting(premise)
 	req := llm.Request{Tag: "author_campaign", Temperature: 0.8, ForceTool: "create_campaign", Tools: []llm.Tool{createCampaignTool()},
 		Messages: []llm.Message{llm.System(authorSystem), llm.User(fmt.Sprintf(
-			"Premise: %s\n\nCreate the campaign for 1-4 level 1 characters. Catalog keys for merchant stock: %s.",
-			premise, strings.Join(game.CatalogKeys(), ", ")))}}
+			"Premise: %s\n\nCreate the campaign for 1-4 level 1 characters. Pick the setting that fits the premise. Catalog keys for merchant stock (%s setting; other eras' gear is translated automatically): %s.",
+			premise, guess, strings.Join(game.CatalogKeysFor(guess), ", ")))}}
 	var built *game.World
 	calls, err := g.forced(ctx, req, func(cs []llm.ToolCall) []string {
 		var spec CampaignSpec
@@ -189,7 +193,7 @@ func (g *GM) buildCampaign(id, premise string, spec CampaignSpec) (*game.World, 
 	if len(p) > 0 {
 		return nil, p
 	}
-	w := &game.World{Campaign: game.Campaign{ID: id, Title: trim(spec.Title, 80), Premise: premise, Pitch: trim(spec.Pitch, 400),
+	w := &game.World{Campaign: game.Campaign{ID: id, Title: trim(spec.Title, 80), Premise: premise, Pitch: trim(spec.Pitch, 400), Setting: game.ChooseSetting(spec.Setting, premise),
 		Status: game.StatusLobby, MaxSetbacks: g.Cfg.MaxSetbacks, MaxPlayers: g.Cfg.MaxPlayers, CreatedAt: g.Now().Unix()}}
 	w.Campaign.Scene = game.Scene{Day: 1, Time: 1, Tension: 2}
 	w.Campaign.Turns.Budget = game.FullBudget(false)
@@ -486,13 +490,17 @@ func (g *GM) DraftCharacter(ctx context.Context, w *game.World, concept string) 
 			"STR", "DEX", "CON", "INT", "WIS", "CHA"),
 		"proficient": arr(abilityEnum, "exactly 2 abilities"),
 	}, "name", "kit", "scores", "proficient"))
+	title, setting := "", game.SettingFantasy
+	if w != nil {
+		title, setting = w.Campaign.Title+": "+w.Campaign.Pitch, w.Setting()
+	}
 	var kits []string
 	for _, k := range game.KitKeys() {
-		kits = append(kits, fmt.Sprintf("%s (%s)", k, game.Kits[k].Desc))
+		kit := game.KitFor(setting, k)
+		kits = append(kits, fmt.Sprintf("%s (%s: %s)", k, kit.Name, kit.Desc))
 	}
-	title, taken := "", ""
+	taken := ""
 	if w != nil {
-		title = w.Campaign.Title + ": " + w.Campaign.Pitch
 		var names []string
 		for _, c := range w.Characters {
 			names = append(names, c.Name)
@@ -511,8 +519,8 @@ func (g *GM) DraftCharacter(ctx context.Context, w *game.World, concept string) 
 	}
 	req := llm.Request{Tag: "author_character", Temperature: 0.8, ForceTool: "draft_character", Tools: []llm.Tool{t},
 		Messages: []llm.Message{llm.System(authorSystem), llm.User(fmt.Sprintf(
-			"Campaign: %s\nPlayer's concept: %s%s\n\nKits: %s.\nAssign the standard array 15, 14, 13, 12, 10, 8 to the six abilities, each value exactly once, and pick 2 proficient abilities. Classes are flavor only.",
-			title, firstOf(concept, "a capable adventurer"), taken, strings.Join(kits, "; ")))}}
+			"Campaign: %s\nSetting: %s\nPlayer's concept: %s%s\n\nKits: %s.\nAssign the standard array 15, 14, 13, 12, 10, 8 to the six abilities, each value exactly once, and pick 2 proficient abilities. Classes are flavor only.",
+			title, settingLine(setting), firstOf(concept, "a capable adventurer"), taken, strings.Join(kits, "; ")))}}
 	var spec game.CharacterSpec
 	calls, err := g.forced(ctx, req, nil)
 	if err == nil && len(calls) > 0 {
@@ -615,12 +623,12 @@ func kitFor(text string) string {
 		kit   string
 		words []string
 	}{
-		{"arcanist", []string{"wizard", "mage", "sorcer", "witch", "warlock", "arcan", "scholar", "spell"}},
-		{"devout", []string{"cleric", "priest", "paladin", "monk", "holy", "faith", "devout", "healer", "nun"}},
-		{"bard", []string{"bard", "singer", "musician", "poet", "minstrel", "actor"}},
-		{"ranger", []string{"ranger", "hunter", "archer", "scout", "druid", "bow", "tracker"}},
-		{"skirmisher", []string{"rogue", "thief", "assassin", "skirmish", "knife", "sneak", "burglar", "spy"}},
-		{"warrior", []string{"fighter", "warrior", "knight", "soldier", "barbarian", "guard", "mercenary"}},
+		{"arcanist", []string{"wizard", "mage", "sorcer", "witch", "warlock", "arcan", "scholar", "spell", "occult", "professor", "hacker", "scientist", "psion", "psychic", "engineer"}},
+		{"devout", []string{"cleric", "priest", "paladin", "monk", "holy", "faith", "devout", "healer", "nun", "doctor", "medic", "nurse", "paramedic", "chaplain", "preacher"}},
+		{"bard", []string{"bard", "singer", "musician", "poet", "minstrel", "actor", "reporter", "journalist", "socialite", "con artist", "diplomat", "showman"}},
+		{"ranger", []string{"ranger", "hunter", "archer", "scout", "druid", "bow", "tracker", "rifle", "frontier", "survival"}},
+		{"skirmisher", []string{"rogue", "thief", "assassin", "skirmish", "knife", "sneak", "burglar", "spy", "detective", "gumshoe", "investigator", "private eye", "gunslinger", "outlaw", "smuggler", "gangster"}},
+		{"warrior", []string{"fighter", "warrior", "knight", "soldier", "barbarian", "guard", "mercenary", "veteran", "marine", "cop", "police"}},
 	}
 	for _, p := range pick {
 		for _, w := range p.words {
@@ -648,7 +656,7 @@ func (g *GM) arrivalHooks(ctx context.Context, w *game.World) (func(*game.Locati
 
 func (g *GM) canonContext(w *game.World) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Campaign: %s. %s\nPremise: %s\n", w.Campaign.Title, w.Campaign.Pitch, w.Campaign.Premise)
+	fmt.Fprintf(&b, "Campaign: %s. %s\nPremise: %s\nSetting: %s\n", w.Campaign.Title, w.Campaign.Pitch, w.Campaign.Premise, settingLine(w.Setting()))
 	if ant := w.NPC(w.Campaign.AntagonistID); ant != nil {
 		fmt.Fprintf(&b, "Antagonist: %s (%s).\n", ant.Name, ant.Role)
 	}
@@ -690,7 +698,7 @@ func (g *GM) fillLocation(ctx context.Context, w *game.World, l *game.Location) 
 	req := llm.Request{Tag: "author_location", Temperature: 0.8, ForceTool: "fill_location", Tools: []llm.Tool{t},
 		Messages: []llm.Message{llm.System(authorSystem), llm.User(fmt.Sprintf(
 			"%s\nThe party arrives at %q (%s, danger %d/5). Rumour: %s\nIt connects to: %s.\nExisting NPCs: %s.%s\nCatalog keys: %s.",
-			g.canonContext(w), l.Name, l.Kind, l.Danger, l.Hint, strings.Join(neighbours, ", "), strings.Join(npcs, ", "), already, strings.Join(game.CatalogKeys(), ", ")))}}
+			g.canonContext(w), l.Name, l.Kind, l.Danger, l.Hint, strings.Join(neighbours, ", "), strings.Join(npcs, ", "), already, strings.Join(game.CatalogKeysFor(w.Setting()), ", ")))}}
 	var fill struct {
 		game.LocationFill
 		Lore []struct{ Title, Text string } `json:"lore"`
@@ -813,4 +821,19 @@ func fallbackName(concept string) string {
 		h = -h
 	}
 	return fallbackNames[h%len(fallbackNames)]
+}
+
+// settingLine describes one setting for a prompt.
+func settingLine(key string) string {
+	s := game.Setting(key)
+	return s.Name + " (" + s.Desc + ")"
+}
+
+// settingsLine lists every setting for the create_campaign schema.
+func settingsLine() string {
+	var parts []string
+	for _, s := range game.SettingList {
+		parts = append(parts, s.Key+" = "+s.Desc)
+	}
+	return strings.Join(parts, "; ")
 }

@@ -100,7 +100,7 @@ func CreateCharacter(w *World, playerID string, spec CharacterSpec) (*Character,
 	if len(p) > 0 {
 		return nil, p
 	}
-	kit := Kits[spec.Kit]
+	kit := KitFor(w.Setting(), spec.Kit)
 	class := strings.TrimSpace(spec.Class)
 	if class == "" {
 		class = kit.Name
