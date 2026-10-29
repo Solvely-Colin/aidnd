@@ -96,7 +96,7 @@ they/them, and drafts fill it from the concept.
 | `GET /campaigns/{id}/locations/{lid}` | any caller | A visited or known location; 404 otherwise. |
 | `GET /campaigns/{id}/npcs/{nid}` | any caller | Public NPC view and merchant stock. |
 | `GET /campaigns/{id}/quests` | any caller | `{quests: [...]}` |
-| `GET /campaigns/{id}/journal` | any caller | `{summary, chronicle: [{turn, text}], quests, setbacks}` |
+| `GET /campaigns/{id}/journal` | any caller | `{summary, chronicle: [{id, turn, day, kind, text, location_id, npc_ids, source, quest_id, status, outcome}], quests, setbacks}`; `kind` is fact, deed, death, promise or rumor; promises have `status` open, kept or broken |
 | `POST /campaigns/{id}/stream-token` | any caller | `{token, expires_at}` for the event stream. |
 | `GET /campaigns/{id}/events` | see SSE | Server-sent events. |
 | `GET /campaigns/{id}/log?after=&limit=` | any caller | Same events as JSON pages: `{events, last_id}`. |

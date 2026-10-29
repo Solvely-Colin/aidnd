@@ -68,8 +68,13 @@ func TestSideQuestLifecycle(t *testing.T) {
 	if f.aria.Gold != gold+40 || reward.Owner.ID != f.aria.ID || f.bram.XP != xp+60 {
 		t.Fatalf("rewards: gold %d item owner %v xp %d", f.aria.Gold, reward.Owner, f.bram.XP)
 	}
-	if len(f.elder.Memory) == 0 || !strings.Contains(f.elder.Memory[0], "Aria") {
-		t.Fatalf("elder does not remember: %v", f.elder.Memory)
+	if mem := f.elder.Recall(); len(mem) == 0 || !strings.Contains(mem[0], "Aria") {
+		t.Fatalf("elder does not remember: %v", mem)
+	}
+	for _, c := range f.w.Chronicle {
+		if c.QuestID == q.ID && (c.Kind != FactPromise || c.Status != PromiseKept) {
+			t.Fatalf("quest promise not kept: %+v", c)
+		}
 	}
 }
 
