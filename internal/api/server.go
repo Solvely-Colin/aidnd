@@ -527,15 +527,16 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Text     string `json:"text"`
-		TargetID string `json:"target_id"`
-		ZoneID   string `json:"zone_id"`
+		Text     string        `json:"text"`
+		TargetID string        `json:"target_id"`
+		ZoneID   string        `json:"zone_id"`
+		Check    *gm.CheckHint `json:"check"`
 	}
 	if err := decode(r, &body); err != nil {
 		s.fail(w, err)
 		return
 	}
-	res, err := s.gm.TakeAction(r.Context(), r.PathValue("id"), p, body.Text, gm.Hints{TargetID: body.TargetID, ZoneID: body.ZoneID})
+	res, err := s.gm.TakeAction(r.Context(), r.PathValue("id"), p, body.Text, gm.Hints{TargetID: body.TargetID, ZoneID: body.ZoneID, Check: body.Check})
 	if err != nil {
 		s.fail(w, err)
 		return

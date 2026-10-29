@@ -187,7 +187,43 @@ func describeHints(w *game.World, h Hints) string {
 			parts = append(parts, fmt.Sprintf("zone %s [%s]", z.Name, z.ID))
 		}
 	}
+	if h.Check != nil {
+		if ab, ok := game.ParseAbility(h.Check.Ability); ok {
+			parts = append(parts, fmt.Sprintf("the player asks to make a %s ability_check", ab))
+		}
+	}
 	return strings.Join(parts, ", ")
+}
+
+// directCheck turns a dock check (search, pick or force a lock) into the
+// action itself, so the roll is exactly the one the player chose. It
+// returns nil when the hint is absent or is left to the interpreter.
+func directCheck(w *game.World, actor *game.Character, h Hints) ([]game.Action, error) {
+	ch := h.Check
+	if ch == nil {
+		return nil, nil
+	}
+	a := game.Action{Kind: game.ActCheck, Purpose: ch.Purpose, Ability: ch.Ability}
+	switch ch.Purpose {
+	case "search":
+		a.Text = "search the area"
+	case "unlock", "force":
+		x := w.FindExit(w.Campaign.LocationID, ch.Exit)
+		if x == nil || x.Edge.State != game.EdgeLocked {
+			return nil, fmt.Errorf("%w: there is no locked way %q here", ErrBadRequest, ch.Exit)
+		}
+		if x.Edge.LairGate {
+			return nil, fmt.Errorf("%w: the way to %s cannot be forced; the story must progress first", ErrBadRequest, x.To.Name)
+		}
+		a.Target = x.Edge.ID
+		a.Text = map[string]string{"unlock": "pick the lock to ", "force": "force the way to "}[ch.Purpose] + x.To.Name
+	default:
+		return nil, nil
+	}
+	if msg := validateAction(w, actor, &a); msg != "" {
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, msg)
+	}
+	return []game.Action{a}, nil
 }
 
 // applyHints fills gaps from map selections without overriding words.
@@ -228,6 +264,12 @@ func applyHints(w *game.World, a game.Action, h Hints, text string) game.Action 
 	case game.ActLook:
 		if a.Target == "" && h.TargetID != "" && (enemy != nil || npc != nil) {
 			a.Target = h.TargetID
+		}
+	case game.ActCheck:
+		if h.Check != nil {
+			if ab, ok := game.ParseAbility(h.Check.Ability); ok {
+				a.Ability = string(ab)
+			}
 		}
 	case game.ActReposition:
 		if a.Zone == "" {

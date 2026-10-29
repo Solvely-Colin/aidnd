@@ -57,6 +57,10 @@ func TestRangedAttackWithCover(t *testing.T) {
 	if r.Steps[0].Rolls[0].Target != 14 || r.Steps[0].Tier != "failure" {
 		t.Fatalf("cover not applied: %+v", r.Steps[0].Rolls)
 	}
+	if ro := r.Steps[0].Rolls[0]; ro.Cover != 2 || ro.Against != "AC" || len(ro.Parts) != 2 {
+		t.Fatalf("attack roll context: %+v", ro)
+	}
+	checkPartsSum(t, r.Steps[0].Rolls[0])
 	f.w.Campaign.Turns.Budget = FullBudget(true)
 	r = Resolve(f.ctx(10, 6), f.bram, []Action{{Kind: ActAttack, Target: "wolf"}})
 	if e.HP != 4 || !hasChange(r, "hits Wolf for 6") {

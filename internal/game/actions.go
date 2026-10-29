@@ -66,10 +66,16 @@ type Roll struct {
 	Total   int       `json:"total"`
 	Target  int       `json:"target,omitempty"` // DC or AC
 	Tier    dice.Tier `json:"tier,omitempty"`
+	// Parts break Mod down (ability, proficiency, tools); they sum to Mod.
+	Parts   []RollPart `json:"parts,omitempty"`
+	Against string     `json:"against,omitempty"` // "AC" or "DC" for d20 rolls
+	Cover   int        `json:"cover,omitempty"`   // cover bonus included in Target
+	Crit    bool       `json:"crit,omitempty"`    // damage dice were doubled
 }
 
 func checkRoll(kind string, c CheckRoll) Roll {
-	return Roll{Label: c.Label, Kind: kind, Natural: c.Natural, Mod: c.Mod, Total: c.Total, Target: c.Target, Tier: c.Tier}
+	return Roll{Label: c.Label, Kind: kind, Natural: c.Natural, Mod: c.Mod, Total: c.Total, Target: c.Target, Tier: c.Tier,
+		Parts: c.Parts, Against: c.Against, Cover: c.Cover}
 }
 
 func dmgRoll(label, kind string, r dice.Result) Roll {
@@ -790,8 +796,9 @@ func attack(ctx *Ctx, c *Character, a Action, st *Step) error {
 		return fmt.Errorf("%s is %s away and %s has %s reach; reposition closer first", e.Display(), zonesWord(d), wpn.Name, ReachName(reach))
 	}
 	toHit, _ := AttackMod(c, wpn)
-	ac := e.AC + CoverBonus(l, c.ZoneID, e.ZoneID)
-	out := Attack(ctx.R, fmt.Sprintf("%s attacks %s with %s", c.Name, e.Display(), wpn.Name), toHit, ac, wpn.Damage)
+	cover := CoverBonus(l, c.ZoneID, e.ZoneID)
+	out := Attack(ctx.R, fmt.Sprintf("%s attacks %s with %s", c.Name, e.Display(), wpn.Name), toHit, e.AC+cover, wpn.Damage)
+	out.Roll.Parts, out.Roll.Cover = AttackParts(c, wpn), cover
 	st.Rolls = append(st.Rolls, checkRoll("attack", out.Roll))
 	st.Tier = out.Roll.Tier
 	if !out.Hit {
@@ -801,7 +808,9 @@ func attack(ctx *Ctx, c *Character, a Action, st *Step) error {
 		}
 		return nil
 	}
-	st.Rolls = append(st.Rolls, dmgRoll(fmt.Sprintf("%s damage", wpn.Name), "damage", *out.Damage))
+	dr := dmgRoll(fmt.Sprintf("%s damage", wpn.Name), "damage", *out.Damage)
+	dr.Crit = out.Crit
+	st.Rolls = append(st.Rolls, dr)
 	dmg := out.Damage.Total
 	e.HP = max(0, e.HP-dmg)
 	line := fmt.Sprintf("%s hits %s for %d damage (%d/%d HP)", c.Name, e.Display(), dmg, e.HP, e.MaxHP)
@@ -837,7 +846,7 @@ func subdue(ctx *Ctx, c *Character, a Action, st *Step) error {
 	dc := SubdueDC(e)
 	ch := ctx.R.D20(c.CheckMod(ab), dc)
 	st.Rolls = append(st.Rolls, Roll{Label: fmt.Sprintf("%s tries to %s %s (%s)", c.Name, strings.ReplaceAll(method, "_", " "), e.Display(), ab),
-		Kind: "subdue", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier})
+		Kind: "subdue", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: CheckParts(c, ab), Against: "DC"})
 	st.Tier = ch.Tier
 	if !ch.Tier.Succeeded() {
 		st.Changes = append(st.Changes, fmt.Sprintf("%s fails to subdue %s", c.Name, e.Display()))
@@ -953,6 +962,7 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 		dc = 10
 	}
 	mod := c.CheckMod(ab)
+	parts := CheckParts(c, ab)
 	label := fmt.Sprintf("%s %s check", c.Name, ab)
 	if lockEdge != nil {
 		dc = lockEdge.LockDC
@@ -961,6 +971,7 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 		}
 		if ab == DEX && w.FindItemOf(OwnerCharacter, c.ID, "thieves_tools") != nil {
 			mod += 2
+			parts = append(parts, RollPart{Label: "Thieves' tools", Value: 2})
 			label += " with thieves' tools"
 		}
 	}
@@ -968,7 +979,7 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 		label += " to " + trimTo(a.Text, 60)
 	}
 	ch := ctx.R.D20(mod, dc)
-	st.Rolls = append(st.Rolls, Roll{Label: label, Kind: "check", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier})
+	st.Rolls = append(st.Rolls, Roll{Label: label, Kind: "check", Natural: ch.Natural, Mod: ch.Mod, Total: ch.Total, Target: dc, Tier: ch.Tier, Parts: parts, Against: "DC"})
 	st.Tier = ch.Tier
 	switch ch.Tier {
 	case dice.CritFailure:

@@ -148,6 +148,23 @@ func TestLockPickedByCheck(t *testing.T) {
 	if !hasChange(r, "is open") || f.w.EdgeBetween(f.hub.ID, f.vault.ID).State != EdgeKnown {
 		t.Fatalf("lock not picked: %v %s", r.Changes, stepErr(r, 0))
 	}
+	ro := r.Steps[0].Rolls[0]
+	if ro.Against != "DC" || ro.Target != 15 || len(ro.Parts) != 2 || ro.Parts[0].Label != "DEX" || ro.Parts[1].Label != "Proficiency" {
+		t.Fatalf("roll parts: %+v", ro)
+	}
+	checkPartsSum(t, ro)
+}
+
+// checkPartsSum: the parts shown to players add up to the modifier rolled.
+func checkPartsSum(t *testing.T, ro Roll) {
+	t.Helper()
+	sum := 0
+	for _, p := range ro.Parts {
+		sum += p.Value
+	}
+	if sum != ro.Mod || ro.Natural+ro.Mod != ro.Total {
+		t.Fatalf("parts %+v sum %d, mod %d, total %d", ro.Parts, sum, ro.Mod, ro.Total)
+	}
 }
 
 func TestLairGateCannotBeForced(t *testing.T) {

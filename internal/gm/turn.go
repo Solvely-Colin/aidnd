@@ -138,8 +138,14 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	recent := g.recent(ctx, w)
 	g.progress(campaignID, "reading", map[string]any{"character_id": actor.ID, "character": actor.Name, "text": text})
 
-	// 1. interpret
-	actions := g.interpret(ctx, w, actor, text, hints, recent)
+	// 1. interpret (a check picked from the dock is rolled as chosen)
+	actions, err := directCheck(w, actor, hints)
+	if err != nil {
+		return nil, err
+	}
+	if actions == nil {
+		actions = g.interpret(ctx, w, actor, text, hints, recent)
+	}
 	// 2. resolve
 	onArrive, ambush := g.arrivalHooks(ctx, w)
 	prevLoc := w.Campaign.LocationID
