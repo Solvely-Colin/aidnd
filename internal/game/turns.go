@@ -356,11 +356,11 @@ type EnemyTurn struct {
 	Text     string         `json:"text"`
 	// Save is the target's save against the attack's condition, if any;
 	// Before and After are condition effects on the enemy itself.
-	Save       *Roll    `json:"save,omitempty"`
-	Inflicted  string   `json:"inflicted,omitempty"`
-	Before []string `json:"before,omitempty"` // start of its turn: stunned, standing up
-	After  []string `json:"after,omitempty"`  // end of its turn: saves, wearing off
-	Rolls  []Roll   `json:"rolls,omitempty"`  // the enemy's own saves
+	Save      *Roll    `json:"save,omitempty"`
+	Inflicted string   `json:"inflicted,omitempty"`
+	Before    []string `json:"before,omitempty"` // start of its turn: stunned, standing up
+	After     []string `json:"after,omitempty"`  // end of its turn: saves, wearing off
+	Rolls     []Roll   `json:"rolls,omitempty"`  // the enemy's own saves
 }
 
 // enemiesActingNow spreads the enemies over the round: each acts once per
