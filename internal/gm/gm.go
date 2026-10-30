@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -118,6 +119,11 @@ func (g *GM) lock(id string) func() {
 
 // commit saves the world with events and publishes them.
 func (g *GM) commit(ctx context.Context, w *game.World, evs ...store.Event) ([]store.Event, error) {
+	if party := w.Focused(); party != "" {
+		for i := range evs {
+			evs[i] = tagParty(evs[i], party)
+		}
+	}
 	saved, err := g.Store.Save(ctx, w, evs...)
 	if err != nil {
 		return nil, err
@@ -126,6 +132,25 @@ func (g *GM) commit(ctx context.Context, w *game.World, evs ...store.Event) ([]s
 		g.Publish(w.Campaign.ID, saved)
 	}
 	return saved, nil
+}
+
+// tagParty marks an event with the group it happened to, so players in
+// other groups can leave it out of their feed.
+func tagParty(e store.Event, party string) store.Event {
+	var m map[string]any
+	if len(e.Data) == 0 {
+		m = map[string]any{}
+	} else if err := json.Unmarshal(e.Data, &m); err != nil || m == nil {
+		return e
+	}
+	if _, ok := m["party"]; ok {
+		return e
+	}
+	m["party"] = party
+	if b, err := json.Marshal(m); err == nil {
+		e.Data = b
+	}
+	return e
 }
 
 // Load reads a campaign (no lock; for read-only views).
@@ -262,6 +287,10 @@ func (g *GM) replaceDead(ctx context.Context, w *game.World, playerID string, ol
 			return nil, Conflict("%s is already in the party; pick another name", other.Name)
 		}
 	}
+	// they join the dead character's group, where it stands
+	if err := w.FocusPlayer(playerID); err != nil {
+		return nil, err
+	}
 	for _, it := range w.ItemsOf(game.OwnerCharacter, old.ID) {
 		it.Owner = game.Owner{Kind: game.OwnerLocation, ID: w.Campaign.LocationID}
 	}
@@ -276,6 +305,7 @@ func (g *GM) replaceDead(ctx context.Context, w *game.World, playerID string, ol
 	if err != nil {
 		return nil, err
 	}
+	c.Group = old.Group
 	game.JoinMidway(w, c, old.XP, zone)
 	if seat >= 0 {
 		w.Campaign.Turns.Order[seat] = c.ID

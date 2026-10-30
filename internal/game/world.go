@@ -23,6 +23,8 @@ type World struct {
 	Beats      []*Beat          `json:"beats"`
 	Chronicle  []ChronicleEntry `json:"chronicle"`
 	Defeats    []DefeatRecord   `json:"defeats"`
+
+	focus *focus // see Focus
 }
 
 // NewID returns a fresh id like "loc12", unique within the world.

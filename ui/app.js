@@ -386,12 +386,14 @@ function restartFeed() {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
   es.addEventListener("progress", ev => {
     S.progress = JSON.parse(ev.data).data;
+    // another group's turn is theirs to watch
+    if (S.progress?.character_id && !actorName(S.progress.character_id)) { S.progress = null; return; }
     (S.progress?.rolls || []).forEach(r => queueRoll(r, actorName(S.progress.character_id)));
     renderFeed();
   });
@@ -413,9 +415,27 @@ function onEvent(e) {
   refreshTimer = setTimeout(refreshView, 250);
 }
 
+// myEvents keeps what happened to the caller's group: when the world is
+// split, each group has its own story. It follows the caller through splits
+// and joins, so their story before a split stays in their feed.
+function myEvents(evs) {
+  const me = S.view?.you?.character_id;
+  let cur = "main";
+  const out = [];
+  for (const e of evs) {
+    const d = e.data || {};
+    if (e.type === "group_split") { if (d.character_id === me) cur = d.group; out.push(e); continue; }
+    if (e.type === "group_joined") { if (d.from === cur || d.into === cur) cur = d.group; out.push(e); continue; }
+    if (e.type === "character_created" && d.player_id === S.me?.player_id) cur = S.view?.group || cur;
+    if (!d.party || d.party === cur) out.push(e);
+  }
+  return out;
+}
+
 // liveEvent reacts to something that just happened (not to the replay).
 function liveEvent(e) {
   const d = e.data || {};
+  if (d.party && S.view?.group && d.party !== S.view.group) return;
   if (e.type === "action_resolved") eachRoll(d).forEach(r => queueRoll(r.d20, actorName(d.character_id)));
   if (e.type === "enemy_turns") (d.turns || []).forEach(t => t.attack?.roll && queueRoll({ ...t.attack.roll, kind: "attack", label: t.attack.roll.label || `Attack on ${t.target || "the party"}` }, t.enemy, true));
   if (e.type === "location_changed") { S.collapsed = false; S.talkTo = ""; S.stock = {}; }
@@ -882,6 +902,7 @@ function renderRails() {
   l.innerHTML = `<div class="rail-scroll"><div class="panel-body">
       <p class="rail-h">Party</p>
       <div class="pcards">${v.party.map(c => pcardHTML(c, c.id === sel)).join("")}</div>
+      ${groupsHTML()}
       ${v.party.length ? `<p class="rail-h">${isMe(sel) ? "Your character" : `${esc(firstName(v.party.find(p => p.id === sel).name))}’s sheet`}</p>${sheetHTML(true)}` : ""}
     </div></div>`;
   r.innerHTML = `<div class="rail-board">${placeArt(loc.id)}<div class="shade"></div>${loc.zones?.length ? boardHTML() : ""}</div>
@@ -898,6 +919,34 @@ function pcardHTML(c, sel) {
       ${hpline(c)}<span class="pc-k">${c.hp}/${c.max_hp} HP · AC ${c.ac}${c.zone_name ? ` · <span class="dim">${esc(c.zone_name)}</span>` : ""}</span>
       ${conds.length ? `<span class="conds">${conds.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note || "")}">${esc(k.label)}</span>`).join("")}</span>` : ""}
     </span></button>`;
+}
+
+// groupsHTML shows the other groups in the shared world, with a way to go
+// off alone or to join a group standing in the same place.
+function groupsHTML() {
+  const v = S.view, gs = v.groups || [];
+  if (v.status !== "active") return "";
+  const mineG = gs.find(g => g.mine), others = gs.filter(g => !g.mine);
+  const canSolo = mineG && mineG.members.length > 1 && !v.encounter;
+  if (!others.length && !canSolo) return "";
+  return `<section class="groups"><p class="rail-h">Other groups</p>
+    ${others.map(g => `<div class="grp ${g.here ? "here" : ""}">
+      <span class="t"><b>${esc(list(g.members.map(m => firstName(m.name))))}</b>
+        <span>${g.here ? "here with you" : esc(g.location || "somewhere")}${g.fighting ? " · in a fight" : ""}</span></span>
+      ${g.here && !g.fighting && !v.encounter ? `<button class="btn grp-join" data-joingrp="${esc(g.id)}">Join up</button>` : ""}
+    </div>`).join("") || `<span class="empty-line">Everyone is together.</span>`}
+    ${canSolo ? `<button class="link grp-solo" data-act="solo">Go off on your own</button><span class="hint-line">You keep your own scene and turns in the same world. Meet your friends somewhere to join up again.</span>` : ""}
+  </section>`;
+}
+
+async function groupMove(kind, body, t) {
+  if (t) t.disabled = true;
+  try {
+    const r = await api("POST", `/campaigns/${S.route}/me/${kind}`, body);
+    S.view = r.campaign;
+    S.journal = null; S.map = null;
+    renderChrome(); renderFeed(true);
+  } catch (e) { toast(e.message); if (t) t.disabled = false; }
 }
 
 // refreshJournal redraws the journal wherever it is showing.
@@ -962,6 +1011,7 @@ function eachRoll(d) {
 function feedItems(evs) {
   const out = [], party = S.view?.party || [];
   let lastTurn = "", joins = [];
+  evs = myEvents(evs);
   const flush = () => { if (joins.length) out.push({ k: "sys", text: `${list(joins)} ${joins.length > 1 ? "join" : "joins"} the party` }); joins = []; };
   for (const e of evs) {
     const d = e.data || {};
@@ -969,6 +1019,8 @@ function feedItems(evs) {
     flush();
     switch (e.type) {
       case "location_changed": out.push({ k: "place", name: d.name }); break;
+      case "group_split": out.push({ k: "sys", text: `${isMe(d.character_id) ? "You go" : `${d.character} goes`} off alone${d.location ? ` from ${d.location}` : ""}.` }); break;
+      case "group_joined": out.push({ k: "sys", text: `${d.joining} ${d.joining?.includes(",") ? "join" : "joins"} up with ${d.with}.` }); break;
       case "turn_started": {
         // Mark the turn only when it passes to someone else.
         if (d.character_id === lastTurn) break;
@@ -1628,6 +1680,7 @@ function sceneHTML() {
         <span class="t"><b>${esc(n.name)}</b><span>${esc([n.role, n.merchant ? "sells goods" : ""].filter(Boolean).join(", "))}${zoneName(n.zone_id) ? " · " + esc(zoneName(n.zone_id)) : ""}</span></span><span class="go">Talk →</span></button>`).join("")
         || `<span class="empty-line" style="padding:8px 0">No one else is here.</span>`}
     </section>
+    ${stageMode() ? "" : groupsHTML()}
     ${loc.items?.length ? `<section><span class="mono-k">On the ground</span>${loc.items.map(i => `<button class="row-line" data-send="I pick up ${esc(the(i.name))}"><span class="nm">${esc(i.name)}${i.effect ? `<small>${esc(effectText(i.effect))}</small>` : ""}</span><span class="verb">Take</span></button>`).join("")}</section>` : ""}`;
 }
 
@@ -2030,7 +2083,7 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-saga],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto]");
+  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-saga],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto],[data-joingrp]");
   if (!t || t.disabled) return;
   const ds = t.dataset, act = ds.act;
   if (ds.open) return go(`#/c/${ds.open}`);
@@ -2099,8 +2152,10 @@ document.addEventListener("click", async e => {
     return send(x.state === "locked" ? `I try to get through ${x.label}` : S.view.encounter ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}`);
   }
   if (ds.send) return send(ds.send);
+  if (ds.joingrp) return groupMove("join", { group: ds.joingrp }, t);
   try {
     switch (act) {
+      case "solo": return groupMove("solo", {}, t);
       case "signout": await fetch("/auth/logout", { method: "POST" }); S.me = null; leaveCampaign(); S.route = ""; location.hash = ""; return renderSignin();
       case "home": return go("#/");
       case "create": return createCampaign();

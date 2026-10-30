@@ -142,6 +142,10 @@ type CharExtra struct {
 	Strain int      `json:"strain,omitempty"`
 	Scars  []string `json:"scars,omitempty"`
 	Faced  []string `json:"faced,omitempty"`
+
+	// Group is the split-off group the character travels with ("" for
+	// the main one; see groups.go).
+	Group string `json:"group,omitempty"`
 }
 
 // Concentration is a spell being held.
@@ -680,6 +684,8 @@ type CampaignExtra struct {
 	// Milestones lift every character to at least a level when an
 	// objective is done: objective id -> level.
 	Milestones map[string]int `json:"milestones,omitempty"`
+	// Groups are parties split off from the main one (see groups.go).
+	Groups []*Group `json:"groups,omitempty"`
 }
 
 // Deadly reports whether characters can die in this campaign.

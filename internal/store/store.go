@@ -199,7 +199,8 @@ func (s *Store) Save(ctx context.Context, w *game.World, events ...Event) ([]Eve
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err := saveWorld(ctx, tx, w, s.now().Unix()); err != nil {
+	// a world focused on one group is stored whole
+	if err := w.Settled(func() error { return saveWorld(ctx, tx, w, s.now().Unix()) }); err != nil {
 		return nil, err
 	}
 	out := make([]Event, 0, len(events))

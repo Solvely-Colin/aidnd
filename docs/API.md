@@ -215,6 +215,15 @@ and the main quest only shows objectives up to the first one not yet done.
 }
 ```
 
+### Groups
+
+A campaign is one shared world that can hold several groups. The campaign view, map, journal, quests and location views show the caller's group: its place, scene, turns and fight. `group` is the caller's group id (`main` until they split off) and `groups` lists every group: `{id, members: [{character_id, name, down}], location_id, location, fighting, mine, here}`.
+
+- `POST /campaigns/{id}/me/solo` splits the caller's character into a group of their own (409 mid-fight or when already alone). Returns `{campaign}`.
+- `POST /campaigns/{id}/me/join {group}` brings the caller's whole group into another group in the same place (409 when apart or fighting). Returns `{campaign}`.
+
+Events saved during a group's turn carry `data.party` (the group id). `group_split {character_id, character, group, from, location}` and `group_joined {group, from, into, joining, with}` are untagged.
+
 ## Turns
 
 In a fight only the active player may act. Outside fights there is no turn

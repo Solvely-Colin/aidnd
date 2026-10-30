@@ -133,6 +133,9 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	if err != nil {
 		return nil, err
 	}
+	if err := w.FocusPlayer(playerID); err != nil {
+		return nil, err
+	}
 	if w.Campaign.Status != game.StatusActive {
 		return nil, Conflict("the campaign is %s", w.Campaign.Status)
 	}
@@ -398,6 +401,9 @@ func (g *GM) Skip(ctx context.Context, campaignID, playerID string, mode SkipMod
 	defer g.lock(campaignID)()
 	w, err := g.Store.Load(ctx, campaignID)
 	if err != nil {
+		return nil, err
+	}
+	if err := w.FocusPlayer(playerID); err != nil {
 		return nil, err
 	}
 	if w.Campaign.Status != game.StatusActive {
