@@ -107,6 +107,31 @@ export class GameServer extends Container<Env> {
 			LLM_API_KEY: "bridge",
 			LLM_REASONING_EFFORT: env.LLM_REASONING_EFFORT ?? "",
 		};
+		// A deploy restarts this object but not its container: with the
+		// durable_object policy a running container keeps its old image, and
+		// an open event stream keeps it awake, so the game server could stay
+		// on old code for hours. Every deploy runs this constructor, so here
+		// is where a container on an old image is stopped. The next request
+		// starts it on the new one; saved games live in D1.
+		ctx.blockConcurrencyWhile(() => this.upgradeImage());
+	}
+
+	async upgradeImage(): Promise<void> {
+		try {
+			const c = this.ctx.container as any;
+			const want: string | undefined = c?.images?.gameserver;
+			if (!c?.running || !want) return;
+			const info = await c.inspect();
+			// inspect reports an empty image while starting; leave those be.
+			if (!info?.image || info.image === want) return;
+			console.log(`game server on ${info.image}, deploying ${want}: restarting`);
+			// SIGTERM lets the server finish in-flight requests (10 s).
+			await this.stop();
+			for (let i = 0; i < 24 && c.running; i++) await new Promise((r) => setTimeout(r, 500));
+			if (c.running) await this.destroy();
+		} catch (e) {
+			console.log("image check failed:", (e as Error)?.message ?? e);
+		}
 	}
 }
 
