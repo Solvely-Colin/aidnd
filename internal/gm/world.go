@@ -47,6 +47,10 @@ func (g *GM) worldTicks(ctx context.Context, campaignID string) (int, error) {
 		lv.LastTickDay++
 		gz := g.gazette(ctx, w, rep)
 		lv.Gazette = gz
+		for _, d := range rep.Downtime {
+			party := game.GroupOf(w.Character(d.CharacterID))
+			evs = append(evs, tagParty(store.NewEvent("downtime_done", "", d), party))
+		}
 		evs = append(evs, store.NewEvent("world_tick", "", map[string]any{
 			"week": rep.Week, "tide": rep.Tide, "tide_from": rep.TideFrom, "band": game.TideBand(rep.Tide), "idle": rep.Idle, "gazette": gz}))
 	}
@@ -113,4 +117,39 @@ var weatherLines = []string{
 	"Fair and cool. A hard frost is possible inland.",
 	"Overcast, with a heavy swell running on the outer reefs.",
 	"Warm and close, thunder in the hills by evening.",
+}
+
+// SetDowntime queues the player's downtime order for the next world tick;
+// kind "" cancels it.
+func (g *GM) SetDowntime(ctx context.Context, campaignID, playerID, kind string) (*game.World, error) {
+	defer g.lock(campaignID)()
+	w, err := g.Store.Load(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	if err := w.FocusPlayer(playerID); err != nil {
+		return nil, err
+	}
+	if w.Campaign.Status != game.StatusActive {
+		return nil, Conflict("the campaign is %s", w.Campaign.Status)
+	}
+	c := w.CharacterOf(playerID)
+	if c == nil {
+		return nil, ErrForbidden
+	}
+	if kind != "" {
+		if w.InCombat() {
+			return nil, Conflict("not in the middle of a fight")
+		}
+		if err := game.CanDowntime(w, c, w.Here()); err != nil {
+			return nil, Conflict("%s", err.Error())
+		}
+	}
+	if err := game.QueueDowntime(w, c, kind); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	if _, err := g.commit(ctx, w); err != nil {
+		return nil, err
+	}
+	return w, nil
 }

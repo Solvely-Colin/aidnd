@@ -23,6 +23,13 @@ func TestWorldTicksDailyAndWritesTheGazette(t *testing.T) {
 		t.Fatal("the clock should start without a tick")
 	}
 	tide := w.Campaign.Living.Tide
+	// a night's downtime at the hotel
+	if _, err := r.g.SetDowntime(bg, r.id, "u1", "nap"); err == nil {
+		t.Fatal("unknown downtime accepted")
+	}
+	_, err = r.g.SetDowntime(bg, r.id, "u1", "work")
+	must(t, err)
+	gold := r.world(t).CharacterOf("u1").Gold
 	r.now = r.now.Add(24 * time.Hour)
 	_, err = r.g.Sweep(bg)
 	must(t, err)
@@ -30,6 +37,9 @@ func TestWorldTicksDailyAndWritesTheGazette(t *testing.T) {
 	lv := w.Campaign.Living
 	if lv.Week != 1 || lv.Tide <= tide-1 || lv.Gazette == nil || lv.Gazette.Headlines[0] != "Fog Hides Innsmouth Harbor" || lv.Gazette.Classified == "" {
 		t.Fatalf("after a day: week %d tide %d gazette %+v", lv.Week, lv.Tide, lv.Gazette)
+	}
+	if me := w.CharacterOf("u1"); me.Gold <= gold || me.Downtime != nil || len(r.events(t, "downtime_done")) != 1 {
+		t.Fatalf("downtime work: gold %d -> %d", gold, me.Gold)
 	}
 	if evs := r.events(t, "world_tick"); len(evs) != 1 || strings.Contains(string(evs[0].Data), `"party"`) {
 		t.Fatalf("one untagged world_tick event: %d", len(evs))

@@ -282,6 +282,10 @@ type YouView struct {
 	Joined      bool   `json:"joined"`
 	YourTurn    bool   `json:"your_turn"`
 	AutoRoll    bool   `json:"auto_roll"`
+	// Downtime is the order queued for the next world tick; CanDowntime
+	// is set where one can be queued.
+	Downtime    string `json:"downtime,omitempty"`
+	CanDowntime bool   `json:"can_downtime,omitempty"`
 }
 
 type SceneView struct {
@@ -341,6 +345,15 @@ type WorldView struct {
 	Tide    int           `json:"tide"`
 	Band    string        `json:"band"`
 	Gazette *game.Gazette `json:"gazette,omitempty"`
+	// Downtime lists the orders a character can queue at a safe place.
+	Downtime []DowntimeKind `json:"downtime"`
+}
+
+// DowntimeKind is one downtime order.
+type DowntimeKind struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+	Desc string `json:"desc"`
 }
 
 // sagaStart is the world's first day; a world week is a calendar week.
@@ -352,7 +365,11 @@ func worldView(w *game.World) *WorldView {
 		return nil
 	}
 	d := sagaStart.AddDate(0, 0, 7*lv.Week)
-	return &WorldView{Week: lv.Week, Date: d.Format("January 2, 2006"), Tide: lv.Tide, Band: game.TideBand(lv.Tide), Gazette: lv.Gazette}
+	v := &WorldView{Week: lv.Week, Date: d.Format("January 2, 2006"), Tide: lv.Tide, Band: game.TideBand(lv.Tide), Gazette: lv.Gazette}
+	for _, k := range game.DowntimeKinds {
+		v.Downtime = append(v.Downtime, DowntimeKind{Key: k.Key, Name: k.Name, Desc: k.Desc})
+	}
+	return v
 }
 
 // MyCampaign is a campaign in the player's own list.
@@ -694,6 +711,12 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	}
 	if p := w.Player(playerID); p != nil {
 		v.You = YouView{PlayerID: p.ID, CharacterID: p.CharacterID, Joined: true, AutoRoll: p.AutoRoll}
+		if me := w.Character(p.CharacterID); me != nil && c.Status == game.StatusActive {
+			if me.Downtime != nil {
+				v.You.Downtime = me.Downtime.Kind
+			}
+			v.You.CanDowntime = !w.InCombat() && game.CanDowntime(w, me, w.Here()) == nil
+		}
 		if c.Status == game.StatusActive {
 			if v.FreeRoam {
 				me := w.Character(p.CharacterID)
