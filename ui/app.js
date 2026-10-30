@@ -635,7 +635,7 @@ function classStep(d) {
       <h3>${esc(cur.name)}</h3><p>${esc(cur.desc)}</p>
       <dl><dt>Leans on</dt><dd>${cur.primary.map(a => ABIL_NAME[a]).join(" or ")}</dd>
         <dt>Saves</dt><dd>${cur.saves.map(a => ABIL_NAME[a]).join(", ")}</dd>
-        <dt>Starts with</dt><dd>${esc(cur.gear.join(", "))}</dd>
+        <dt>Starts with</dt><dd>${esc(gearList(cur.gear).join(", "))}</dd>
         <dt>At 3rd level</dt><dd>${esc(cur.subclass)}${cur.subclass !== cur.subclass_rules_name ? ` <small>(${esc(cur.subclass_rules_name)})</small>` : ""}</dd></dl>
       <ol class="ladder">${[1, 2, 3, 4, 5].map(l => `<li><span>${l}</span><div>${cur.features.filter(f => f.level === l).map(f => `<b title="${esc(f.desc)}">${esc(f.name)}</b>`).join("") || "<em>—</em>"}</div></li>`).join("")}</ol>
     </div>` : `<div class="dossier empty"><p>Pick a class to see what it does at each level. Every era plays the same rules under its own names.</p></div>`;
@@ -713,6 +713,13 @@ function spellStep(d) {
     ${spellRows(p.spell_options || [], d.spells || [], p, "dspell")}`;
 }
 
+// gearList folds repeats: two daggers read "Switchblade ×2".
+function gearList(gear) {
+  const n = new Map();
+  for (const g of gear) n.set(g, (n.get(g) || 0) + 1);
+  return [...n].map(([g, k]) => k > 1 ? `${g} ×${k}` : g);
+}
+
 function storyStep(d) {
   const p = S.prev, cur = rl("classes", d.class_key), sp = rl("species", d.species), bg = rl("backgrounds", d.background);
   const sc = p?.scores || {};
@@ -724,7 +731,7 @@ function storyStep(d) {
       ${p ? `<span class="stats">${p.max_hp} HP · ${ABIL.map(a => `${a} ${sc[a] ?? "–"}`).join("  ")}</span>
       <span class="stats">${(p.skills || []).map(skillName).join(" · ")}</span>
       ${(d.spells || []).length ? `<span class="stats">${d.spells.map(k => spellOf(k)?.name || k).join(" · ")}</span>` : ""}
-      ${cur ? `<span class="stats">${esc(cur.gear.join(" · "))}</span>` : ""}` : ""}
+      ${cur ? `<span class="stats">${esc(gearList(cur.gear).join(" · "))}</span>` : ""}` : ""}
     </div></div>
     ${p?.problems?.length ? `<ul class="problems">${p.problems.map(x => `<li>${esc(x.message || x)}</li>`).join("")}</ul>` : ""}`;
 }
