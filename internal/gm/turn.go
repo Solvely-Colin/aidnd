@@ -242,6 +242,9 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	out.WorldChanges = append(append(out.WorldChanges, dir.BeatChanges...), nar.Changes...)
 	out.WorldRolls = nar.Rolls
 
+	for i, ch := range res.Changes {
+		res.Changes[i] = game.Reskin(ch, w.Setting())
+	}
 	evs := []store.Event{
 		store.NewEvent("player_action", playerID, map[string]any{"character_id": actor.ID, "character": actor.Name, "text": text, "hints": hints}),
 		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": append(res.Rolls(), nar.Rolls...), "world_changes": out.WorldChanges}),
