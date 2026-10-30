@@ -331,6 +331,9 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 		}
 	}
 	line("PARTY: %s", orNone(party))
+	if other := w.Elsewhere(); len(other) > 0 {
+		line("OTHER PLAYER CHARACTERS IN THE WORLD (separate groups; they act on their own turns, so never narrate them acting): %s", strings.Join(other, "; "))
+	}
 	var offered, active []string
 	for _, q := range w.Quests {
 		switch q.Status {

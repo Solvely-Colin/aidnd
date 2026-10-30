@@ -227,6 +227,17 @@ more regions join the world as they are written.
   narrator's `hazard` tool with condition `horror`. Scars are played by the
   narrator; "Hears whispers" also lowers passive Perception by 2.
 
+## Shared world: groups (2026-10-30)
+
+One campaign is one shared world. A character can go off alone, and groups that meet in the same place can join up. The world (places, people, items, quests, lore, the chronicle) is shared; each group owns where it stands, its scene, its turn order, its fight and its story so far.
+
+- The main group lives in the campaign's own fields, so a world with one group plays and stores exactly as before. Split-off groups live in `Campaign.Groups`; a character's `Group` names its group ("" is main).
+- `World.Focus(group)` swaps a group's state into the campaign fields and hides everyone else's characters and players, so the whole engine and GM pipeline run unchanged for that group. `Settle` undoes it; the store settles before saving or snapshotting. Every GM entry point that acts for a player (`TakeAction`, `Roll`, `Skip`, `CancelPending`, replacing a dead character) and every read view focuses on the caller's group.
+- `SplitOff` refuses mid-fight and refuses to split a whole group. `JoinGroups` needs both groups in the same place and neither fighting; the joined group keeps the target's scene and is the main group if either was.
+- Events saved while focused carry `party` (the group id); the app shows a player the events of the groups they were in at the time, so their story before a split stays in their feed. `group_split` and `group_joined` events are shown to everyone.
+- The narrator gets an OTHER PLAYER CHARACTERS line: who is in another group and where, flagged when they stand in the same place, and is told never to narrate them acting.
+- Not yet: side initiative when two groups share a fight, per-group rewind (the DM console rewinds the whole world), and changed-row saves.
+
 ## Changes from the live play-test (deepseek-v4.1-flash)
 
 - Quests stay completable whatever the author names: an obtain/deliver item that exists

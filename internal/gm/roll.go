@@ -183,6 +183,9 @@ func (g *GM) Roll(ctx context.Context, campaignID, playerID string) (*TurnResult
 	if err != nil {
 		return nil, err
 	}
+	if err := w.FocusPlayer(playerID); err != nil {
+		return nil, err
+	}
 	if w.Campaign.Status != game.StatusActive {
 		return nil, Conflict("the campaign is %s", w.Campaign.Status)
 	}
@@ -251,6 +254,9 @@ func (g *GM) CancelPending(ctx context.Context, campaignID, playerID string) err
 	defer g.lock(campaignID)()
 	w, err := g.Store.Load(ctx, campaignID)
 	if err != nil {
+		return err
+	}
+	if err := w.FocusPlayer(playerID); err != nil {
 		return err
 	}
 	pl := w.Player(playerID)

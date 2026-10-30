@@ -23,8 +23,8 @@ type Snapshot struct {
 // SaveSnapshot keeps w as it is now, before a turn changes it, tagged with
 // the campaign's latest event so a rewind knows which events to undo.
 func (s *Store) SaveSnapshot(ctx context.Context, w *game.World, label string) error {
-	data, err := json.Marshal(w)
-	if err != nil {
+	var data []byte
+	if err := w.Settled(func() (err error) { data, err = json.Marshal(w); return err }); err != nil {
 		return err
 	}
 	id := w.Campaign.ID

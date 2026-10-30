@@ -321,6 +321,50 @@ type CampaignView struct {
 	// Storyline is the main quest that matters where the party stands (a
 	// saga has one per region).
 	Storyline string `json:"storyline,omitempty"`
+	// Group is the caller's group; Groups lists every group in the world
+	// (one, the main group, until someone splits off).
+	Group  string      `json:"group"`
+	Groups []GroupView `json:"groups"`
+}
+
+// GroupView is one party in the shared world.
+type GroupView struct {
+	ID       string       `json:"id"`
+	Members  []MemberView `json:"members"`
+	Location string       `json:"location_id"`
+	Place    string       `json:"location"`
+	Fighting bool         `json:"fighting"`
+	Mine     bool         `json:"mine"`
+	// Here is set when the group stands where the caller's group does.
+	Here bool `json:"here"`
+}
+
+// MemberView names a character in a group.
+type MemberView struct {
+	CharacterID string `json:"character_id"`
+	Name        string `json:"name"`
+	Down        bool   `json:"down,omitempty"`
+}
+
+func groupsView(w *game.World, mine string) []GroupView {
+	out := []GroupView{}
+	for _, gi := range w.GroupInfos() {
+		gv := GroupView{ID: gi.ID, Location: gi.LocationID, Fighting: gi.Fighting, Mine: gi.ID == mine,
+			Here: gi.LocationID == w.Campaign.LocationID, Members: []MemberView{}}
+		if l := w.Location(gi.LocationID); l != nil {
+			gv.Place = l.Name
+		}
+		for _, c := range gi.Members {
+			if c.Dead {
+				continue
+			}
+			gv.Members = append(gv.Members, MemberView{CharacterID: c.ID, Name: c.Name, Down: c.Down()})
+		}
+		if len(gv.Members) > 0 {
+			out = append(out, gv)
+		}
+	}
+	return out
 }
 
 func itemView(w *game.World, it *game.Item, c *game.Character, n *game.NPC) ItemView {
@@ -558,6 +602,7 @@ func encounterView(w *game.World) *EncounterView {
 }
 
 func campaignView(w *game.World, playerID string) CampaignView {
+	_ = w.FocusPlayer(playerID)
 	c := w.Campaign
 	v := CampaignView{ID: c.ID, Title: c.Title, Pitch: c.Pitch, Premise: c.Premise, Setting: w.Setting(), Status: c.Status, Turn: c.Turn,
 		Setbacks: c.Setbacks, MaxSetbacks: c.MaxSetbacks, MaxPlayers: c.MaxPlayers,
@@ -575,6 +620,11 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	for _, p := range w.Players {
 		v.Players = append(v.Players, PlayerView{ID: p.ID, Name: p.Name, CharacterID: p.CharacterID})
 	}
+	v.Group = game.MainGroup
+	if f := w.Focused(); f != "" {
+		v.Group = f
+	}
+	v.Groups = groupsView(w, v.Group)
 	v.Saga, v.Dread = c.Saga, c.Dread
 	if mq := w.MainQuest(); mq != nil {
 		v.Storyline = mq.ID

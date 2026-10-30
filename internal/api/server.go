@@ -82,6 +82,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/start", s.auth(s.handleStart))
 	mux.HandleFunc("POST /campaigns/{id}/actions", s.auth(s.handleAction))
 	mux.HandleFunc("POST /campaigns/{id}/skip", s.auth(s.handleSkip))
+	mux.HandleFunc("POST /campaigns/{id}/me/solo", s.auth(s.handleSolo))
+	mux.HandleFunc("POST /campaigns/{id}/me/join", s.auth(s.handleJoinGroup))
 	mux.HandleFunc("POST /campaigns/{id}/roll", s.auth(s.handleRoll))
 	mux.HandleFunc("POST /campaigns/{id}/roll/cancel", s.auth(s.handleCancelRoll))
 	mux.HandleFunc("POST /campaigns/{id}/me/dice", s.auth(s.handleDice))
@@ -411,7 +413,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetCampaign(w http.ResponseWriter, r *http.Request) {
-	wld, err := s.store.Load(r.Context(), r.PathValue("id"))
+	wld, err := s.loadFor(r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -645,7 +647,7 @@ func (s *Server) handleSkip(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMap(w http.ResponseWriter, r *http.Request) {
-	wld, err := s.store.Load(r.Context(), r.PathValue("id"))
+	wld, err := s.loadFor(r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -654,7 +656,7 @@ func (s *Server) handleMap(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLocation(w http.ResponseWriter, r *http.Request) {
-	wld, err := s.store.Load(r.Context(), r.PathValue("id"))
+	wld, err := s.loadFor(r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -668,7 +670,7 @@ func (s *Server) handleLocation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNPC(w http.ResponseWriter, r *http.Request) {
-	wld, err := s.store.Load(r.Context(), r.PathValue("id"))
+	wld, err := s.loadFor(r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -687,7 +689,7 @@ func (s *Server) handleNPC(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleQuests(w http.ResponseWriter, r *http.Request) {
-	wld, err := s.store.Load(r.Context(), r.PathValue("id"))
+	wld, err := s.loadFor(r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -696,7 +698,7 @@ func (s *Server) handleQuests(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
-	wld, err := s.store.Load(r.Context(), r.PathValue("id"))
+	wld, err := s.loadFor(r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -855,4 +857,50 @@ func firstNonEmpty(ss ...string) string {
 		}
 	}
 	return ""
+}
+
+// loadFor reads the campaign as the caller's group sees it: their group's
+// place, scene, turns and fight.
+func (s *Server) loadFor(r *http.Request) (*game.World, error) {
+	wld, err := s.store.Load(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return nil, err
+	}
+	return wld, wld.FocusPlayer(whoFrom(r).PlayerID)
+}
+
+// handleSolo splits the player's character off to go on alone.
+func (s *Server) handleSolo(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	wld, err := s.gm.GoSolo(r.Context(), r.PathValue("id"), p)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
+// handleJoinGroup brings the player's group into another one in the same
+// place.
+func (s *Server) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Group string `json:"group"`
+	}
+	if err := decode(r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	wld, err := s.gm.JoinGroup(r.Context(), r.PathValue("id"), p, body.Group)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
 }
