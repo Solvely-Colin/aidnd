@@ -161,6 +161,7 @@ func completeObjective(w *World, q *Quest, o *Objective) ([]QuestUpdate, []strin
 	}
 	if all {
 		q.Status = QuestCompleted
+		tideOnQuest(w, q)
 		text := "Quest complete: " + q.Title
 		if q.GiverID != "" {
 			if g := w.NPC(q.GiverID); g != nil {

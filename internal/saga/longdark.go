@@ -182,4 +182,32 @@ var innsmouth = Region{
 		Minion:       "Deep One",
 		MinionHorror: 2,
 	},
+	Factions: []Faction{
+		{Key: "eod", Name: "Esoteric Order of Dagon", Threat: true, Clock: "The Bell's Answer", Steps: 6,
+			Moves: []string{
+				"An Innsmouth fisherman put out at dusk and did not come home.",
+				"Salt lines appeared overnight across doorsteps on Water Street.",
+				"Harbor folk swear a bell rang out on the reef at low tide.",
+				"Another Innsmouth family has stopped answering its door.",
+				"The Order Hall's windows burned green past midnight.",
+			},
+			Full:       "The Order holds Innsmouth: after dark the whole town belongs to it now.",
+			FullDanger: map[string]int{"Innsmouth Harbor": 2, "Washington Street": 2, "Zadok Allen's Shack": 2}},
+		{Key: "marchetti", Name: "Marchetti outfit", Clock: "Clean Run", Steps: 4,
+			Moves: []string{
+				"A rum boat slipped into Innsmouth harbor without lights.",
+				"Two Marchetti men were seen paying off the harbor watch.",
+				"Crates of Canadian whiskey turned up in a Newburyport warehouse.",
+			},
+			Full: "The Marchetti boats own Innsmouth harbor by night; anyone on the water answers to them."},
+		{Key: "bureau", Name: "Bureau of Special Inquiry", Clock: "Containment", Steps: 6, FromWeek: 6,
+			Moves: []string{
+				"Men in grey suits took rooms in Newburyport and asked about Innsmouth.",
+				"A federal car was seen parked on the Rowley road all night.",
+				"Agents questioned a Marsh refinery clerk behind closed doors.",
+				"The Bureau quietly bought up the old Ipswich bus line.",
+				"Sealed orders reached the Coast Guard station at Newburyport.",
+			},
+			Full: "Federal agents raided Innsmouth: Martha Sargent was taken in for questioning and the Marsh refinery was shut."},
+	},
 }

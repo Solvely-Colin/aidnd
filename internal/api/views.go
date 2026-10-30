@@ -5,6 +5,7 @@ import (
 	"github.com/Solvely-Colin/aidnd/internal/store"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Solvely-Colin/aidnd/internal/game"
 	"github.com/Solvely-Colin/aidnd/internal/gm"
@@ -329,6 +330,29 @@ type CampaignView struct {
 	// Deadline is when autopilot plays the current turn of an async fight
 	// (unix seconds; 0 when nothing is waiting on one).
 	Deadline int64 `json:"deadline,omitempty"`
+	// World is the long campaign's shared calendar, Tide and newspaper.
+	World *WorldView `json:"world,omitempty"`
+}
+
+// WorldView is what players see of the living world.
+type WorldView struct {
+	Week    int           `json:"week"`
+	Date    string        `json:"date"`
+	Tide    int           `json:"tide"`
+	Band    string        `json:"band"`
+	Gazette *game.Gazette `json:"gazette,omitempty"`
+}
+
+// sagaStart is the world's first day; a world week is a calendar week.
+var sagaStart = time.Date(1931, time.April, 6, 0, 0, 0, 0, time.UTC)
+
+func worldView(w *game.World) *WorldView {
+	lv := w.Campaign.Living
+	if lv == nil {
+		return nil
+	}
+	d := sagaStart.AddDate(0, 0, 7*lv.Week)
+	return &WorldView{Week: lv.Week, Date: d.Format("January 2, 2006"), Tide: lv.Tide, Band: game.TideBand(lv.Tide), Gazette: lv.Gazette}
 }
 
 // MyCampaign is a campaign in the player's own list.
@@ -640,6 +664,7 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	}
 	v.Groups = groupsView(w, v.Group)
 	v.Deadline = turnDeadline(w)
+	v.World = worldView(w)
 	v.Saga, v.Dread = c.Saga, c.Dread
 	if mq := w.MainQuest(); mq != nil {
 		v.Storyline = mq.ID

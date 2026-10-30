@@ -687,6 +687,9 @@ type CampaignExtra struct {
 	// Async campaigns are played over weeks: a fight waits hours for a
 	// player, then autopilot plays their turn (see gm/async.go).
 	Async bool `json:"async,omitempty"`
+	// Living is the long campaign's world clock, Tide and factions (see
+	// worldtick.go); nil for a one-shot.
+	Living *Living `json:"living,omitempty"`
 	// Groups are parties split off from the main one (see groups.go).
 	Groups []*Group `json:"groups,omitempty"`
 }

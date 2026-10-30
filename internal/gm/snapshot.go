@@ -333,6 +333,14 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 		}
 	}
 	line("PARTY: %s", orNone(party))
+	if lv := w.Campaign.Living; lv != nil {
+		mood := map[string]string{game.TideEbb: "the dark is held back", game.TideSlack: "things are getting worse", game.TideFlood: "the dark is winning; dread everywhere"}[game.TideBand(lv.Tide)]
+		gz := ""
+		if lv.Gazette != nil && len(lv.Gazette.Headlines) > 0 {
+			gz = " This week's newspaper: " + strings.Join(lv.Gazette.Headlines, " / ")
+		}
+		line("THE WORLD: week %d. The Tide is %d/100 (%s): %s.%s", lv.Week, lv.Tide, game.TideBand(lv.Tide), mood, gz)
+	}
 	if other := w.Elsewhere(); len(other) > 0 {
 		line("OTHER PLAYER CHARACTERS IN THE WORLD (separate groups; they act on their own turns, so never narrate them acting): %s", strings.Join(other, "; "))
 	}
