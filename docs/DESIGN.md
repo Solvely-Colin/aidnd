@@ -238,6 +238,15 @@ One campaign is one shared world. A character can go off alone, and groups that 
 - The narrator gets an OTHER PLAYER CHARACTERS line: who is in another group and where, flagged when they stand in the same place, and is told never to narrate them acting.
 - Not yet: side initiative when two groups share a fight, per-group rewind (the DM console rewinds the whole world), and changed-row saves.
 
+## Async turns (2026-10-30)
+
+Long campaigns (every saga; `Campaign.LongForm()`) are played over weeks, so a fight waits for its players.
+
+- In a fight, the player whose turn it is has `TurnDeadline` (12 hours) to play it. Other players can't skip it before then.
+- Past the deadline, autopilot plays it (`gm.autopilot`, `game.AutopilotActions`): a plain strike at the weakest foe in reach, or a dodge, never a spell slot, item or limited feature. A dying character's death save is rolled by the engine. The turn is logged as "(away) ... fights on by instinct" and narrated like any other.
+- `GM.Sweep` runs every turn that's overdue, in every group of every long campaign. The server runs it every minute, and the Worker's hourly cron calls `POST /tick` so a sleeping container wakes up and catches up.
+- Alerts stay in the app: `/me/campaigns` marks `your_turn` (and `deadline`), the home screen leads with that story ("Your turn · autopilot in 11h"), the tab title says "Your turn", and the dock shows the time left.
+
 ## Changes from the live play-test (deepseek-v4.1-flash)
 
 - Quests stay completable whatever the author names: an obtain/deliver item that exists

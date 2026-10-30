@@ -684,9 +684,16 @@ type CampaignExtra struct {
 	// Milestones lift every character to at least a level when an
 	// objective is done: objective id -> level.
 	Milestones map[string]int `json:"milestones,omitempty"`
+	// Async campaigns are played over weeks: a fight waits hours for a
+	// player, then autopilot plays their turn (see gm/async.go).
+	Async bool `json:"async,omitempty"`
 	// Groups are parties split off from the main one (see groups.go).
 	Groups []*Group `json:"groups,omitempty"`
 }
+
+// LongForm reports whether the campaign is played async over weeks (every
+// saga is, including ones made before the flag).
+func (c *Campaign) LongForm() bool { return c.Async || c.Saga != "" }
 
 // Deadly reports whether characters can die in this campaign.
 func (c *Campaign) Deadly() bool { return c.Lethality != LethalityStory }

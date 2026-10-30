@@ -5,6 +5,9 @@
 	"compatibility_date": "2026-10-13",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
+	// Hourly: wake the game server so overdue turns in async fights get
+	// played by autopilot (worker/index.ts scheduled).
+	"triggers": { "crons": ["0 * * * *"] },
 	// Keep APP_SECRET/PLAY_CODE if they were set as dashboard variables.
 	"keep_vars": true,
 	// The player UI. The Worker runs first only for the API, login and art.

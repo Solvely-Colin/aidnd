@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/Solvely-Colin/aidnd/internal/store"
 	"sort"
 	"strings"
 
@@ -325,7 +326,20 @@ type CampaignView struct {
 	// (one, the main group, until someone splits off).
 	Group  string      `json:"group"`
 	Groups []GroupView `json:"groups"`
+	// Deadline is when autopilot plays the current turn of an async fight
+	// (unix seconds; 0 when nothing is waiting on one).
+	Deadline int64 `json:"deadline,omitempty"`
 }
+
+// MyCampaign is a campaign in the player's own list.
+type MyCampaign struct {
+	store.CampaignSummary
+	YourTurn bool  `json:"your_turn,omitempty"`
+	Deadline int64 `json:"deadline,omitempty"`
+}
+
+// turnDeadline is the GM's TurnDeadline, set by New.
+var turnDeadline = func(*game.World) int64 { return 0 }
 
 // GroupView is one party in the shared world.
 type GroupView struct {
@@ -625,6 +639,7 @@ func campaignView(w *game.World, playerID string) CampaignView {
 		v.Group = f
 	}
 	v.Groups = groupsView(w, v.Group)
+	v.Deadline = turnDeadline(w)
 	v.Saga, v.Dread = c.Saga, c.Dread
 	if mq := w.MainQuest(); mq != nil {
 		v.Storyline = mq.ID
