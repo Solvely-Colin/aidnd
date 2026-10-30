@@ -15,6 +15,8 @@ type Hints struct {
 	ZoneID   string     `json:"zone_id,omitempty"`
 	Check    *CheckHint `json:"check,omitempty"`
 	Act      *ActHint   `json:"act,omitempty"`
+	// Autopilot marks a turn played for a player who is away.
+	Autopilot bool `json:"autopilot,omitempty"`
 }
 
 // ActHint is a tactical action picked from the dock (dodge, help, shove...).

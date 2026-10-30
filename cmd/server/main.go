@@ -114,6 +114,16 @@ func main() {
 		}
 		logger.Printf("testing table at http://%s/dev/", host)
 	}
+	// Timers: autopilot for turns past their deadline in async fights.
+	go func() {
+		for range time.Tick(time.Minute) {
+			if n, err := g.Sweep(context.Background()); err != nil {
+				logger.Printf("sweep: %v", err)
+			} else if n > 0 {
+				logger.Printf("sweep: autopilot played %d turns", n)
+			}
+		}
+	}()
 	go func() {
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatal(err)

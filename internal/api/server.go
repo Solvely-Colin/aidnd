@@ -50,6 +50,7 @@ func New(g *gm.GM, cfg Config) *Server {
 		cfg.StreamTTL = 10 * time.Minute
 	}
 	s := &Server{gm: g, store: g.Store, hub: NewHub(), cfg: cfg, log: g.Log, now: time.Now}
+	turnDeadline = g.TurnDeadline
 	if cfg.APIKey != "" {
 		s.secret = []byte("stream:" + cfg.APIKey)
 	} else {
@@ -82,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/start", s.auth(s.handleStart))
 	mux.HandleFunc("POST /campaigns/{id}/actions", s.auth(s.handleAction))
 	mux.HandleFunc("POST /campaigns/{id}/skip", s.auth(s.handleSkip))
+	mux.HandleFunc("POST /tick", s.auth(s.handleTick))
 	mux.HandleFunc("POST /campaigns/{id}/me/solo", s.auth(s.handleSolo))
 	mux.HandleFunc("POST /campaigns/{id}/me/join", s.auth(s.handleJoinGroup))
 	mux.HandleFunc("POST /campaigns/{id}/roll", s.auth(s.handleRoll))
@@ -377,7 +379,20 @@ func (s *Server) handleMyCampaigns(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"campaigns": list})
+	// say where it is the player's turn, so the app can show it
+	out := make([]MyCampaign, 0, len(list))
+	for _, cs := range list {
+		mc := MyCampaign{CampaignSummary: cs}
+		if cs.Status == game.StatusActive {
+			if wld, err := s.store.Load(r.Context(), cs.ID); err == nil {
+				v := campaignView(wld, p)
+				mc.YourTurn = !v.FreeRoam && v.You.YourTurn
+				mc.Deadline = v.Deadline
+			}
+		}
+		out = append(out, mc)
+	}
+	writeJSON(w, 200, map[string]any{"campaigns": out})
 }
 
 func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
@@ -903,4 +918,15 @@ func (s *Server) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
+// handleTick runs the timers now: overdue turns in async fights. The
+// Worker's cron calls it so a sleeping server wakes to do this.
+func (s *Server) handleTick(w http.ResponseWriter, r *http.Request) {
+	n, err := s.gm.Sweep(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"autopilot_turns": n})
 }

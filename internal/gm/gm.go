@@ -50,9 +50,15 @@ type Config struct {
 	// PlayerDice makes turns that need a player's d20 wait for that player
 	// to roll it (unless they chose auto-roll). Off, the engine rolls at once.
 	PlayerDice bool
+	// TurnDeadline is how long an async fight waits for a player before
+	// autopilot plays their turn (default 12h).
+	TurnDeadline time.Duration
 }
 
 func (c *Config) defaults() {
+	if c.TurnDeadline <= 0 {
+		c.TurnDeadline = DefaultTurnDeadline
+	}
 	if c.SceneTurnCap <= 0 {
 		c.SceneTurnCap = 10
 	}

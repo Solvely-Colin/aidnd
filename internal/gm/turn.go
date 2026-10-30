@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Solvely-Colin/aidnd/internal/game"
 	"github.com/Solvely-Colin/aidnd/internal/llm"
@@ -421,8 +422,13 @@ func (g *GM) Skip(ctx context.Context, campaignID, playerID string, mode SkipMod
 			return nil, ErrForbidden
 		}
 		idle := g.Now().Unix() - w.Campaign.Turns.Started
-		if idle < int64(g.Cfg.SkipAfterSeconds) {
-			return nil, fmt.Errorf("%w: %s's turn can be skipped after %d idle seconds (%d so far)", ErrNotYourTurn, actor.Name, g.Cfg.SkipAfterSeconds, idle)
+		wait := int64(g.Cfg.SkipAfterSeconds)
+		if w.Campaign.LongForm() {
+			// in a long campaign a player has until the deadline
+			wait = int64(g.Cfg.TurnDeadline / time.Second)
+		}
+		if idle < wait {
+			return nil, fmt.Errorf("%w: %s's turn can be skipped after %d idle seconds (%d so far)", ErrNotYourTurn, actor.Name, wait, idle)
 		}
 	}
 	out := &TurnResult{TurnEnded: true}

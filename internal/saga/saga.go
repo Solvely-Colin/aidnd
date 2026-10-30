@@ -177,7 +177,7 @@ func Build(s *Saga, id string, opt Options) (*game.World, error) {
 	}
 	w := &game.World{Campaign: game.Campaign{ID: id, Title: s.Title, Premise: s.Premise, Pitch: s.Pitch,
 		Setting: s.Setting, Status: game.StatusLobby, MaxSetbacks: opt.MaxSetbacks, MaxPlayers: opt.MaxPlayers, CreatedAt: opt.Now}}
-	w.Campaign.Saga, w.Campaign.Dread = s.Key, true
+	w.Campaign.Saga, w.Campaign.Dread, w.Campaign.Async = s.Key, true, true
 	w.Campaign.Scene = game.Scene{Day: 1, Time: 1, Tension: 2}
 	w.Campaign.Turns.Budget = game.FullBudget(false)
 	w.Campaign.Milestones = map[string]int{}

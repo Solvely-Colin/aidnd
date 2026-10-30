@@ -224,6 +224,10 @@ A campaign is one shared world that can hold several groups. The campaign view, 
 
 Events saved during a group's turn carry `data.party` (the group id). `group_split {character_id, character, group, from, location}` and `group_joined {group, from, into, joining, with}` are untagged.
 
+### Async turns
+
+In a long campaign (a saga), the campaign view's `deadline` is the unix time when autopilot plays the current fight turn. `GET /me/campaigns` adds `your_turn` and `deadline` to each campaign. `POST /tick` (service key) plays every overdue turn now and returns `{autopilot_turns}`; the Worker's hourly cron calls it.
+
 ## Turns
 
 In a fight only the active player may act. Outside fights there is no turn

@@ -253,4 +253,11 @@ export default {
 		if (pathname.startsWith("/auth/")) return Response.json({ error: "not found" }, { status: 404 });
 		return env.ASSETS.fetch(req);
 	},
+	// The cron wakes the game server to run its timers.
+	async scheduled(_ev: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+		const tick = getContainer(env.GAME, "main").fetch(
+			new Request("http://game/tick", { method: "POST", headers: { Authorization: `Bearer ${env.APP_SECRET}` } }),
+		);
+		ctx.waitUntil(tick.then(r => r.text()).catch(() => undefined));
+	},
 } satisfies ExportedHandler<Env>;

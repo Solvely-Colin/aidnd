@@ -240,7 +240,7 @@ async function renderHome() {
   if (S.route) return;
   const order = { active: 0, lobby: 1, completed: 2, failed: 2 };
   const stories = mine.campaigns.slice().sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3) || b.updated_at - a.updated_at);
-  const lead = stories.find(c => c.status === "active" || c.status === "lobby");
+  const lead = stories.find(c => c.your_turn) || stories.find(c => c.status === "active" || c.status === "lobby");
   const rest = stories.filter(c => c !== lead);
   const mineIds = new Set(stories.map(c => c.id));
   const open = all.campaigns.filter(c => c.status === "lobby" && !mineIds.has(c.id) && c.players < c.max_players);
@@ -249,10 +249,10 @@ async function renderHome() {
     ${lead ? `<div class="hero">
       <div class="home-art">${coverArt(lead.id)}</div>${top}
       <div class="home-lead"><div class="col">
-        <span class="eyebrow-acc">${lead.status === "lobby" ? "Gathering the party" : "In play"} · ${lead.players}/${lead.max_players} players · ${esc(ago(lead.updated_at))}</span>
+        <span class="eyebrow-acc">${lead.your_turn ? `Your turn${lead.deadline ? ` · autopilot in ${untilText(lead.deadline)}` : ""}` : lead.status === "lobby" ? "Gathering the party" : "In play"} · ${lead.players}/${lead.max_players} players · ${esc(ago(lead.updated_at))}</span>
         <h1 class="title-xl">${esc(lead.title)}</h1>
         ${lead.pitch ? `<p class="lede">${esc(clip(lead.pitch, 180))}</p>` : ""}
-        <div class="hero-cta"><button class="btn primary" data-open="${esc(lead.id)}">${lead.status === "lobby" ? "Back to the table" : "Continue the story"}</button></div>
+        <div class="hero-cta"><button class="btn primary" data-open="${esc(lead.id)}">${lead.status === "lobby" ? "Back to the table" : lead.your_turn ? "Take your turn" : "Continue the story"}</button></div>
       </div></div>
     </div>` : `<div class="hero" style="height:64px">${top}</div>`}
     <div class="home-body">
@@ -264,7 +264,7 @@ async function renderHome() {
 }
 
 function bookHTML(c) {
-  const meta = { lobby: "Gathering the party", active: `In play · ${ago(c.updated_at)}`, completed: "Finished", failed: "Lost" }[c.status] || "";
+  const meta = { lobby: "Gathering the party", active: c.your_turn ? "Your turn" : `In play · ${ago(c.updated_at)}`, completed: "Finished", failed: "Lost" }[c.status] || "";
   return `<button class="book" data-open="${esc(c.id)}"><div class="cov">${coverArt(c.id)}</div><b>${esc(c.title)}</b><span>${esc(meta)}${c.status === "lobby" ? ` · ${c.players}/${c.max_players}` : ""}</span></button>`;
 }
 
@@ -456,6 +456,8 @@ async function refreshView() {
   if (!S.route) return;
   const before = S.view?.status;
   try { S.view = await api("GET", `/campaigns/${S.route}`); } catch { return; }
+  // the tab says when it's your turn, for a player who left it open
+  document.title = (!S.view.free_roam && S.view.you?.your_turn ? "Your turn · " : "") + BASE_TITLE;
   S.journal = null; S.map = null;
   if (S.view.encounter && S.talkTo) S.talkTo = "";
   if (before !== S.view.status) return render();
@@ -1099,6 +1101,15 @@ const statuses = c => (c.conditions || []).filter(k => STATUS_KEYS.has(k.key)).m
 
 // the("The Shade") is "The Shade", the("Goblin") is "the Goblin".
 const the = n => /^(the|a|an)\s/i.test(n) ? n : `the ${n}`;
+const BASE_TITLE = document.title;
+
+// untilText says how long until a unix time: "11h", "40m", "now".
+function untilText(ts) {
+  const s = ts - Date.now() / 1000;
+  if (s <= 60) return "a moment";
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  return `${Math.round(s / 3600)}h`;
+}
 const list = a => a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
 
 // The engine's labels start with the roller's name ("Silas Marrow WIS
@@ -1333,10 +1344,10 @@ function renderDock() {
     ${yours && S.tray ? trayHTML(groups[S.tray]) : ""}
     ${myPend ? rollCardHTML(myPend) : me?.dead ? deadCardHTML(me) : ""}
     ${others.length ? `<div class="turnrow"><span class="who other">${others.map(p => `${esc(firstName(p.name))} ${p.kind === "death_save" ? "is dying · death save" : "is about to roll"}`).join(" · ")}</span></div>` : ""}
-    ${myPend ? "" : yours ? `<div class="turnrow"><span class="who">${free ? "Free play · anyone can act" : "Your turn"}</span><span class="acts">${acts}</span></div>`
+    ${myPend ? "" : yours ? `<div class="turnrow"><span class="who">${free ? "Free play · anyone can act" : `Your turn${v.deadline ? ` <em>· autopilot in ${untilText(v.deadline)}</em>` : ""}`}</span><span class="acts">${acts}</span></div>`
       : free ? `<div class="turnrow"><span class="who other">Free play <em>· anyone on their feet can act</em></span></div>`
-      : active && !others.some(p => p.character_id === active.character_id) ? `<div class="turnrow"><span class="who other">${esc(active.name)}’s turn <em>· ${esc(ap?.name || "")} is thinking</em></span>
-      ${v.you?.joined && idle > 120 ? `<span class="acts"><button data-act="skip">Skip their turn</button></span>` : ""}</div>` : ""}
+      : active && !others.some(p => p.character_id === active.character_id) ? `<div class="turnrow"><span class="who other">${esc(active.name)}’s turn <em>· ${v.deadline ? `${untilText(v.deadline)} to play it` : `${esc(ap?.name || "")} is thinking`}</em></span>
+      ${v.you?.joined && (v.deadline ? Date.now() / 1000 > v.deadline : idle > 120) ? `<span class="acts"><button data-act="skip">Skip their turn</button></span>` : ""}</div>` : ""}
     ${yours ? checkChipHTML() : ""}
     <form class="inputbar ${yours && !thinking ? "you" : ""}" id="say-form">
       <div class="party">${v.party.map(c => { const st = statuses(c); return `<button type="button" class="pa ${v.active?.character_id === c.id ? "acting" : ""} ${isMe(c.id) ? "you" : ""} ${st.length ? "afflicted" : ""}" data-sheet="${esc(c.id)}" title="${esc(c.name)} · ${c.hp}/${c.max_hp} HP${st.length ? " · " + esc(st.join(", ")) : ""}">${initial(c.name)}${face(c, "round-f")}<span class="hpl"><i class="${c.hp / c.max_hp <= .5 ? "low" : ""}" style="width:${hpPct(c)}%"></i></span></button>`; }).join("")}</div>
