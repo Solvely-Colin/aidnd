@@ -935,7 +935,7 @@ function groupsHTML() {
     ${others.map(g => `<div class="grp ${g.here ? "here" : ""}">
       <span class="t"><b>${esc(list(g.members.map(m => firstName(m.name))))}</b>
         <span>${g.here ? "here with you" : esc(g.location || "somewhere")}${g.fighting ? " · in a fight" : ""}</span></span>
-      ${g.here && !g.fighting && !v.encounter ? `<button class="btn grp-join" data-joingrp="${esc(g.id)}">Join up</button>` : ""}
+      ${g.here && !v.encounter ? `<button class="btn grp-join" data-joingrp="${esc(g.id)}">${g.fighting ? "Join the fight" : "Join up"}</button>` : ""}
     </div>`).join("") || `<span class="empty-line">Everyone is together.</span>`}
     ${canSolo ? `<button class="link grp-solo" data-act="solo">Go off on your own</button><span class="hint-line">You keep your own scene and turns in the same world. Meet your friends somewhere to join up again.</span>` : ""}
   </section>`;

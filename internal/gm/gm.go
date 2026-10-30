@@ -127,7 +127,10 @@ func (g *GM) lock(id string) func() {
 func (g *GM) commit(ctx context.Context, w *game.World, evs ...store.Event) ([]store.Event, error) {
 	if party := w.Focused(); party != "" {
 		for i := range evs {
-			evs[i] = tagParty(evs[i], party)
+			// the shared story is everyone's news
+			if t := evs[i].Type; t != "quest_updated" && t != "campaign_ended" {
+				evs[i] = tagParty(evs[i], party)
+			}
 		}
 	}
 	saved, err := g.Store.Save(ctx, w, evs...)

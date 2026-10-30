@@ -100,3 +100,25 @@ func TestSplitRefusedInAFight(t *testing.T) {
 		t.Fatal("settle did not restore the world")
 	}
 }
+
+func TestJoinSomeoneElsesFight(t *testing.T) {
+	w := &game.World{Campaign: game.Campaign{LocationID: "l1"}}
+	w.Characters = []*game.Character{{ID: "c1", Name: "A"}, {ID: "c2", Name: "B"}, {ID: "c3", Name: "C"}}
+	w.Campaign.Turns.Order = []string{"c1", "c2", "c3"}
+	g, err := game.SplitOff(w, []string{"c3"}, 0)
+	must(t, err)
+	// the main group gets into a fight; it is B's turn, half spent
+	w.Encounter = &game.Encounter{LocationID: "l1", Round: 2, Enemies: []*game.Enemy{{Name: "Ghoul", HP: 5, StatBlock: game.StatBlock{MaxHP: 5}}}}
+	w.Campaign.Turns.Index = 1
+	w.Campaign.Turns.Budget = game.Budget{Action: 0, Move: 1}
+	if err := game.JoinGroups(w, game.MainGroup, g.ID); err == nil {
+		t.Fatal("a fighting group can't pull others in")
+	}
+	must(t, game.JoinGroups(w, g.ID, game.MainGroup))
+	if w.Split() || w.Encounter == nil || w.Encounter.Round != 2 {
+		t.Fatal("C should be in the main group's fight")
+	}
+	if o := w.Campaign.Turns.Order; len(o) != 3 || o[2] != "c3" || w.Campaign.Turns.Index != 1 || w.Campaign.Turns.Budget.Move != 1 {
+		t.Fatalf("C goes last and B's turn carries on: %v index %d %+v", o, w.Campaign.Turns.Index, w.Campaign.Turns.Budget)
+	}
+}

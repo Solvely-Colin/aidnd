@@ -236,7 +236,9 @@ One campaign is one shared world. A character can go off alone, and groups that 
 - `SplitOff` refuses mid-fight and refuses to split a whole group. `JoinGroups` needs both groups in the same place and neither fighting; the joined group keeps the target's scene and is the main group if either was.
 - Events saved while focused carry `party` (the group id); the app shows a player the events of the groups they were in at the time, so their story before a split stays in their feed. `group_split` and `group_joined` events are shown to everyone.
 - The narrator gets an OTHER PLAYER CHARACTERS line: who is in another group and where, flagged when they stand in the same place, and is told never to narrate them acting.
-- Not yet: side initiative when two groups share a fight, per-group rewind (the DM console rewinds the whole world), and changed-row saves.
+- A group can walk into another group's fight (**Join the fight**): the newcomers take their turns after everyone already in it, and the turn in progress carries on. A fighting group can't pull others in, and two fights don't merge. The narrator is told when another group here is locked in a fight.
+- Quest updates and the campaign's end are shown to every group: the shared story is everyone's news. Everything else a group does (an NPC killed, an item taken, a chronicle fact) changes the one shared world the other groups play in.
+- Not yet: two fights merging into one, per-group rewind (the DM console rewinds the whole world), and changed-row saves.
 
 ## Async turns (2026-10-30)
 

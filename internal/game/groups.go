@@ -265,7 +265,7 @@ func SplitOff(w *World, ids []string, now int64) (*Group, error) {
 		return nil, fmt.Errorf("that is the whole group already")
 	}
 	src := w.groupState(from)
-	if src.Encounter != nil && src.Encounter.LocationID == src.LocationID && len(src.Encounter.Living()) > 0 {
+	if fighting(src) {
 		return nil, fmt.Errorf("nobody can split off in the middle of a fight")
 	}
 	g := &Group{
@@ -294,8 +294,9 @@ func SplitOff(w *World, ids []string, now int64) (*Group, error) {
 }
 
 // JoinGroups folds group a into group b; they must stand in the same
-// place and neither may be fighting. The world must be settled. If either
-// is the main group, the joined group is the main one.
+// place. If b is fighting, a joins that fight; a can't bring one of its
+// own. The world must be settled. If either is the main group, the
+// joined group is the main one.
 func JoinGroups(w *World, a, b string) error {
 	if w.focus != nil {
 		return fmt.Errorf("settle the world before joining")
@@ -310,13 +311,14 @@ func JoinGroups(w *World, a, b string) error {
 	if sa.LocationID != sb.LocationID {
 		return fmt.Errorf("the groups are not in the same place")
 	}
-	for _, s := range []*Group{sa, sb} {
-		if s.Encounter != nil && s.Encounter.LocationID == s.LocationID && len(s.Encounter.Living()) > 0 {
-			return fmt.Errorf("finish the fight first")
-		}
+	// a group can walk into another's fight, but nobody is pulled into
+	// one, and two fights don't merge
+	if fighting(sa) {
+		return fmt.Errorf("finish your own fight first; the others can join you in it")
 	}
-	// the joined group carries on with b's scene and story; it is the
-	// main group if either one was
+	midFight := fighting(sb)
+	// the joined group carries on with b's scene, story and fight; it is
+	// the main group if either one was
 	keep, gone := b, a
 	if a == MainGroup {
 		keep, gone = a, b
@@ -336,8 +338,12 @@ func JoinGroups(w *World, a, b string) error {
 			}
 		}
 	}
-	st.Turns.Index = 0
-	st.Turns.Budget = FullBudget(false)
+	if !midFight {
+		st.Turns.Index = 0
+		st.Turns.Budget = FullBudget(false)
+	}
+	// mid-fight, the newcomers take their turns after everyone already in
+	// it, and the turn in progress carries on
 	for _, c := range w.Characters {
 		if g := GroupOf(c); g == a || g == b {
 			c.Group = keep
@@ -349,6 +355,11 @@ func JoinGroups(w *World, a, b string) error {
 	w.setGroupState(keep, &st)
 	w.dropGroup(gone)
 	return nil
+}
+
+// fighting reports whether a group's fight is still on.
+func fighting(s *Group) bool {
+	return s.Encounter != nil && s.Encounter.LocationID == s.LocationID && len(s.Encounter.Living()) > 0
 }
 
 // groupState copies a group's state (main's from the campaign fields).
@@ -433,7 +444,11 @@ func (w *World) Elsewhere() []string {
 		loc := w.groupLocation(id)
 		who := strings.Join(names, ", ")
 		if loc == w.Campaign.LocationID {
-			here = append(here, who+" (another group, here but not part of this scene's action)")
+			what := "here but not part of this scene's action"
+			if st := w.peekGroup(id); st != nil && fighting(st) {
+				what = "here and locked in a fight; this group may join it, but never narrate that fight's blows or outcome"
+			}
+			here = append(here, who+" (another group, "+what+")")
 		} else if l := w.Location(loc); l != nil {
 			away = append(away, who+" at "+l.Name)
 		}
@@ -487,7 +502,7 @@ func (w *World) GroupInfos() []GroupInfo {
 			continue
 		}
 		gi := GroupInfo{ID: id, Members: w.Members(id), LocationID: st.LocationID}
-		gi.Fighting = st.Encounter != nil && st.Encounter.LocationID == st.LocationID && len(st.Encounter.Living()) > 0
+		gi.Fighting = fighting(st)
 		out = append(out, gi)
 	}
 	return out
