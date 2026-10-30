@@ -232,6 +232,8 @@ In a long campaign (a saga), the campaign view's `deadline` is the unix time whe
 
 A long campaign's view has `world: {week, date, tide, band, gazette: {week, headlines, classified, weather}}`. Each daily world tick sends a `world_tick` event `{week, tide, tide_from, band, idle, gazette}`. `POST /tick` also runs any world ticks that are owed.
 
+`POST /campaigns/{id}/me/downtime {kind}` queues the caller's downtime order for the next world tick (`research`, `work`, `rest`, `contacts`, `carouse`; `""` cancels). It needs a safe place and no fight (otherwise 409), and returns `{campaign}`. The view's `you.downtime` is the queued order, `you.can_downtime` says whether one can be queued here, and `world.downtime` lists the orders. Results arrive as `downtime_done {character_id, name, kind, roll, text}` events.
+
 ## Turns
 
 In a fight only the active player may act. Outside fights there is no turn

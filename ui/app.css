@@ -816,3 +816,9 @@ details.feat p { margin: 0 0 12px; font-size: 14px; color: var(--ink2); line-hei
 .gazette .classified .mono-k { display: block; color: #4a4434; margin-bottom: 2px; }
 .gazette .weather { font-style: italic; font-size: 12px; }
 .ev-gazette { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+
+/* downtime orders */
+.downtime { display: flex; flex-direction: column; gap: 4px; }
+.downtime .row-line .nm small { display: block; font: 13px/1.4 var(--sans); color: var(--ink3); margin-top: 2px; }
+.downtime .row-line.on .nm { color: var(--acc); }
+.downtime .row-line:disabled { opacity: .45; }

@@ -85,6 +85,8 @@ type TickReport struct {
 	Tide     int      `json:"tide"`
 	Facts    []string `json:"facts"`
 	Filled   []string `json:"filled,omitempty"` // faction names
+	// Downtime is what each queued downtime order came to.
+	Downtime []DowntimeResult `json:"downtime,omitempty"`
 }
 
 // TickHourUTC is when the world's day turns over (about 5am in New England).
@@ -149,6 +151,7 @@ func WorldTick(w *World, r *dice.Roller, now int64, idle bool) *TickReport {
 		rep.Facts = append(rep.Facts, text)
 		w.Record(ChronicleEntry{Kind: FactNews, Source: SourceEngine, Text: fmt.Sprintf("Week %d: %s", lv.Week, text)})
 	}
+	rep.Downtime = ResolveDowntime(w, r)
 	threatFilled := false
 	for _, f := range lv.Factions {
 		if !f.active(w) || r.Die(6) < 5 {

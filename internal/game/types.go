@@ -146,6 +146,8 @@ type CharExtra struct {
 	// Group is the split-off group the character travels with ("" for
 	// the main one; see groups.go).
 	Group string `json:"group,omitempty"`
+	// Downtime is the order queued for the next world tick.
+	Downtime *Downtime `json:"downtime,omitempty"`
 }
 
 // Concentration is a spell being held.
@@ -543,6 +545,8 @@ type Lore struct {
 // LoreExtra holds lore fields added after the first schema, stored as one
 // JSON column.
 type LoreExtra struct {
+	// Researched is set once a character's downtime research found it.
+	Researched bool `json:"researched,omitempty"`
 	// Gate keeps a secret from the narrator until players uncover it: the
 	// id of an objective or quest that must be done first ("" = open).
 	Gate string `json:"gate,omitempty"`

@@ -84,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/actions", s.auth(s.handleAction))
 	mux.HandleFunc("POST /campaigns/{id}/skip", s.auth(s.handleSkip))
 	mux.HandleFunc("POST /tick", s.auth(s.handleTick))
+	mux.HandleFunc("POST /campaigns/{id}/me/downtime", s.auth(s.handleDowntime))
 	mux.HandleFunc("POST /campaigns/{id}/me/solo", s.auth(s.handleSolo))
 	mux.HandleFunc("POST /campaigns/{id}/me/join", s.auth(s.handleJoinGroup))
 	mux.HandleFunc("POST /campaigns/{id}/roll", s.auth(s.handleRoll))
@@ -929,4 +930,26 @@ func (s *Server) handleTick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"autopilot_turns": n})
+}
+
+// handleDowntime queues (or, with kind "", cancels) the player's downtime
+// order for the next world tick.
+func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Kind string `json:"kind"`
+	}
+	if err := decode(r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	wld, err := s.gm.SetDowntime(r.Context(), r.PathValue("id"), p, body.Kind)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
 }

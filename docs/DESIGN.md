@@ -260,7 +260,8 @@ A long campaign's world takes a turn once a real day (`game.WorldTick`), even wh
 - **The Gazette:** one model call turns a tick's facts into three or four headlines, a classified ad that's a hook, and a weather line. Without the model, the facts are the headlines. It's sent as a `world_tick` event (untagged, so every group sees it in its feed) and kept on `Living.Gazette`.
 - The narrator gets a THE WORLD line: the week, the Tide and its band, and this week's headlines.
 - The app shows a World tab in the journal (date, Tide gauge, front page) and the paper in the story feed.
-- Not yet: downtime orders, NPC routes and shop restocks on ticks, Tide effects on encounters and rests, and travel between regions taking world time.
+- **Downtime:** at a hub (or any danger-0 place), a character can queue one order for the next tick (`game.QueueDowntime`). Research (Investigation, DC 12) finds an open lore entry about the region, never a gated secret. Work (best ability) earns 6 gold per level on a success and 2 on a failure. Rest takes 2 strain off and ends poisoned and frightened. Work your contacts (Persuasion) and carouse (Charisma) turn up a rumor of a faction's next move, and a carouse that rolls a natural 1 costs gold. Results are `downtime_done` events in that character's group feed.
+- Not yet: training, faction standing, NPC routes and shop restocks on ticks, Tide effects on encounters and rests, and travel between regions taking world time.
 
 ## Changes from the live play-test (deepseek-v4.1-flash)
 

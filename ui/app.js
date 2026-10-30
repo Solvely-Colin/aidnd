@@ -386,7 +386,7 @@ function restartFeed() {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
@@ -941,6 +941,27 @@ function groupsHTML() {
   </section>`;
 }
 
+// downtimeHTML: at a safe place in a long campaign, one thing to do before
+// the world's next turn (each morning).
+function downtimeHTML() {
+  const v = S.view, you = v.you || {}, kinds = v.world?.downtime || [];
+  if (!kinds.length || (!you.can_downtime && !you.downtime)) return "";
+  return `<section class="downtime"><span class="mono-k">Before morning</span>
+    <span class="hint-line">Pick one thing to do overnight. It happens when the world takes its turn, around 5am Eastern.</span>
+    ${kinds.map(k => `<button class="row-line ${you.downtime === k.key ? "on" : ""}" data-downtime="${you.downtime === k.key ? "" : esc(k.key)}" ${you.can_downtime || you.downtime === k.key ? "" : "disabled"}>
+      <span class="nm">${esc(k.name)}<small>${esc(k.desc)}</small></span><span class="verb">${you.downtime === k.key ? "Planned · undo" : "Plan"}</span></button>`).join("")}
+  </section>`;
+}
+
+async function setDowntime(kind, t) {
+  if (t) t.disabled = true;
+  try {
+    const r = await api("POST", `/campaigns/${S.route}/me/downtime`, { kind });
+    S.view = r.campaign;
+    renderChrome();
+  } catch (e) { toast(e.message); if (t) t.disabled = false; }
+}
+
 async function groupMove(kind, body, t) {
   if (t) t.disabled = true;
   try {
@@ -1021,6 +1042,7 @@ function feedItems(evs) {
     flush();
     switch (e.type) {
       case "location_changed": out.push({ k: "place", name: d.name }); break;
+      case "downtime_done": out.push({ k: "sys", text: d.text + (d.roll ? ` (rolled ${d.roll.total} against ${d.roll.target})` : "") }); break;
       case "world_tick": {
         // days in a row with nothing between them show only the latest paper
         const it = { k: "gazette", g: d.gazette, tide: d.tide, band: d.band };
@@ -1698,6 +1720,7 @@ function sceneHTML() {
         <span class="t"><b>${esc(n.name)}</b><span>${esc([n.role, n.merchant ? "sells goods" : ""].filter(Boolean).join(", "))}${zoneName(n.zone_id) ? " · " + esc(zoneName(n.zone_id)) : ""}</span></span><span class="go">Talk →</span></button>`).join("")
         || `<span class="empty-line" style="padding:8px 0">No one else is here.</span>`}
     </section>
+    ${downtimeHTML()}
     ${stageMode() ? "" : groupsHTML()}
     ${loc.items?.length ? `<section><span class="mono-k">On the ground</span>${loc.items.map(i => `<button class="row-line" data-send="I pick up ${esc(the(i.name))}"><span class="nm">${esc(i.name)}${i.effect ? `<small>${esc(effectText(i.effect))}</small>` : ""}</span><span class="verb">Take</span></button>`).join("")}</section>` : ""}`;
 }
@@ -2028,7 +2051,7 @@ function placesTab(j) {
 }
 
 function cluesTab(j) {
-  const cs = (j.chronicle || []).filter(c => match(c.text, c.kind)).slice().reverse();
+  const cs = (j.chronicle || []).filter(c => c.kind !== "news" && match(c.text, c.kind)).slice().reverse();
   const kind = c => c.kind === "promise" ? `<span class="kind ${esc(c.status || "open")}">promise${c.status && c.status !== "open" ? " " + esc(c.status) : ""}</span>` : c.kind && c.kind !== "fact" ? `<span class="kind">${esc(c.kind)}</span>` : "";
   return `${j.summary && !J.q ? `<section><span class="mono-k">The story so far</span><p class="sofar">${esc(j.summary)}</p></section>` : ""}
     ${!j.chronicle?.length ? none("No clues yet. Search, ask, look closely. What you find is written here.") : !cs.length ? none(`No clue matches “${esc(J.q)}”.`)
@@ -2127,7 +2150,7 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-saga],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto],[data-joingrp]");
+  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-saga],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto],[data-joingrp],[data-downtime]");
   if (!t || t.disabled) return;
   const ds = t.dataset, act = ds.act;
   if (ds.open) return go(`#/c/${ds.open}`);
@@ -2197,6 +2220,7 @@ document.addEventListener("click", async e => {
   }
   if (ds.send) return send(ds.send);
   if (ds.joingrp) return groupMove("join", { group: ds.joingrp }, t);
+  if (ds.downtime !== undefined) return setDowntime(ds.downtime, t);
   try {
     switch (act) {
       case "solo": return groupMove("solo", {}, t);
