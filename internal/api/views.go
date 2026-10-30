@@ -314,11 +314,13 @@ type CampaignView struct {
 	FreeRoam  bool          `json:"free_roam"`
 	Pending   []PendingView `json:"pending"`
 	Lethality string        `json:"lethality"`
-	// Saga and Act are set for a hand-written campaign; Dread turns on
-	// strain and scars.
+	// Saga is set for a hand-written campaign; Dread turns on strain and
+	// scars.
 	Saga  string `json:"saga,omitempty"`
-	Act   int    `json:"act,omitempty"`
 	Dread bool   `json:"dread,omitempty"`
+	// Storyline is the main quest that matters where the party stands (a
+	// saga has one per region).
+	Storyline string `json:"storyline,omitempty"`
 }
 
 func itemView(w *game.World, it *game.Item, c *game.Character, n *game.NPC) ItemView {
@@ -573,7 +575,10 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	for _, p := range w.Players {
 		v.Players = append(v.Players, PlayerView{ID: p.ID, Name: p.Name, CharacterID: p.CharacterID})
 	}
-	v.Saga, v.Act, v.Dread = c.Saga, c.Act, c.Dread
+	v.Saga, v.Dread = c.Saga, c.Dread
+	if mq := w.MainQuest(); mq != nil {
+		v.Storyline = mq.ID
+	}
 	v.Lethality = c.Lethality
 	if v.Lethality == "" {
 		v.Lethality = game.LethalityStandard

@@ -278,6 +278,8 @@ type Location struct {
 	IsLair      bool   `json:"is_lair,omitempty"`
 	Zones       []Zone `json:"zones,omitempty"`
 	LastDay     int    `json:"last_day,omitempty"` // day the party was last here
+	// Region groups a saga's places ("innsmouth", "arkham"); "" elsewhere.
+	Region string `json:"region,omitempty"`
 }
 
 // Zone looks up a zone by id or name.
@@ -671,9 +673,8 @@ type CampaignExtra struct {
 	// Pending holds turns waiting for their player to roll, by character id.
 	Pending map[string]*PendingAction `json:"pending,omitempty"`
 	// Saga is the hand-written campaign this world was built from ("" for
-	// an authored one-shot), and Act is the act being played.
+	// an authored one-shot).
 	Saga string `json:"saga,omitempty"`
-	Act  int    `json:"act,omitempty"`
 	// Dread turns on strain, scars and horror saves (see strain.go).
 	Dread bool `json:"dread,omitempty"`
 	// Milestones lift every character to at least a level when an

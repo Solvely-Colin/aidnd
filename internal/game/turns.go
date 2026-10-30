@@ -259,7 +259,7 @@ func StartEncounter(w *World, specs []EnemySpec) (*Encounter, []string, error) {
 	for _, s := range specs {
 		n := clamp(s.Count, 1, 4)
 		if s.Boss != nil {
-			if bossAt >= 0 || (danger < 3 && (s.NPCID == "" || s.NPCID != w.Campaign.AntagonistID)) {
+			if bossAt >= 0 || (danger < 3 && !w.IsBoss(s.NPCID)) {
 				s.Boss = nil
 			} else {
 				n, bossAt = 1, len(blocks)

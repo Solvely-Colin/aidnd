@@ -287,26 +287,26 @@ function strainHTML(st) {
     ${st.scars?.length ? `<div class="scars">${st.scars.map(s => `<div><b>${esc(s.name)}</b><span>${esc(s.text)}</span></div>`).join("")}</div>` : ""}</div>`;
 }
 
-// Sagas are hand-written long campaigns. Each act opens as the last one
-// ends, so the card only promises what is playable now.
+// Sagas are hand-written long campaigns in one open world that grows as
+// players travel: regions are built the first time someone goes there.
 function sagasHTML() {
   const list = S.meta?.sagas || [];
   if (!list.length) return "";
   return `<span class="mono-k">A long campaign</span>${list.map(s => `<div class="saga">
       <div class="saga-art"><div class="art">${drawn("saga-" + s.key)}</div></div>
       <div class="saga-txt">
-        <span class="eyebrow-acc">${esc(SETTING_WORD[s.setting] || s.setting)} · act one open · levels ${esc(s.levels.replace("-", " to "))}</span>
+        <span class="eyebrow-acc">${esc(SETTING_WORD[s.setting] || s.setting)} · an open world · begins in ${esc(s.start)}</span>
         <h2 class="title-l">${esc(s.title)}</h2>
         <p class="pitch">${esc(s.pitch)}</p>
         <div class="saga-foot"><button class="btn primary" data-saga="${esc(s.key)}">Begin the campaign</button>
-          <span class="help">Written ahead, played over weeks. Go solo or bring friends. Horror leaves marks: watch your strain.</span></div>
+          <span class="help">One world that grows as you explore it, played over weeks. Go solo or bring friends. Horror leaves marks: watch your strain.</span></div>
       </div></div>`).join("")}`;
 }
 
 async function startSaga(key) {
   S.writing = Date.now();
   const box = $("#sagas");
-  if (box) box.innerHTML = `<div class="writing"><h3>Opening the first act</h3><span class="help">Laying out the town and its people…</span></div>`;
+  if (box) box.innerHTML = `<div class="writing"><h3>Opening the world</h3><span class="help">Laying out the first town and its people…</span></div>`;
   try {
     const c = await api("POST", "/campaigns", { saga: key, lethality: S.lethality || "standard" });
     await api("POST", `/campaigns/${c.id}/players`, { name: S.me.name });
@@ -1637,7 +1637,7 @@ function topics(n) {
   const v = S.view, out = [];
   const given = (v.quests || []).filter(q => q.giver_name === n.name && q.status !== "completed");
   given.forEach(q => out.push({ key: "q" + q.id, label: q.title, ask: `about ${q.title.toLowerCase().replace(/^the /, "the ")}` }));
-  const main = (v.quests || []).find(q => q.is_main && q.status !== "completed");
+  const main = (v.quests || []).find(q => q.id === v.storyline && q.status === "active") || (v.quests || []).find(q => q.is_main && q.status === "active");
   if (main && !given.includes(main)) out.push({ key: "main", label: main.title, ask: `about ${main.title.replace(/^The /, "the ")}` });
   out.push({ key: "want", label: "What they want", ask: "what they want" });
   out.push({ key: "place", label: v.location?.name || "This place", ask: `about ${v.location?.name || "this place"}` });

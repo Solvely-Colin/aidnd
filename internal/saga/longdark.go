@@ -2,11 +2,10 @@ package saga
 
 import "github.com/Solvely-Colin/aidnd/internal/game"
 
-// The Long Dark Below is the first saga: Lovecraftian New England,
-// 1931-1935, levels 1 to 20 over five acts. SPOILERS below: the secrets
-// are gated so the narrator only learns them as players uncover them.
-//
-// Act I is built here. Acts II-V come with the level 6-20 rules.
+// The Long Dark Below is the first saga: Lovecraftian New England from
+// 1931, one open world that grows region by region as players reach it.
+// SPOILERS below: the secrets are gated so the narrator only learns them as
+// players uncover them. More regions are added as they are written.
 func init() { register(longDark) }
 
 var longDark = &Saga{
@@ -17,20 +16,19 @@ var longDark = &Saga{
 		"and nobody in town reported it. Something under the Atlantic is dreaming, and the coast is starting to dream with it.",
 	Premise: "A Lovecraftian investigation campaign in 1931 Massachusetts, beginning in the decaying fishing town of Innsmouth. " +
 		"Investigators, not heroes: horror is felt, the unknown stays partly unknown, and the town keeps its secrets until they are pried loose.",
-	Acts: []Act{actOne},
+	Start:   "innsmouth",
+	Regions: []Region{innsmouth, arkham},
 }
 
 // Deep One hybrids and the Order's men share a stat block.
 var orderMan = &game.StatBlock{MaxHP: 11, AC: 12, AttackBonus: 3, Damage: "1d6+1", HorrorRank: 1}
 
-var actOne = Act{
-	N:      1,
-	Title:  "Salt and Silence",
+var innsmouth = Region{
+	Key:    "innsmouth",
+	Name:   "Innsmouth",
 	Levels: [2]int{1, 4},
-	Openings: []string{
-		"The Mary Alder came home with no one aboard.",
-		"Innsmouth doesn't want you asking why.",
-	},
+	Brief: "Innsmouth has been dying since the 'plague' of 1846. Most townsfolk have the Innsmouth look and keep away from strangers. " +
+		"The Esoteric Order of Dagon replaced every church in town that year. Outsiders who ask too many questions are watched, then warned, then gone.",
 	Hub: Place{Name: "Gilman House", Kind: game.KindBuilding,
 		Hint: "The only hotel in Innsmouth",
 		Desc: "A sagging four-storey hotel on Town Square, the only place in Innsmouth that rents rooms to strangers. " +
@@ -139,9 +137,6 @@ var actOne = Act{
 				{Kind: game.ObjFreeform, Text: "Keep Gull Point Light burning through the storm night and drive off what climbs the rocks"}}},
 	},
 	Secrets: []Secret{
-		{Title: "Innsmouth in 1931", AlwaysOn: true,
-			Text: "Innsmouth has been dying since the 'plague' of 1846. Most townsfolk have the Innsmouth look and keep away from strangers. " +
-				"The Esoteric Order of Dagon replaced every church in town that year. Outsiders who ask too many questions are watched, then warned, then gone."},
 		{Title: "Mr. Nye", Keywords: []string{"nye", "bell-founder", "providence"},
 			Text: "Mr. Nye is charming, helpful and endlessly curious about the Order's bell. He offers to take the bell somewhere safe if anyone gets it. " +
 				"He never explains himself and is never caught in a lie. Play him as a gentleman with no fear at all."},

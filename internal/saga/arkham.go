@@ -1,0 +1,141 @@
+package saga
+
+import "github.com/Solvely-Colin/aidnd/internal/game"
+
+// Arkham and the Dunwich hills: the stolen Sunken Codex. SPOILERS: the
+// secrets are gated until players uncover them.
+
+var outerOne = &game.StatBlock{MaxHP: 13, AC: 13, AttackBonus: 4, Damage: "1d8+1", HorrorRank: 2}
+
+var arkham = Region{
+	Key:    "arkham",
+	Name:   "Arkham",
+	From:   "innsmouth",
+	Road:   "the Arkham road, inland past the salt marsh",
+	Levels: [2]int{3, 5},
+	Brief: "Arkham is an old, gambrel-roofed university town on the Miskatonic River, proud of its library and uneasy about what is in it. " +
+		"West of it the land climbs into the Dunwich hills: poor farms, stone circles on the hilltops, and families that keep to themselves.",
+	Hub: Place{Name: "Orne Library", Kind: game.KindBuilding,
+		Hint: "Miskatonic University's great library",
+		Desc: "The Orne Library of Miskatonic University: oak reading rooms, green lamps, and a locked iron gate to the Restricted Stacks. " +
+			"Since the theft there is a guard at the gate in daylight, and the staff speak in whispers."},
+	Places: []Place{
+		{Name: "The Restricted Stacks", Kind: game.KindBuilding, Danger: 1,
+			Hint: "Where the forbidden books are kept",
+			Desc: "A vaulted room behind the iron gate. Chained folios, a reading desk, and one empty space on a shelf, with a wet ring on the wood where a book once sat."},
+		{Name: "Nye & Sons, Antiquarian", Kind: game.KindBuilding, Danger: 1,
+			Hint: "A bookshop on Garrison Street that opened this spring",
+			Desc: "A narrow shop of old books on Garrison Street. The sign is new, the shelves are dusty, and the owner is always away on business."},
+		{Name: "Boston & Maine Depot", Kind: game.KindTown, Danger: 1,
+			Hint: "The railway station, for Boston and the north",
+			Desc: "A brick station by the river, with a newsstand, a freight shed, and trains for Boston twice a day."},
+		{Name: "The Witch House", Kind: game.KindBuilding, Danger: 3,
+			Hint: "A rooming house no student stays in long",
+			Desc: "An old house in the Merchant Quarter where Keziah Mason lived in 1692. The attic room has walls that meet at angles that hurt to look at."},
+		{Name: "Dunwich Village", Kind: game.KindTown, Danger: 2,
+			Hint: "A decaying hill village up the Aylesbury Pike",
+			Desc: "A huddle of rotting gambrel roofs under round hills crowned with standing stones. The church has a broken steeple and is now a general store. People watch you from doorways and don't wave."},
+		{Name: "Whateley Farm", Kind: game.KindBuilding, Danger: 3, From: "Dunwich Village",
+			Hint: "The old Whateley place, where something happened in 1928",
+			Desc: "A sagging farmhouse at the foot of Sentinel Hill. Half of it was boarded up years ago. Fresh wagon tracks lead up the hill."},
+		{Name: "Cold Spring Glen", Kind: game.KindWilderness, Danger: 3, From: "Dunwich Village",
+			Hint: "A dark ravine where lights are seen at night",
+			Desc: "A deep wooded ravine full of the sound of water. The ferns are crushed in wide circles, and the trees above are scorched in patches."},
+		{Name: "Sentinel Hill", Kind: game.KindWilderness, Danger: 4, From: "Whateley Farm", Lair: true,
+			Hint: "The great hill above Dunwich, crowned with a stone table"},
+	},
+	People: []Person{
+		{Name: "Dr. Henry Armitage", Role: "head librarian of Miskatonic", At: "Orne Library", Disposition: 1, Protected: true,
+			Desc: "The white-haired head librarian, who has seen what a book can do and would rather burn one than have it read. Kind, tired and very careful."},
+		{Name: "Prof. Francis Morgan", Role: "professor of comparative literature", At: "Orne Library", Disposition: 0,
+			Desc: "A robust, clever man who believes every book should be read at least once. He is very keen to find the Codex first."},
+		{Name: "Ezra Hale", Role: "night watchman", At: "Orne Library", Disposition: 1,
+			Desc: "The library's night watchman, a veteran of the Argonne. He has not stopped smiling since the night of the theft, and he can't explain why."},
+		{Name: "Pete Kowalski", Role: "newsstand owner", At: "Boston & Maine Depot", Disposition: 1, Merchant: true,
+			Stock: []string{"healing_potion", "healing_potion", "healers_kit", "rope", "lantern", "rations", "torch"},
+			Desc:  "Runs the depot newsstand and sells whatever the trains bring in. Knows every stranger who got off this month."},
+		{Name: "Earl Sawyer", Role: "Dunwich farmer", At: "Dunwich Village", Disposition: 0,
+			Desc: "A gaunt hill farmer losing a cow a week. He is the only man in Dunwich frightened enough to talk to outsiders."},
+		{Name: "Mamie Bishop", Role: "village gossip", At: "Dunwich Village", Disposition: 0,
+			Desc: "A sharp old woman who knew the Whateleys and will tell you all about them, for a price and a cup of coffee."},
+		{Name: "Joe Osborn", Role: "storekeeper", At: "Dunwich Village", Disposition: 0, Merchant: true,
+			Stock: []string{"rations", "rope", "torch", "lantern", "healing_potion"},
+			Desc:  "Keeps the general store in the old church. Sells to anyone, trusts no one."},
+		{Name: "The Outer Ones", Role: "things from the sky", Disposition: -3, Stats: outerOne,
+			Desc: "Pinkish, fungous, crab-like things with membranous wings and a pulsing head of tendrils. They buzz when they speak."},
+	},
+	Things: []Thing{
+		{Name: "Nye & Sons sales ledger", Kind: game.ItemQuest, At: "Nye & Sons, Antiquarian",
+			Desc: "The shop's only entry for spring: 'Codex, sunken, one volume. Sold to C. Whateley, Dunwich. Paid in old coin.'"},
+		{Name: "Professor Morgan's crate", Kind: game.ItemQuest, At: "Boston & Maine Depot",
+			Desc: "A nailed crate addressed to Prof. F. Morgan, stamped 'Books, fragile' from a Boston gallery. Something inside shifts when it is tilted."},
+	},
+	Main: Quest{
+		Title:   "The Sunken Codex",
+		Summary: "Someone stole the Sunken Codex from Miskatonic's Restricted Stacks. Find it before it is used.",
+		Objectives: []game.ObjectiveSpec{
+			{Kind: game.ObjTalkToNPC, Target: "Ezra Hale", Text: "Hear the night watchman's account of the theft"},
+			{Kind: game.ObjObtainItem, Target: "Nye & Sons sales ledger", Text: "Find out from the Garrison Street bookshop who bought the Codex"},
+			{Kind: game.ObjTalkToNPC, Target: "Earl Sawyer", Text: "Win over Earl Sawyer, the one man in Dunwich who will talk"},
+			{Kind: game.ObjReachLocation, Target: "Whateley Farm", Text: "Find the Whateley farmhouse and learn when the rite will be"},
+		},
+		Milestones: map[int]int{2: 4, 5: 5},
+	},
+	Side: []Quest{
+		{Title: "Earl Sawyer's Cows", Giver: "Earl Sawyer", Solo: true, XP: 40, Gold: 10,
+			Summary: "For one investigator. Sit up a night with Earl Sawyer's herd and see what takes them.",
+			Objectives: []game.ObjectiveSpec{
+				{Kind: game.ObjFreeform, Text: "Watch Earl Sawyer's pasture through a night and find out what takes the cows"}}},
+		{Title: "The Late Return", Giver: "Dr. Henry Armitage", Solo: true, XP: 40,
+			Summary: "For one investigator. A book signed out in 1792 has come back to the library. Find out who returned it.",
+			Objectives: []game.ObjectiveSpec{
+				{Kind: game.ObjFreeform, Text: "Find out who returned a library book signed out in 1792"}}},
+		{Title: "Morgan's Errand", Giver: "Prof. Francis Morgan", Solo: true, XP: 30, Gold: 20,
+			Summary: "For one investigator. Professor Morgan pays well to have a crate fetched from the depot, unopened.",
+			Objectives: []game.ObjectiveSpec{
+				{Kind: game.ObjObtainItem, Target: "Professor Morgan's crate", Text: "Collect Professor Morgan's crate from the Boston & Maine Depot"},
+				{Kind: game.ObjDeliverItem, Target: "Professor Morgan's crate", DeliverTo: "Prof. Francis Morgan", Text: "Bring the crate to Professor Morgan"}}},
+		{Title: "A Night in the Witch House", Giver: "Dr. Henry Armitage", XP: 60, Gold: 20,
+			Summary: "For the whole party. Students who sleep in the Witch House attic stop sleeping. Spend a night there and end it.",
+			Objectives: []game.ObjectiveSpec{
+				{Kind: game.ObjReachLocation, Target: "The Witch House", Text: "Go to the Witch House"},
+				{Kind: game.ObjFreeform, Text: "Last the night in the attic room and end what visits it"}}},
+	},
+	Secrets: []Secret{
+		{Title: "The Corvid Society", Keywords: []string{"corvid", "society", "miskatonic", "armitage", "morgan"},
+			Text: "A handful of Miskatonic scholars quietly collect and study forbidden books. Dr. Armitage leads the careful ones, who would burn the worst; Prof. Morgan leads the curious, who would read them."},
+		{Title: "Ezra Hale's smile", Keywords: []string{"watchman", "ezra", "smile", "theft"},
+			Text: "The thief walked past Ezra Hale and touched his face, and Ezra has smiled ever since. He remembers a smell of the sea and a hill-country voice."},
+		{Title: "Nye & Sons", Gate: "main:2", Keywords: []string{"nye", "bookshop", "garrison"},
+			Text: "The bookshop is rented by a tall, dark, well-spoken man, the same Mr. Nye who stays in Innsmouth. He sold the Codex to Curtis Whateley, calling it the key to the gate on Sentinel Hill."},
+		{Title: "Curtis Whateley", Gate: "main:2", Keywords: []string{"curtis", "whateley", "wilbur"},
+			Text: "Curtis Whateley is a cousin of Wilbur Whateley, who died in the Orne Library in 1928 trying to steal the Necronomicon. Curtis wants to finish Wilbur's work and open the gate on Sentinel Hill."},
+		{Title: "The Sunken Codex", Gate: "main:3", Keywords: []string{"codex", "book", "sunken"},
+			Text: "The Codex is not about the gate at all. It is a sea-book about the Deep Ones and a drowned city, its pages always wet. Curtis doesn't know. His rite will fail, and open only a small tear."},
+		{Title: "The Outer Ones", Gate: "main:4", Keywords: []string{"lights", "outer ones", "glen", "cows", "wings"},
+			Text: "The lights over the hills are the Outer Ones, things from beyond the sky. They have waited years for a tear on Sentinel Hill and are helping Curtis without his knowing. They take cattle, and sometimes they trade a secret for a favor."},
+	},
+	Beats: []Beat{
+		{Title: "Dunwich", Trigger: game.TriggerEnterLocation, Target: "Dunwich Village",
+			Text: "Dunwich falls quiet as the party arrives. A dog barks once and stops. On the hilltops the standing stones catch the light, and on Sentinel Hill a thin smoke rises."},
+		{Title: "Lights in the glen", Trigger: game.TriggerEnterLocation, Target: "Cold Spring Glen", Effects: []string{game.EffectBringNPC, game.EffectAmbush}, Figure: "The Outer Ones",
+			Text: "A buzzing fills the ravine, and pale lights drop through the trees. The Outer Ones do not want the glen disturbed tonight."},
+		{Title: "The stones hum", Trigger: game.TriggerObjectiveDone, Target: "main:4",
+			Text: "From the farmhouse the party can hear it: the stones on Sentinel Hill have begun to hum. Curtis Whateley's almanac marks the rite for the next dark of the moon, three nights away."},
+		{Title: "A note from Armitage", Trigger: game.TriggerStalled, Value: 6,
+			Text: "Dr. Armitage sends a note: a bookshop on Garrison Street opened this spring, and its owner was seen near the library the night of the theft."},
+	},
+	Boss: Boss{
+		Person: Person{Name: "Curtis Whateley", Role: "heir of the Dunwich Whateleys", At: "Sentinel Hill",
+			Desc:  "A tall, stooped, goatish man in a farmer's coat, reading aloud from a wet book on the stone table. His voice carries over the whole valley.",
+			Stats: &game.StatBlock{MaxHP: 60, AC: 13, AttackBonus: 6, Damage: "1d10+2", Inflicts: game.CondFrightened, HorrorRank: 1}},
+		Move: "The Hilltop Chant",
+		Phases: []game.BossPhase{
+			{Name: "The chant"},
+			{Name: "The stones hum", Line: "The standing stones hum louder; Curtis reads faster and fights like a man possessed"},
+			{Name: "The tear opens", Line: "The air above the stone table splits, and the Outer Ones come through the tear"},
+		},
+		Minion:       "Outer One",
+		MinionHorror: 2,
+	},
+}

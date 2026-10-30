@@ -605,7 +605,7 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			return "", fmt.Errorf("no fight to end")
 		}
 		for _, e := range w.Encounter.Living() {
-			if e.NPCID != "" && e.NPCID == w.Campaign.AntagonistID {
+			if w.IsBoss(e.NPCID) {
 				return "", fmt.Errorf("the antagonist does not flee")
 			}
 		}

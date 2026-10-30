@@ -669,8 +669,8 @@ func TestStartSagaCampaign(t *testing.T) {
 		t.Fatalf("create saga %d %s", r.code, r.body)
 	}
 	v := r.json(t)
-	if v["saga"] != "long-dark" || v["act"] != float64(1) || v["dread"] != true || v["setting"] != "pulp" {
-		t.Fatalf("saga view: saga=%v act=%v dread=%v setting=%v", v["saga"], v["act"], v["dread"], v["setting"])
+	if v["saga"] != "long-dark" || v["dread"] != true || v["setting"] != "pulp" {
+		t.Fatalf("saga view: saga=%v dread=%v setting=%v", v["saga"], v["dread"], v["setting"])
 	}
 	id := v["id"].(string)
 	j := e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "", "")
