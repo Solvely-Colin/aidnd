@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS locations (
     is_lair     INTEGER NOT NULL DEFAULT 0,
     zones       TEXT NOT NULL DEFAULT '[]',
     last_day    INTEGER NOT NULL DEFAULT 0,
+    region      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (campaign_id, id)
 );
 

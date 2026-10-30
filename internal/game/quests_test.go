@@ -220,6 +220,42 @@ func TestAntagonistDefeatCompletesCampaign(t *testing.T) {
 	}
 }
 
+func TestSagaBossEndsStorylineNotCampaign(t *testing.T) {
+	f := newFixture(t)
+	f.w.Campaign.Saga = "test-saga"
+	q := f.mainQuest(t)
+	f.w.Campaign.Milestones = map[string]int{q.Objectives[len(q.Objectives)-1].ID: 3}
+	q.Objectives[0].Done, q.Objectives[1].Done = true, true
+	UpdateLairGate(f.w)
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	Resolve(f.ctx(100), f.aria, []Action{{Kind: ActMove, Target: "Whisperwood"}})
+	Resolve(f.ctx(), f.aria, []Action{{Kind: ActReposition, Zone: "Clearing"}})
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	Resolve(f.ctx(), f.aria, []Action{{Kind: ActMove, Target: "Black Spire"}})
+	f.villain.Stats = &StatBlock{MaxHP: 4, AC: 5, AttackBonus: 2, Damage: "1d6"}
+	f.villain.ZoneID = f.aria.ZoneID
+	boss := NPCJoinsFight(f.w, f.villain)
+	boss.HP = 1
+	f.w.Campaign.Turns.Budget = FullBudget(true)
+	r := Resolve(f.ctx(10, 6), f.aria, []Action{{Kind: ActAttack, Target: "Vex"}, {Kind: ActLook}})
+	if f.w.Campaign.Status == StatusCompleted || r.CampaignEnded {
+		t.Fatalf("a saga's world goes on after a boss: %s", f.w.Campaign.Status)
+	}
+	if q.Status != QuestTurnedIn || f.villain.Alive {
+		t.Fatalf("storyline should be over: %s alive=%v", q.Status, f.villain.Alive)
+	}
+	if f.aria.Level < 3 {
+		t.Fatalf("the boss milestone should lift Aria to 3, got %d", f.aria.Level)
+	}
+	found := false
+	for _, e := range f.w.Chronicle {
+		found = found || (e.QuestID == q.ID && e.Kind == FactDeed)
+	}
+	if !found {
+		t.Fatal("the end of a storyline is remembered")
+	}
+}
+
 func TestOversizedRewardsRejected(t *testing.T) {
 	f := newFixture(t)
 	_, err := AddQuest(f.w, QuestSpec{Title: "Riches", GiverID: f.elder.ID,

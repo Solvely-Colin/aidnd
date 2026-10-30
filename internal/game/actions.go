@@ -1053,24 +1053,43 @@ func defeat(w *World, e *Enemy, subdued bool) []string {
 			n.Keep(fmt.Sprintf("day %d: was subdued by the party", w.Campaign.Scene.Day))
 			w.Record(ChronicleEntry{Kind: FactDeed, Source: SourceEngine, NPCIDs: []string{n.ID}, Text: fmt.Sprintf("The party subdued %s at %s", n.Name, where)})
 		}
-		if n.Antagonist || n.ID == w.Campaign.AntagonistID {
-			changes = append(changes, completeMain(w)...)
+		if q := w.StorylineOf(n.ID); q != nil {
+			changes = append(changes, completeMain(w, q)...)
+		} else if w.IsBoss(n.ID) {
+			changes = append(changes, completeMain(w, w.MainQuest())...)
 		}
 	}
 	return changes
 }
 
-// completeMain finishes the storyline when the antagonist falls.
-func completeMain(w *World) []string {
+// completeMain finishes a storyline when its antagonist falls. A one-shot
+// campaign ends there; a saga's open world goes on, and the fall is
+// recorded so the world remembers it.
+func completeMain(w *World, mq *Quest) []string {
 	changes := []string{"The antagonist has fallen!"}
-	if mq := w.MainQuest(); mq != nil {
+	if mq != nil {
 		for i := range mq.Objectives {
-			mq.Objectives[i].Done = true
+			o := &mq.Objectives[i]
+			if !o.Done {
+				o.Done = true
+				if lvl := w.Campaign.Milestones[o.ID]; lvl > 0 {
+					for _, c := range w.Characters {
+						changes = append(changes, RaiseToLevel(c, lvl)...)
+					}
+				}
+			}
 		}
 		mq.Status = QuestTurnedIn
 		keepQuestPromise(w, mq)
 	}
-	w.Campaign.Status = StatusCompleted
+	if w.Campaign.Saga == "" {
+		w.Campaign.Status = StatusCompleted
+		return changes
+	}
+	if mq != nil {
+		changes[0] = "The storyline \"" + mq.Title + "\" is over"
+		w.Record(ChronicleEntry{Kind: FactDeed, Source: SourceEngine, QuestID: mq.ID, Text: "The party ended the storyline \"" + mq.Title + "\""})
+	}
 	return changes
 }
 

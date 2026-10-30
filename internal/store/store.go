@@ -271,8 +271,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, l := range w.Locations {
-		if err := insert(ctx, tx, "locations", []string{"campaign_id", "id", "ord", "name", "kind", "hint", "description", "danger", "stub", "visited", "is_hub", "is_lair", "zones", "last_day"},
-			id, l.ID, i, l.Name, l.Kind, l.Hint, l.Description, l.Danger, l.Stub, l.Visited, l.IsHub, l.IsLair, js(nonNil(l.Zones)), l.LastDay); err != nil {
+		if err := insert(ctx, tx, "locations", []string{"campaign_id", "id", "ord", "name", "kind", "hint", "description", "danger", "stub", "visited", "is_hub", "is_lair", "zones", "last_day", "region"},
+			id, l.ID, i, l.Name, l.Kind, l.Hint, l.Description, l.Danger, l.Stub, l.Visited, l.IsHub, l.IsLair, js(nonNil(l.Zones)), l.LastDay, l.Region); err != nil {
 			return err
 		}
 	}
@@ -402,10 +402,10 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Characters = append(w.Characters, ch)
 			return errors.Join(unjs(scores, &ch.Scores), unjs(prof, &ch.Proficient), unjs(conds, &ch.Conditions), unjs(extra, &ch.CharExtra))
 		}),
-		q(`SELECT id, name, kind, hint, description, danger, stub, visited, is_hub, is_lair, zones, last_day FROM locations WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
+		q(`SELECT id, name, kind, hint, description, danger, stub, visited, is_hub, is_lair, zones, last_day, region FROM locations WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			l := &game.Location{}
 			var zones string
-			if err := r.Scan(&l.ID, &l.Name, &l.Kind, &l.Hint, &l.Description, &l.Danger, &l.Stub, &l.Visited, &l.IsHub, &l.IsLair, &zones, &l.LastDay); err != nil {
+			if err := r.Scan(&l.ID, &l.Name, &l.Kind, &l.Hint, &l.Description, &l.Danger, &l.Stub, &l.Visited, &l.IsHub, &l.IsLair, &zones, &l.LastDay, &l.Region); err != nil {
 				return err
 			}
 			w.Locations = append(w.Locations, l)

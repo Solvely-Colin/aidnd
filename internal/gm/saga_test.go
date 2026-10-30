@@ -52,9 +52,10 @@ func TestSagaActOnePlays(t *testing.T) {
 	if w.Here().Name != "Innsmouth Harbor" {
 		t.Fatalf("at %s", w.Here().Name)
 	}
-	// the harbor's hand-written description is canon: no fill_location call
-	if n := len(r.f.Tagged("author_location")); n != 0 {
-		t.Fatalf("anchor places keep their canon description, got %d author calls", n)
+	// the harbor's written description is canon: the author may add around
+	// it, but the description stays as written
+	if d := w.Here().Description; !strings.HasPrefix(d, "Rotting wharves") {
+		t.Fatalf("canon description replaced: %q", d)
 	}
 	var beat bool
 	for _, b := range w.Beats {

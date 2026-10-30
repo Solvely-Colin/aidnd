@@ -174,16 +174,17 @@ func (g *GM) CreateCampaign(ctx context.Context, premise string) (*game.World, e
 	return built, err
 }
 
-// CreateSaga starts act 1 of a hand-written saga and saves it. Nothing
-// is authored by the model up front; places fill in zones as they are
-// reached, inside the saga's canon.
+// CreateSaga starts a hand-written saga's open world and saves it. Nothing
+// is authored up front: regions are built from the saga as the party
+// reaches them, and the author only adds what lies around the written
+// places, inside the saga's canon.
 func (g *GM) CreateSaga(ctx context.Context, key string) (*game.World, error) {
 	s := saga.Get(key)
 	if s == nil {
 		return nil, fmt.Errorf("unknown saga %q", key)
 	}
 	id := g.NewID()
-	w, err := saga.Build(s, 1, id, saga.Options{MaxSetbacks: g.Cfg.MaxSetbacks, MaxPlayers: g.Cfg.MaxPlayers, Now: g.Now().Unix()})
+	w, err := saga.Build(s, id, saga.Options{MaxSetbacks: g.Cfg.MaxSetbacks, MaxPlayers: g.Cfg.MaxPlayers, Now: g.Now().Unix()})
 	if err != nil {
 		return nil, err
 	}
@@ -721,6 +722,12 @@ func kitFor(text string) string {
 // arrivalHooks returns engine hooks that author stubs, zones and ambushes.
 func (g *GM) arrivalHooks(ctx context.Context, w *game.World) (func(*game.Location), func(*game.Location) []game.EnemySpec) {
 	onArrive := func(l *game.Location) {
+		// a saga region is built from its written canon on first arrival
+		if built, err := saga.Arrive(w, l); err != nil {
+			g.logf("saga region at %s: %v", l.Name, err)
+		} else if built {
+			g.debugf("saga region built at %s", l.Name)
+		}
 		if l.Stub {
 			g.fillLocation(ctx, w, l)
 		}
@@ -759,8 +766,14 @@ func (g *GM) fillLocation(ctx context.Context, w *game.World, l *game.Location) 
 		here = append(here, it.Name)
 	}
 	already := ""
+	// a saga's written description is canon: the author adds only what is
+	// around it, and the description is kept as written
+	canon := l.Description
+	if canon != "" {
+		already += "\nThis place is already described, and that is canon (keep to it; your description may only add detail): " + canon
+	}
 	if len(here) > 0 {
-		already = "\nAlready lying here (mention it in the description; do not add it again): " + strings.Join(here, ", ") + "."
+		already += "\nAlready lying here (mention it in the description; do not add it again): " + strings.Join(here, ", ") + "."
 	}
 	npc := obj(map[string]any{"name": str("name (reuse an existing NPC's exact name only if it is the same person)"), "role": str("role"), "desc": str("one sentence"),
 		"disposition": num("-3..3", -3, 3), "merchant": boolean("sells goods"), "stock": arr(str("catalog key"), "merchant stock")}, "name", "role")
@@ -802,6 +815,9 @@ func (g *GM) fillLocation(ctx context.Context, w *game.World, l *game.Location) 
 		fill.NPCs = nil
 	}
 	notes, ferr := game.FillLocation(w, l.ID, fill.LocationFill)
+	if canon != "" {
+		l.Description = canon
+	}
 	if ferr != nil {
 		g.logf("fill_location %s: %v", l.Name, ferr)
 	}
@@ -879,7 +895,13 @@ func (g *GM) authorEnemies(ctx context.Context, w *game.World, l *game.Location,
 	// the same name would be a fake villain
 	var out []game.EnemySpec
 	for _, e := range a.Enemies {
-		if ant := w.NPC(w.Campaign.AntagonistID); ant != nil && (game.NameContains(e.Name, ant.Name) || game.NameContains(ant.Name, e.Name)) {
+		fake := false
+		for _, ant := range w.NPCs {
+			if w.IsBoss(ant.ID) && (game.NameContains(e.Name, ant.Name) || game.NameContains(ant.Name, e.Name)) {
+				fake = true
+			}
+		}
+		if fake {
 			continue
 		}
 		out = append(out, e)

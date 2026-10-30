@@ -1,5 +1,5 @@
 // Package saga holds hand-written campaigns (the campaign bible as data)
-// and builds a world from one. A saga is the top canon layer: the engine,
+// and builds an open world from one, region by region as play reaches it. A saga is the top canon layer: the engine,
 // the chronicle and the narrator build on it and never contradict it.
 //
 // Secrets in a saga are gated: each lore entry names the objective or quest
@@ -16,35 +16,43 @@ import (
 	"github.com/Solvely-Colin/aidnd/internal/game"
 )
 
-// Saga is a multi-act campaign.
+// Saga is a long campaign in one open world. There are no acts: the
+// world is made of regions, each with its own storyline, and a region is
+// built out the first time anyone travels there.
 type Saga struct {
 	Key     string
 	Title   string
 	Pitch   string // player-facing
 	Premise string
 	Setting string // era key
-	Acts    []Act
+	Start   string // key of the region play begins in
+	Regions []Region
 }
 
-// Act is one chapter: a region, a mystery and a boss.
-type Act struct {
-	N        int
-	Title    string
-	Levels   [2]int // the level range it is built for
-	Hub      Place
-	Places   []Place
-	People   []Person
-	Things   []Thing
-	Main     Quest // the last objective (defeat the boss) is added by Build
-	Side     []Quest
-	Secrets  []Secret
-	Beats    []Beat
-	Boss     Boss
-	Openings []string // player-facing lines for the act card
+// Region is a part of the world: a safe hub, the places around it, its
+// people, and a storyline that ends with a boss. Regions can be played in
+// any order; Levels is only the range it is pitched at.
+type Region struct {
+	Key    string
+	Name   string
+	Brief  string // player-safe canon the narrator sees anywhere in the region
+	From   string // region key whose hub the road leaves from ("" for the start)
+	Road   string // how the road looks from there
+	Levels [2]int
+	Hub    Place
+	Places []Place
+	People []Person
+	Things []Thing
+	Main   Quest // the last objective (defeat the boss) is added by the build
+	Side   []Quest
+	// Secrets are gated: see Secret.
+	Secrets []Secret
+	Beats   []Beat
+	Boss    Boss
 }
 
-// Place is a location. From names the place it connects to (the hub if
-// empty). A lair connects through a gate that opens with the main quest.
+// Place is a location. From names the place it connects to (the region's
+// hub if empty). A lair connects through a gate its storyline opens.
 type Place struct {
 	Name, Kind, Hint, Desc string
 	Danger                 int
@@ -72,8 +80,8 @@ type Thing struct {
 	Held             bool
 }
 
-// Quest is a main or side quest. Milestones maps an objective number
-// (1-based) to the level every character reaches when it is done.
+// Quest is a storyline or a side quest. Milestones maps an objective
+// number (1-based) to the level every character reaches when it is done.
 type Quest struct {
 	Title, Summary, Giver string
 	Solo                  bool // sized for one character
@@ -84,7 +92,8 @@ type Quest struct {
 }
 
 // Secret is canon the narrator sees. Gate is "" (always open), "main:N"
-// (after main objective N) or "side:<title>" (after that side quest).
+// (after the region storyline's objective N) or "side:<title>" (after that
+// side quest).
 type Secret struct {
 	Title, Text string
 	Keywords    []string
@@ -101,7 +110,7 @@ type Beat struct {
 	Figure                       string
 }
 
-// Boss is the act's antagonist, who waits in the lair.
+// Boss is a storyline's antagonist, who waits in the region's lair.
 type Boss struct {
 	Person
 	Move         string
@@ -117,25 +126,35 @@ func register(s *Saga) { registry[s.Key] = s }
 // Get returns a saga by key.
 func Get(key string) *Saga { return registry[key] }
 
+// Region returns one of the saga's regions.
+func (s *Saga) Region(key string) *Region {
+	for i := range s.Regions {
+		if s.Regions[i].Key == key {
+			return &s.Regions[i]
+		}
+	}
+	return nil
+}
+
 // Info is a saga's player-facing card.
 type Info struct {
 	Key     string `json:"key"`
 	Title   string `json:"title"`
 	Pitch   string `json:"pitch"`
 	Setting string `json:"setting"`
-	Acts    int    `json:"acts"`
-	Levels  string `json:"levels"`
+	Start   string `json:"start"`   // the region play begins in
+	Regions int    `json:"regions"` // regions written so far
 }
 
 // List returns every saga's card, by title.
 func List() []Info {
 	var out []Info
 	for _, s := range registry {
-		lo, hi := 20, 1
-		for _, a := range s.Acts {
-			lo, hi = min(lo, a.Levels[0]), max(hi, a.Levels[1])
+		start := ""
+		if r := s.Region(s.Start); r != nil {
+			start = r.Name
 		}
-		out = append(out, Info{Key: s.Key, Title: s.Title, Pitch: s.Pitch, Setting: s.Setting, Acts: len(s.Acts), Levels: fmt.Sprintf("%d-%d", lo, hi)})
+		out = append(out, Info{Key: s.Key, Title: s.Title, Pitch: s.Pitch, Setting: s.Setting, Start: start, Regions: len(s.Regions)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Title < out[j].Title })
 	return out
@@ -147,45 +166,101 @@ type Options struct {
 	Now                     int64
 }
 
-// Build makes a new world for act n of the saga. Every name in the act
-// must resolve; a problem is an error, never a silently dropped piece.
-func Build(s *Saga, n int, id string, opt Options) (*game.World, error) {
-	if n < 1 || n > len(s.Acts) {
-		return nil, fmt.Errorf("saga %s has no act %d", s.Key, n)
+// Build makes a new world for the saga: the start region in full, and a
+// road to every other region's hub, left as a stub until someone goes
+// there (see Arrive). Every name must resolve; a problem is an error,
+// never a silently dropped piece.
+func Build(s *Saga, id string, opt Options) (*game.World, error) {
+	start := s.Region(s.Start)
+	if start == nil {
+		return nil, fmt.Errorf("saga %s has no start region %q", s.Key, s.Start)
 	}
-	a := &s.Acts[n-1]
-	w := &game.World{Campaign: game.Campaign{ID: id, Title: s.Title + ": " + a.Title, Premise: s.Premise, Pitch: s.Pitch,
+	w := &game.World{Campaign: game.Campaign{ID: id, Title: s.Title, Premise: s.Premise, Pitch: s.Pitch,
 		Setting: s.Setting, Status: game.StatusLobby, MaxSetbacks: opt.MaxSetbacks, MaxPlayers: opt.MaxPlayers, CreatedAt: opt.Now}}
-	w.Campaign.Saga, w.Campaign.Act, w.Campaign.Dread = s.Key, n, true
+	w.Campaign.Saga, w.Campaign.Dread = s.Key, true
 	w.Campaign.Scene = game.Scene{Day: 1, Time: 1, Tension: 2}
 	w.Campaign.Turns.Budget = game.FullBudget(false)
+	w.Campaign.Milestones = map[string]int{}
 
-	hub := w.AddStub(a.Hub.Name, a.Hub.Hint, firstOf(a.Hub.Kind, game.KindTown), 0)
-	hub.Stub, hub.IsHub, hub.Visited, hub.Description = false, true, true, a.Hub.Desc
+	// every region's hub first, so roads can name any of them
+	hubs := map[string]*game.Location{}
+	for i := range s.Regions {
+		r := &s.Regions[i]
+		if hubs[r.Key] != nil {
+			return nil, fmt.Errorf("region %q twice", r.Key)
+		}
+		h := w.AddStub(r.Hub.Name, r.Hub.Hint, firstOf(r.Hub.Kind, game.KindTown), 0)
+		h.IsHub, h.Region = true, r.Key
+		hubs[r.Key] = h
+	}
+	for i := range s.Regions {
+		r := &s.Regions[i]
+		if r.Key == s.Start {
+			continue
+		}
+		from := hubs[r.From]
+		if from == nil {
+			return nil, fmt.Errorf("region %q is reached from unknown %q", r.Key, r.From)
+		}
+		w.Connect(from.ID, hubs[r.Key].ID, game.EdgeKnown, firstOf(r.Road, "the road to "+r.Name), "the road back to "+hubs[r.From].Name)
+	}
+	hub := hubs[start.Key]
 	w.Campaign.HubID, w.Campaign.LocationID = hub.ID, hub.ID
+	hub.Visited = true
+	boss, lair, err := buildRegion(w, start, hub)
+	if err != nil {
+		return nil, fmt.Errorf("region %s: %w", start.Key, err)
+	}
+	w.Campaign.LairID, w.Campaign.AntagonistID = lair.ID, boss.ID
+	if !w.Connected() {
+		return nil, fmt.Errorf("the saga's places do not form one map")
+	}
+	return w, nil
+}
 
+// Arrive builds out a region the first time the party reaches its hub.
+// It reports whether it built anything.
+func Arrive(w *game.World, l *game.Location) (bool, error) {
+	s := Get(w.Campaign.Saga)
+	if s == nil || l == nil || !l.IsHub || !l.Stub || l.Region == "" {
+		return false, nil
+	}
+	r := s.Region(l.Region)
+	if r == nil {
+		return false, nil
+	}
+	if _, _, err := buildRegion(w, r, l); err != nil {
+		return false, fmt.Errorf("region %s: %w", r.Key, err)
+	}
+	return true, nil
+}
+
+// buildRegion lays a region out around its hub and returns its boss and
+// lair.
+func buildRegion(w *game.World, r *Region, hub *game.Location) (*game.NPC, *game.Location, error) {
+	hub.Stub, hub.Description = false, r.Hub.Desc
 	// places first, then the roads between them, so From can name any place
-	for _, p := range a.Places {
-		if w.Location(p.Name) != nil {
-			return nil, fmt.Errorf("place %q twice", p.Name)
+	for _, p := range r.Places {
+		if exact(w, p.Name) != nil {
+			return nil, nil, fmt.Errorf("place %q twice", p.Name)
 		}
 		l := w.AddStub(p.Name, p.Hint, p.Kind, p.Danger)
-		l.Description, l.IsLair = p.Desc, p.Lair
-		// a hand-written description is canon; zones are laid out on arrival
-		l.Stub = p.Desc == ""
+		// a written description is canon: the author keeps it and only
+		// adds what is around it (people, things, new ways onward)
+		l.Description, l.IsLair, l.Region = p.Desc, p.Lair, r.Key
 	}
 	var lair *game.Location
-	for _, p := range a.Places {
+	for _, p := range r.Places {
 		l := exact(w, p.Name)
 		from := hub
 		if p.From != "" {
 			if from = exact(w, p.From); from == nil {
-				return nil, fmt.Errorf("place %q connects to unknown %q", p.Name, p.From)
+				return nil, nil, fmt.Errorf("place %q connects to unknown %q", p.Name, p.From)
 			}
 		}
 		if p.Lair {
 			if lair != nil {
-				return nil, fmt.Errorf("two lairs")
+				return nil, nil, fmt.Errorf("two lairs")
 			}
 			lair = l
 			gate := w.Connect(from.ID, l.ID, game.EdgeLocked, "the way down to "+l.Name, "back to "+from.Name)
@@ -195,64 +270,59 @@ func Build(s *Saga, n int, id string, opt Options) (*game.World, error) {
 		w.Connect(from.ID, l.ID, game.EdgeKnown, "the way to "+l.Name, "back to "+from.Name)
 	}
 	if lair == nil {
-		return nil, fmt.Errorf("act %d has no lair", n)
-	}
-	w.Campaign.LairID = lair.ID
-	if !w.Connected() {
-		return nil, fmt.Errorf("act %d's places do not form one map", n)
+		return nil, nil, fmt.Errorf("no lair")
 	}
 
-	for _, p := range a.People {
+	for _, p := range r.People {
 		if _, err := addPerson(w, p); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	boss, err := addPerson(w, a.Boss.Person)
+	boss, err := addPerson(w, r.Boss.Person)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if boss.LocationID != lair.ID {
-		return nil, fmt.Errorf("the boss must wait in the lair")
+		return nil, nil, fmt.Errorf("the boss must wait in the lair")
 	}
 	boss.Antagonist, boss.Disposition = true, -3
 	if boss.Stats == nil {
 		boss.Stats = &game.StatBlock{MaxHP: 45, AC: 14, AttackBonus: 5, Damage: "1d8+2"}
 	}
-	boss.Stats.AsBoss = &game.BossSpec{Move: a.Boss.Move, Phases: a.Boss.Phases, Minion: a.Boss.Minion, MinionHorror: a.Boss.MinionHorror}
-	w.Campaign.AntagonistID = boss.ID
+	boss.Stats.AsBoss = &game.BossSpec{Move: r.Boss.Move, Phases: r.Boss.Phases, Minion: r.Boss.Minion, MinionHorror: r.Boss.MinionHorror}
 
-	for _, t := range a.Things {
+	for _, t := range r.Things {
 		owner := game.Owner{Kind: game.OwnerLocation}
 		if t.Held {
 			pn := exactNPC(w, t.At)
 			if pn == nil {
-				return nil, fmt.Errorf("thing %q held by unknown %q", t.Name, t.At)
+				return nil, nil, fmt.Errorf("thing %q held by unknown %q", t.Name, t.At)
 			}
 			owner = game.Owner{Kind: game.OwnerNPC, ID: pn.ID}
 		} else {
 			l := exact(w, t.At)
 			if l == nil {
-				return nil, fmt.Errorf("thing %q at unknown %q", t.Name, t.At)
+				return nil, nil, fmt.Errorf("thing %q at unknown %q", t.Name, t.At)
 			}
 			owner.ID = l.ID
 		}
 		if game.PlaceItem(w, game.ItemSpec{Name: t.Name, Kind: t.Kind, Desc: t.Desc, Value: t.Value}, owner) == nil {
-			return nil, fmt.Errorf("thing %q could not be placed", t.Name)
+			return nil, nil, fmt.Errorf("thing %q could not be placed", t.Name)
 		}
 	}
 
-	main := a.Main
+	main := r.Main
 	main.Objectives = append(append([]game.ObjectiveSpec{}, main.Objectives...),
 		game.ObjectiveSpec{Kind: game.ObjDefeatEnemy, Text: "Defeat " + boss.Name, Target: boss.ID})
 	mq, err := addQuest(w, main, true)
 	if err != nil {
-		return nil, fmt.Errorf("main quest: %w", err)
+		return nil, nil, fmt.Errorf("storyline: %w", err)
 	}
 	quests := map[string]*game.Quest{}
-	for _, q := range a.Side {
+	for _, q := range r.Side {
 		sq, err := addQuest(w, q, false)
 		if err != nil {
-			return nil, fmt.Errorf("side quest %q: %w", q.Title, err)
+			return nil, nil, fmt.Errorf("side quest %q: %w", q.Title, err)
 		}
 		quests[q.Title] = sq
 	}
@@ -277,10 +347,19 @@ func Build(s *Saga, n int, id string, opt Options) (*game.World, error) {
 		return "", fmt.Errorf("bad gate %q", ref)
 	}
 
-	for _, sec := range a.Secrets {
+	var regionIDs []string
+	for _, l := range w.Locations {
+		if l.Region == r.Key {
+			regionIDs = append(regionIDs, l.ID)
+		}
+	}
+	if r.Brief != "" {
+		w.Lore = append(w.Lore, &game.Lore{ID: w.NewID("lore"), Title: r.Name, Text: r.Brief, EntityIDs: regionIDs, Keywords: []string{strings.ToLower(r.Name)}, LastTrigger: -100})
+	}
+	for _, sec := range r.Secrets {
 		g, err := gate(sec.Gate)
 		if err != nil {
-			return nil, fmt.Errorf("secret %q: %w", sec.Title, err)
+			return nil, nil, fmt.Errorf("secret %q: %w", sec.Title, err)
 		}
 		lo := &game.Lore{ID: w.NewID("lore"), Title: sec.Title, Text: sec.Text, AlwaysOn: sec.AlwaysOn, LastTrigger: -100}
 		lo.Gate = g
@@ -300,50 +379,51 @@ func Build(s *Saga, n int, id string, opt Options) (*game.World, error) {
 		w.Lore = append(w.Lore, lo)
 	}
 
-	for _, b := range a.Beats {
+	for _, b := range r.Beats {
 		beat := &game.Beat{ID: w.NewID("beat"), Title: b.Title, Text: b.Text, Trigger: b.Trigger, Value: b.Value, Effects: b.Effects}
 		switch b.Trigger {
 		case game.TriggerEnterLocation:
 			l := exact(w, b.Target)
 			if l == nil {
-				return nil, fmt.Errorf("beat %q: unknown place %q", b.Title, b.Target)
+				return nil, nil, fmt.Errorf("beat %q: unknown place %q", b.Title, b.Target)
 			}
 			beat.Target = l.ID
 		case game.TriggerObjectiveDone:
 			g, err := gate(b.Target)
 			if err != nil || !strings.HasPrefix(b.Target, "main:") {
-				return nil, fmt.Errorf("beat %q: target must be main:N", b.Title)
+				return nil, nil, fmt.Errorf("beat %q: target must be main:N", b.Title)
 			}
 			beat.Target = g
 		case game.TriggerStalled, game.TriggerTension, game.TriggerTurn:
 			if b.Value <= 0 {
-				return nil, fmt.Errorf("beat %q needs a value", b.Title)
+				return nil, nil, fmt.Errorf("beat %q needs a value", b.Title)
 			}
 		default:
-			return nil, fmt.Errorf("beat %q: unknown trigger %q", b.Title, b.Trigger)
+			return nil, nil, fmt.Errorf("beat %q: unknown trigger %q", b.Title, b.Trigger)
 		}
 		if b.Figure != "" {
 			f := exactNPC(w, b.Figure)
 			if f == nil {
-				return nil, fmt.Errorf("beat %q: unknown figure %q", b.Title, b.Figure)
+				return nil, nil, fmt.Errorf("beat %q: unknown figure %q", b.Title, b.Figure)
 			}
 			beat.EffectTarget = f.ID
 		}
 		w.Beats = append(w.Beats, beat)
 	}
-	// the finale always plays when the party reaches the lair
+	// the confrontation always plays when the party reaches the lair
 	w.Beats = append(w.Beats, &game.Beat{ID: w.NewID("beat"), Title: "The confrontation", Trigger: game.TriggerEnterLocation, Target: lair.ID,
 		Text: boss.Name + " is here and confronts the party. Make the stakes plain.", Effects: []string{game.EffectAmbush}, EffectTarget: boss.ID})
 
-	// milestones: main quest and side quests
-	w.Campaign.Milestones = map[string]int{}
+	if w.Campaign.Milestones == nil {
+		w.Campaign.Milestones = map[string]int{}
+	}
 	for k, lvl := range main.Milestones {
 		if k < 1 || k > len(mq.Objectives) {
-			return nil, fmt.Errorf("milestone for missing objective %d", k)
+			return nil, nil, fmt.Errorf("milestone for missing objective %d", k)
 		}
 		w.Campaign.Milestones[mq.Objectives[k-1].ID] = lvl
 	}
-	return w, nil
+	return boss, lair, nil
 }
 
 func addPerson(w *game.World, p Person) (*game.NPC, error) {

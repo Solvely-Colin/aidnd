@@ -216,13 +216,77 @@ func (w *World) Quest(ref string) *Quest {
 }
 
 // MainQuest returns the storyline quest.
+//
+// A saga's open world has a storyline per region; then it is the unfinished
+// one for the region the party stands in, else the first unfinished one.
 func (w *World) MainQuest() *Quest {
+	var first, open *Quest
+	region := ""
+	if l := w.Here(); l != nil {
+		region = l.Region
+	}
 	for _, q := range w.Quests {
-		if q.IsMain {
-			return q
+		if !q.IsMain {
+			continue
+		}
+		if first == nil {
+			first = q
+		}
+		if q.Status == QuestTurnedIn || q.Status == QuestCompleted {
+			continue
+		}
+		if open == nil {
+			open = q
+		}
+		if region != "" {
+			if b := w.StorylineBoss(q); b != nil {
+				if l := w.Location(b.LocationID); l != nil && l.Region == region {
+					return q
+				}
+			}
+		}
+	}
+	if open != nil {
+		return open
+	}
+	return first
+}
+
+// StorylineBoss is the NPC a main quest's last objective asks the party to
+// defeat, if it is one.
+func (w *World) StorylineBoss(q *Quest) *NPC {
+	if q == nil || len(q.Objectives) == 0 {
+		return nil
+	}
+	last := q.Objectives[len(q.Objectives)-1]
+	if last.Kind != ObjDefeatEnemy {
+		return nil
+	}
+	return w.NPC(last.Target)
+}
+
+// StorylineOf is the unfinished main quest whose boss is npcID.
+func (w *World) StorylineOf(npcID string) *Quest {
+	for _, q := range w.Quests {
+		if q.IsMain && q.Status != QuestTurnedIn {
+			if b := w.StorylineBoss(q); b != nil && b.ID == npcID {
+				return q
+			}
 		}
 	}
 	return nil
+}
+
+// IsBoss reports whether an NPC is a storyline's antagonist.
+func (w *World) IsBoss(npcID string) bool {
+	if npcID == "" {
+		return false
+	}
+	if npcID == w.Campaign.AntagonistID {
+		return true
+	}
+	n := w.NPC(npcID)
+	return n != nil && n.Antagonist
 }
 
 // Enemy finds a living enemy in the encounter by id, display name or name.

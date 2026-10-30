@@ -182,12 +182,27 @@ Engine state on characters and enemies (`Conditions`), never set by the model di
 
 ## Sagas: hand-written campaigns (2026-10-29)
 
-The first saga is *The Long Dark Below* (Lovecraftian, 1931-1935, five acts,
-levels 1-20). Plan: https://claude.ai/artifact/LWUoM8J2WtWrpZ8LvD8MJL. Act I
-(Innsmouth, levels 1-4) is built; acts II-V come with the level 6-20 rules.
+The first saga is *The Long Dark Below* (Lovecraftian New England from 1931).
+Plan: https://claude.ai/artifact/LWUoM8J2WtWrpZ8LvD8MJL. There are no acts
+(Colin, 2026-10-29: "we build the world as it goes"): one open world of
+regions, each with its own storyline and boss, playable in any order.
+Innsmouth (where play starts) and Arkham with the Dunwich hills are written;
+more regions join the world as they are written.
 
-- **`internal/saga`** holds the campaign bible as Go data and `Build`s a world
-  from one act. Every name must resolve (places, people, items, objective
+- **Regions grow on arrival.** `Build` lays out the start region in full and
+  a road to every other region's hub, left as a stub. The first time the
+  party reaches a stub hub, `saga.Arrive` builds that region from its data.
+  Written places stay stubs so the author can still add people, things and
+  new ways onward around them, but their written description is canon and
+  is kept (`fillLocation`).
+- **Storylines, not one main quest.** Every region's storyline is a main
+  quest. `World.MainQuest()` returns the unfinished one for the region the
+  party stands in; `UpdateLairGate` opens each storyline's own lair; a
+  storyline boss's fall (`StorylineOf`) ends that storyline, records it in
+  the chronicle and applies its milestone. Only a one-shot campaign (no saga)
+  ends when its antagonist falls.
+- **`internal/saga`** holds the campaign bible as Go data and builds the
+  world from it. Every name must resolve (places, people, items, objective
   targets, beat targets, gates); a typo fails the build and the tests, never
   a quietly unwinnable quest. Anchor places with a written description are
   not stubs, so the author never rewrites them; zones are laid out on arrival.
@@ -196,8 +211,8 @@ levels 1-20). Plan: https://claude.ai/artifact/LWUoM8J2WtWrpZ8LvD8MJL. Act I
   (`game.LoreOpen`). A missing gate stays shut.
 - **Milestones.** `Campaign.Milestones` maps objective ids to levels;
   completing one lifts every character to at least that level
-  (`game.RaiseToLevel`). Act I: objective 2 → level 2, objective 4 → 3, the
-  boss → 4. The story sets the pace; nobody has to grind.
+  (`game.RaiseToLevel`). Innsmouth: objective 2 → level 2, objective 4 → 3,
+  the boss → 4; Arkham: objective 2 → 4, the boss → 5. The story sets the pace; nobody has to grind.
 - **Protected NPCs** (`NPC.Protected`): people a saga's story needs. The
   narrator can't turn them into foes; players can still pick that fight.
 - **Hand-written bosses.** `BossSpec.Phases` renames the three default phases

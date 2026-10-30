@@ -243,22 +243,39 @@ func grantRewards(w *World, q *Quest, c *Character) []string {
 
 // UpdateLairGate unlocks lair-gate edges once every main objective except
 // the last is done.
+//
+// Each storyline opens its own lair (where its boss waits); a world with
+// one storyline opens every lair gate, as before.
 func UpdateLairGate(w *World) []string {
-	mq := w.MainQuest()
-	if mq == nil || len(mq.Objectives) == 0 {
-		return nil
-	}
-	for _, o := range mq.Objectives[:len(mq.Objectives)-1] {
-		if !o.Done {
-			return nil
+	var changes []string
+	mains := 0
+	for _, q := range w.Quests {
+		if q.IsMain {
+			mains++
 		}
 	}
-	var changes []string
-	for _, e := range w.Edges {
-		if e.LairGate && e.State != EdgeOpen && e.State != EdgeKnown {
+	for _, mq := range w.Quests {
+		if !mq.IsMain || len(mq.Objectives) == 0 {
+			continue
+		}
+		ready := true
+		for _, o := range mq.Objectives[:len(mq.Objectives)-1] {
+			ready = ready && o.Done
+		}
+		if !ready {
+			continue
+		}
+		lair := w.Campaign.LairID
+		if b := w.StorylineBoss(mq); b != nil && mains > 1 {
+			lair = b.LocationID
+		}
+		for _, e := range w.Edges {
+			if !e.LairGate || e.State == EdgeOpen || e.State == EdgeKnown || (mains > 1 && !e.Touches(lair)) {
+				continue
+			}
 			e.State = EdgeKnown
-			if l := w.Location(w.Campaign.LairID); l != nil {
-				changes = append(changes, fmt.Sprintf("The way to %s is now open", l.Name))
+			if to := w.Location(lair); to != nil {
+				changes = append(changes, fmt.Sprintf("The way to %s is now open", to.Name))
 			}
 		}
 	}
