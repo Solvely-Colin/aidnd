@@ -65,8 +65,8 @@ type SpellView struct {
 }
 
 func spellView(s *game.SpellDef, setting string) SpellView {
-	return SpellView{Key: s.Key, Name: game.SpellName(s, setting), Rules: s.Name, Level: s.Level, School: s.School, Classes: s.Classes,
-		Cast: s.Cast, Range: s.Range, Kind: s.Kind, Area: s.Area, Conc: s.Conc, Targets: s.Targets, Peace: s.Peace, Desc: s.Desc}
+	return SpellView{Key: s.Key, Name: game.SpellName(s, setting), Rules: s.Name, Level: s.Level, School: game.TermName(s.School, s.School, setting), Classes: s.Classes,
+		Cast: s.Cast, Range: s.Range, Kind: s.Kind, Area: s.Area, Conc: s.Conc, Targets: s.Targets, Peace: s.Peace, Desc: game.Reskin(s.Desc, setting)}
 }
 
 // rulesetView is every class, species, background, feat and spell, named
@@ -77,7 +77,7 @@ func rulesetView(setting string) map[string]any {
 		cd := game.Classes[k]
 		v := ClassView{Key: k, Name: game.ClassName(cd, setting), Rules: cd.Name, Desc: cd.Desc, HitDie: cd.HitDie, Primary: cd.Primary, Saves: cd.Saves,
 			SkillCount: cd.SkillCount, SkillChoice: cd.SkillChoice, Caster: cd.Caster, CastAbility: cd.CastAbility,
-			Subclass: game.SubclassName(cd, setting), SubclassSRD: cd.Subclass.Name, SubDesc: cd.Subclass.Desc, Features: cd.Features, Scores: map[string]int{}}
+			Subclass: game.SubclassName(cd, setting), SubclassSRD: cd.Subclass.Name, SubDesc: game.Reskin(cd.Subclass.Desc, setting), Features: reskinFeatures(cd.Features, setting), Scores: map[string]int{}}
 		for i, a := range game.Abilities {
 			v.Scores[string(a)] = cd.Scores[i]
 		}
@@ -91,7 +91,7 @@ func rulesetView(setting string) map[string]any {
 	var species []SpeciesView
 	for _, k := range game.SpeciesKeys() {
 		sp := game.Species[k]
-		species = append(species, SpeciesView{Key: k, Name: game.SpeciesName(sp, setting), Rules: sp.Name, Desc: game.SpeciesDesc(sp, setting), Traits: sp.Traits})
+		species = append(species, SpeciesView{Key: k, Name: game.SpeciesName(sp, setting), Rules: sp.Name, Desc: game.SpeciesDesc(sp, setting), Traits: reskinFeatures(sp.Traits, setting)})
 	}
 	var bgs []BackgroundView
 	for _, k := range game.BackgroundKeys() {
@@ -104,9 +104,15 @@ func rulesetView(setting string) map[string]any {
 	}
 	var invs []game.Feature
 	for _, k := range game.InvocationKeys() {
-		invs = append(invs, game.Invocations[k])
+		invs = append(invs, game.ReskinFeature(game.Invocations[k], setting))
 	}
-	return map[string]any{"setting": setting, "classes": classes, "species": species, "backgrounds": bgs, "feats": game.Feats,
+	feats := map[string]game.FeatDef{}
+	for k, f := range game.Feats {
+		f := *f
+		f.Name, f.Desc = game.TermName(k, f.Name, setting), game.Reskin(f.Desc, setting)
+		feats[k] = f
+	}
+	return map[string]any{"setting": setting, "classes": classes, "species": species, "backgrounds": bgs, "feats": feats,
 		"invocations": invs, "fighting_styles": game.FightingStyles(), "spells": spells, "skills": game.Skills}
 }
 
@@ -162,8 +168,8 @@ func buildView(w *game.World, c *game.Character) BuildView {
 	cd := game.ClassOf(c)
 	sp := game.Species[c.SpeciesKey()]
 	v := BuildView{ClassKey: cd.Key, ClassName: game.ClassName(cd, setting), Species: sp.Key, SpeciesName: game.SpeciesName(sp, setting),
-		Saves: map[string]SaveView{}, Features: game.FeaturesOf(c), Abilities: game.FeatureUses(w, c), Resources: game.Resources(c),
-		Feats: c.FeatList(), Picks: c.Picks, Choices: game.PendingChoices(c), Caster: c.IsCaster(), TempHP: c.TempHP, Conc: c.Conc,
+		Saves: map[string]SaveView{}, Features: reskinFeatures(game.FeaturesOf(c), setting), Abilities: reskinUses(game.FeatureUses(w, c), setting),
+		Resources: reskinResources(game.Resources(c), setting), Feats: c.FeatList(), Picks: c.Picks, Choices: reskinChoices(game.PendingChoices(c), setting), Caster: c.IsCaster(), TempHP: c.TempHP, Conc: c.Conc,
 		Rebuild: c.ClassKey == "", Spec: game.SpecOf(c)}
 	if v.Abilities == nil {
 		v.Abilities = []game.FeatureUse{}
@@ -226,9 +232,16 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	if body.Fill {
 		spec = game.FillBuild(spec)
 	}
+	setting := game.SettingFantasy
+	if wld, err := s.store.Load(r.Context(), r.PathValue("id")); err == nil {
+		setting = wld.Setting()
+	}
 	scores, problems := game.ValidateBuild(spec)
+	for i := range problems {
+		problems[i] = game.Reskin(problems[i], setting)
+	}
 	c := game.PreviewBuild(spec, scores)
-	out := map[string]any{"character": spec, "problems": problems, "choices": game.ChoicesFor(c), "skills": c.SkillList(),
+	out := map[string]any{"character": spec, "problems": problems, "choices": reskinChoices(game.ChoicesFor(c), setting), "skills": c.SkillList(),
 		"max_hp": game.MaxHPFor(c), "scores": c.Scores, "cantrips": game.CantripCount(c), "prepared": game.PreparedCount(c),
 		"spell_options": game.ClassSpells(spec.ClassKey, game.MaxSpellLevel(c)), "default_spells": game.DefaultSpells(c)}
 	if len(problems) == 0 {
@@ -278,4 +291,35 @@ func (s *Server) handleSpells(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, characterView(wld, c))
+}
+
+// The engine names rules in SRD words; these put a view in the setting's.
+
+func reskinFeatures(fs []game.Feature, setting string) []game.Feature {
+	out := make([]game.Feature, len(fs))
+	for i, f := range fs {
+		out[i] = game.ReskinFeature(f, setting)
+	}
+	return out
+}
+
+func reskinUses(us []game.FeatureUse, setting string) []game.FeatureUse {
+	for i := range us {
+		us[i].Name, us[i].Desc, us[i].Why = game.Reskin(us[i].Name, setting), game.Reskin(us[i].Desc, setting), game.Reskin(us[i].Why, setting)
+	}
+	return us
+}
+
+func reskinResources(rs []game.Resource, setting string) []game.Resource {
+	for i := range rs {
+		rs[i].Name = game.Reskin(rs[i].Name, setting)
+	}
+	return rs
+}
+
+func reskinChoices(cs []game.Choice, setting string) []game.Choice {
+	for i := range cs {
+		cs[i].Label = game.Reskin(cs[i].Label, setting)
+	}
+	return cs
 }

@@ -618,6 +618,15 @@ async function preview(fill) {
     if (n !== previewSeq || S.draft !== d) return;
     if (fill) Object.assign(d, r.character, { name: d.name, pronouns: d.pronouns, concept: d.concept, backstory: d.backstory, class: d.class });
     S.prev = r;
+    // Forget picks the build no longer offers (a feat or list switched away
+    // from), so the chips and counts match what is on screen.
+    const offered = Object.fromEntries((r.choices || []).map(ch => [ch.key, ch.options]));
+    let stale = false;
+    for (const [k, got] of Object.entries(d.picks || {})) {
+      const keep = offered[k] ? got.filter(o => offered[k].includes(o)) : [];
+      if (keep.length !== got.length) { stale = true; if (keep.length) d.picks[k] = keep; else delete d.picks[k]; }
+    }
+    if (stale) return preview();
   } catch (er) { toast(er.message); }
   if (S.draft === d) renderBuilder();
 }
@@ -628,15 +637,15 @@ function chipsHTML(opts, on, attr, extra = () => "") {
 
 function classStep(d) {
   const R = rules(), cl = R.classes, cur = cl.find(c => c.key === d.class_key);
-  const list = cl.map(c => `<button class="roster-row ${c.key === d.class_key ? "on" : ""}" data-class="${esc(c.key)}">
-      <b>${esc(c.name)}</b><span>${c.name !== c.rules_name ? esc(c.rules_name) : ""}</span></button>`).join("");
+  const list = cl.map(c => `<button class="roster-row ${c.key === d.class_key ? "on" : ""}" data-class="${esc(c.key)}" title="${esc(c.rules_name)} rules">
+      <b>${esc(c.name)}</b><span></span></button>`).join("");
   const detail = cur ? `<div class="dossier">
-      <span class="mono-k">${cur.name !== cur.rules_name ? `${esc(cur.rules_name)} rules · ` : ""}d${cur.hit_die} hit die${cur.caster ? ` · ${esc(cur.cast_ability)} ${cur.caster === "pact" ? "pact magic" : cur.caster === "half" ? "half caster" : "caster"}` : ""}</span>
+      <span class="mono-k">d${cur.hit_die} hit die${cur.caster ? ` · ${esc(cur.cast_ability)} ${esc(spellWord().toLowerCase())}` : ""}</span>
       <h3>${esc(cur.name)}</h3><p>${esc(cur.desc)}</p>
       <dl><dt>Leans on</dt><dd>${cur.primary.map(a => ABIL_NAME[a]).join(" or ")}</dd>
         <dt>Saves</dt><dd>${cur.saves.map(a => ABIL_NAME[a]).join(", ")}</dd>
         <dt>Starts with</dt><dd>${esc(gearList(cur.gear).join(", "))}</dd>
-        <dt>At 3rd level</dt><dd>${esc(cur.subclass)}${cur.subclass !== cur.subclass_rules_name ? ` <small>(${esc(cur.subclass_rules_name)})</small>` : ""}</dd></dl>
+        <dt>At 3rd level</dt><dd>${esc(cur.subclass)}</dd></dl>
       <ol class="ladder">${[1, 2, 3, 4, 5].map(l => `<li><span>${l}</span><div>${cur.features.filter(f => f.level === l).map(f => `<b title="${esc(f.desc)}">${esc(f.name)}</b>`).join("") || "<em>—</em>"}</div></li>`).join("")}</ol>
     </div>` : `<div class="dossier empty"><p>Pick a class to see what it does at each level. Every era plays the same rules under its own names.</p></div>`;
   return `<div class="roster"><div class="roster-list">${list}</div>${detail}</div>`;
@@ -702,8 +711,8 @@ function spellRows(options, chosen, max, attr) {
     const list = options.map(spellOf).filter(s => s && (lv === 0 ? s.level === 0 : s.level > 0));
     const have = chosen.filter(k => list.some(s => s.key === k)).length;
     return `<section><span class="mono-k">${lv === 0 ? "Cantrips · at will" : "Prepared · uses a slot"} · ${have} of ${n}</span>
-      <div class="spell-list">${list.map(s => `<button class="spell-row ${chosen.includes(s.key) ? "on" : ""}" data-${attr}="${esc(s.key)}">
-        <span class="dot"></span><span class="nm"><b>${esc(s.name)}</b><small>${s.level ? ORD[s.level] + " · " : ""}${esc(s.school)} · ${esc(s.range)}${s.conc ? " · concentration" : ""}${s.name !== s.rules_name ? ` · ${esc(s.rules_name)}` : ""}</small><span>${esc(s.desc)}</span></span></button>`).join("")}</div></section>`;
+      <div class="spell-list">${list.map(s => `<button class="spell-row ${chosen.includes(s.key) ? "on" : ""}" data-${attr}="${esc(s.key)}" title="${esc(s.rules_name)}">
+        <span class="dot"></span><span class="nm"><b>${esc(s.name)}</b><small>${s.level ? ORD[s.level] + " · " : ""}${esc(s.school)} · ${esc(s.range)}${s.conc ? " · concentration" : ""}</small><span>${esc(s.desc)}</span></span></button>`).join("")}</div></section>`;
   }).join("");
 }
 

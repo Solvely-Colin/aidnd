@@ -131,6 +131,24 @@ func TestSwitchedFeatDropsItsPicks(t *testing.T) {
 	}
 }
 
+// Choosing Magic Initiate's list keeps it, and its spells follow.
+func TestMagicInitiateListSticks(t *testing.T) {
+	spec := FillBuild(CharacterSpec{Name: "Clark", ClassKey: "rogue", Species: "human", Background: "criminal"})
+	spec.Picks["versatile"] = []string{"magic_initiate"}
+	spec.Picks["magic_initiate"] = []string{"cleric"}
+	c := PreviewBuild(spec, nil)
+	if got := c.Picks["magic_initiate"]; len(got) != 1 || got[0] != "cleric" {
+		t.Fatalf("list pick dropped: %v", c.Picks)
+	}
+	keys := map[string]bool{}
+	for _, ch := range ChoicesFor(c) {
+		keys[ch.Key] = true
+	}
+	if !keys["magic_initiate"] || !keys["mi_cantrips"] || !keys["mi_spell"] {
+		t.Errorf("want the list (to change it) and its spells offered: %v", keys)
+	}
+}
+
 func TestSneakAttackAndExtraAttack(t *testing.T) {
 	f := newFixture(t)
 	e := f.fight(t, 0, 0, EnemySpec{Name: "Ogre", HP: 60, AC: 10, AttackBonus: 3, Damage: "1d6"})

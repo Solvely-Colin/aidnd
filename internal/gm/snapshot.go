@@ -149,7 +149,8 @@ func abilityLines(w *game.World, c *game.Character) string {
 		if !u.Ready {
 			ready = " [not now: " + u.Why + "]"
 		}
-		out = append(out, fmt.Sprintf("%s \"%s\" (%s%s): %s%s", u.Key, u.Name, cost, uses, u.Desc, ready))
+		st := w.Setting()
+		out = append(out, fmt.Sprintf("%s \"%s\" (%s%s): %s%s", u.Key, game.Reskin(u.Name, st), cost, uses, game.Reskin(u.Desc, st), game.Reskin(ready, st)))
 	}
 	if len(out) == 0 {
 		return ""

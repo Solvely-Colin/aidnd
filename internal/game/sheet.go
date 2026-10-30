@@ -82,10 +82,12 @@ func ChoicesFor(c *Character) []Choice {
 		out = append(out, Choice{Key: "skilled", Label: "Skilled (three skills)", Count: 3, Options: notKnown("skilled"), Kind: "skill"})
 	}
 	if c.HasFeat("magic_initiate") {
-		list := miList(c)
-		if list == "" {
+		// The list choice stays offered after it is made, so the player can
+		// change it (and so the pick is not dropped as stale).
+		if b := Backgrounds[c.Background]; b == nil || b.Feat != "magic_initiate" {
 			out = append(out, Choice{Key: "magic_initiate", Label: "Magic Initiate spell list", Count: 1, Options: []string{"cleric", "druid", "wizard"}, Kind: "list"})
-		} else {
+		}
+		if list := miList(c); list != "" {
 			out = append(out, Choice{Key: "mi_cantrips", Label: "Magic Initiate cantrips", Count: 2, Options: cantripsOf(list), Kind: "spell"})
 			out = append(out, Choice{Key: "mi_spell", Label: "Magic Initiate 1st-level spell", Count: 1, Options: levelSpellsOf(list, 1), Kind: "spell"})
 		}

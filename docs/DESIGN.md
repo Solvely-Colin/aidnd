@@ -133,6 +133,13 @@ Engine state on characters and enemies (`Conditions`), never set by the model di
   background and spell has a name for gaslight, pulp, modern and future
   (`EraNames`); a test keeps names unique inside an era. The interpreter and
   `SpellByRef` accept the key, the SRD name or any era name.
+- **The rest of the rulebook too** (`terms.go`): class features, species
+  traits, feats, fighting styles, invocations and spell schools have era
+  names in `TermEra` (a test keeps them unique per era and complete).
+  Views rename by key; `Reskin` rewrites running text (descriptions, choice
+  labels, turn results, the model's ability list) by whole names, skipping
+  plain words like "Defense". The builder no longer shows SRD names except
+  as a tooltip.
 - **Kept from before.** Weapon damage still adds no ability modifier (the
   enemy HP scale was tuned for it); rage, sneak attack, smite and the like add
   their own dice. Zones stand in for distance: touch is the same zone, near
