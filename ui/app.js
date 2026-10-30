@@ -386,7 +386,7 @@ function restartFeed() {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
@@ -1021,6 +1021,12 @@ function feedItems(evs) {
     flush();
     switch (e.type) {
       case "location_changed": out.push({ k: "place", name: d.name }); break;
+      case "world_tick": {
+        // days in a row with nothing between them show only the latest paper
+        const it = { k: "gazette", g: d.gazette, tide: d.tide, band: d.band };
+        if (out.length && out[out.length - 1].k === "gazette") out[out.length - 1] = it; else out.push(it);
+        break;
+      }
       case "group_split": out.push({ k: "sys", text: `${isMe(d.character_id) ? "You go" : `${d.character} goes`} off alone${d.location ? ` from ${d.location}` : ""}.` }); break;
       case "group_joined": out.push({ k: "sys", text: `${d.joining} ${d.joining?.includes(",") ? "join" : "joins"} up with ${d.with}.` }); break;
       case "turn_started": {
@@ -1132,6 +1138,7 @@ function itemHTML(it, latest) {
     case "turn": return `<div class="ev-turn ${it.you ? "you" : ""}">· ${it.you ? "Your turn" : `${esc(it.name)}’s turn`} ·</div>`;
     case "act": return actHTML(it.c, it.you, it.text);
     case "narr": return narrHTML(it, latest);
+    case "gazette": return it.g ? `<div class="ev-gazette">${gazetteHTML(it.g)}<span class="mono-k">The Tide ${it.tide} · ${esc(it.band || "")}</span></div>` : "";
     case "roll": return rollHTML(it);
     case "quest": return `<div class="ev-quest"><b>${esc(it.label)}</b><span>${esc(it.text)}</span></div>`;
     case "warn": return `<div class="ev-warn ${it.hit ? "hit" : ""}"><b>${it.hit ? "Signature move" : "Incoming"}</b><span>${esc(it.text)}</span></div>`;
@@ -1946,17 +1953,43 @@ function journalHTML() {
   if (!S.journal) loadJournal();
   loadNotes();
   const j = S.journal;
-  const find = J.tab === "quests" || J.tab === "notes" ? "" : `<input class="find" id="j-find" type="search" placeholder="Search ${J.tab}" value="${esc(J.q)}" autocomplete="off">`;
+  const find = J.tab === "quests" || J.tab === "notes" || J.tab === "world" ? "" : `<input class="find" id="j-find" type="search" placeholder="Search ${J.tab}" value="${esc(J.q)}" autocomplete="off">`;
   let body;
-  if (J.tab === "quests") body = questsTab();
+  if (J.tab === "world") body = worldTab();
+  else if (J.tab === "quests") body = questsTab();
   else if (J.tab === "notes") body = notesTab();
   else if (!j) body = `<p class="empty-line">Opening the journal…</p>`;
   else body = ({ people: peopleTab, places: placesTab, clues: cluesTab })[J.tab](j);
-  return `<div class="tabs">${JTABS.map(([k, l]) => `<button class="${J.tab === k ? "on" : ""}" data-act="jtab" data-k="${k}">${l}</button>`).join("")}</div>${find}<div id="j-body" style="display:flex;flex-direction:column;gap:22px">${body}</div>`;
+  const tabs = S.view.world ? [["world", "World"], ...JTABS] : JTABS;
+  return `<div class="tabs">${tabs.map(([k, l]) => `<button class="${J.tab === k ? "on" : ""}" data-act="jtab" data-k="${k}">${l}</button>`).join("")}</div>${find}<div id="j-body" style="display:flex;flex-direction:column;gap:22px">${body}</div>`;
 }
 
 const match = (...parts) => !J.q || parts.join(" ").toLowerCase().includes(J.q.toLowerCase());
 const none = s => `<p class="empty-line">${s}</p>`;
+
+// worldTab: the shared calendar, the Tide and this week's newspaper.
+function worldTab() {
+  const wv = S.view.world;
+  if (!wv) return none("This story has no world clock.");
+  return `<div class="world-now"><span class="mono-k">Week ${wv.week} · ${esc(wv.date)}</span>
+      ${tideHTML(wv)}
+    </div>
+    ${wv.gazette ? gazetteHTML(wv.gazette, wv.date) : none("The first paper comes out after the world's next turn, each morning.")}
+    <span class="hint-line">The world takes a turn every morning, even when nobody plays: the week moves on, the factions push their plans and the Tide rises. Finishing quests holds it back.</span>`;
+}
+
+function tideHTML(wv) {
+  const word = { Ebb: "Ebb · the dark is held back", Slack: "Slack · things are getting worse", Flood: "Flood · the dark is winning" }[wv.band] || wv.band;
+  return `<div class="tide"><div class="tide-bar"><i style="width:${Math.max(2, Math.min(100, wv.tide))}%"></i><em style="left:33%"></em><em style="left:66%"></em></div>
+    <span class="tide-k"><b>The Tide ${wv.tide}</b> · ${esc(word)}</span></div>`;
+}
+
+function gazetteHTML(g, date) {
+  return `<article class="gazette"><header><b>The Arkham Advertiser</b><span>${esc(date || `Week ${g.week}`)}</span></header>
+    ${(g.headlines || []).map((h, i) => `<p class="${i === 0 ? "lead-h" : ""}">${esc(h)}</p>`).join("")}
+    ${g.classified ? `<p class="classified"><span class="mono-k">Classified</span>${esc(g.classified)}</p>` : ""}
+    ${g.weather ? `<p class="weather">${esc(g.weather)}</p>` : ""}</article>`;
+}
 
 function questsTab() {
   const qs = S.view.quests.filter(q => q.status !== "available" || q.is_main).sort((a, b) => (a.status === "completed") - (b.status === "completed") || b.is_main - a.is_main);

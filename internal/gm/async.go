@@ -18,16 +18,22 @@ import (
 const DefaultTurnDeadline = 12 * time.Hour
 
 // TurnDeadline is the unix time autopilot takes the current turn of the
-// focused group, or 0 when nothing is waiting on a deadline.
+// focused group, or 0 when nothing is waiting on a deadline (one-shots,
+// and groups of one).
 func (g *GM) TurnDeadline(w *game.World) int64 {
 	if !w.Campaign.LongForm() || w.Campaign.Status != game.StatusActive || !w.InCombat() || w.ActiveCharacter() == nil {
+		return 0
+	}
+	// a group of one waits on nobody, so its fights have no deadline
+	if len(w.Party()) < 2 {
 		return 0
 	}
 	return w.Campaign.Turns.Started + int64(g.Cfg.TurnDeadline/time.Second)
 }
 
-// Sweep plays every turn that has passed its deadline, in every group of
-// every async campaign. It returns how many turns autopilot took.
+// Sweep runs the timers of every long campaign: the world ticks it is owed
+// (see worldTicks), then every fight turn past its deadline, in every
+// group. It returns how many turns autopilot took.
 func (g *GM) Sweep(ctx context.Context) (int, error) {
 	list, err := g.Store.ListCampaigns(ctx, "")
 	if err != nil {
@@ -41,6 +47,9 @@ func (g *GM) Sweep(ctx context.Context) (int, error) {
 		w, err := g.Store.Load(ctx, cs.ID)
 		if err != nil || !w.Campaign.LongForm() {
 			continue
+		}
+		if _, err := g.worldTicks(ctx, cs.ID); err != nil {
+			g.logf("world tick %s: %v", cs.ID, err)
 		}
 		for _, grp := range w.GroupIDs() {
 			// a few in a row, in case the server slept through several

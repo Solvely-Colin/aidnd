@@ -224,6 +224,9 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	prevLoc := w.Campaign.LocationID
 	res := game.Resolve(&game.Ctx{W: w, R: g.Dice, Now: g.Now(), OnArrive: onArrive, Ambush: ambush}, actor, actions)
 	noteSceneTurn(w, res)
+	if !hints.Autopilot {
+		game.NoteActed(w, g.Now().Unix())
+	}
 	quick := res.AllFree && !res.TurnEnded
 	g.progress(campaignID, "narrating", map[string]any{"character_id": actor.ID, "rolls": res.Rolls()})
 	out := &TurnResult{Resolution: res, Quick: quick, Skipped: res.Skipped}

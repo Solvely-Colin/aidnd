@@ -138,4 +138,26 @@ var arkham = Region{
 		Minion:       "Outer One",
 		MinionHorror: 2,
 	},
+	Factions: []Faction{
+		{Key: "corvid", Name: "Corvid Society", Clock: "Read Too Deep", Steps: 6,
+			Moves: []string{
+				"A Miskatonic reading circle outbid a Boston dealer for a water-stained folio.",
+				"A graduate student was found sleepwalking in the Orne Library after hours.",
+				"Professor Morgan cancelled his lectures for the week without a word.",
+				"Lamps burned in the Restricted Stacks until dawn.",
+				"A Society member was taken to the Arkham Sanitarium, raving about a book.",
+			},
+			Full:       "Morgan's circle read too deep: something walks the Restricted Stacks at night now.",
+			FullDanger: map[string]int{"The Restricted Stacks": 2}},
+		{Key: "outer-ones", Name: "Grey Visitors", Threat: true, Clock: "The Landing", Steps: 6,
+			Moves: []string{
+				"Lights moved over the Dunwich hills; a farm on the Aylesbury pike stands empty.",
+				"Cattle near Cold Spring Glen were found bloodless and cut with surgeon's care.",
+				"A Dunwich farmer came home after three days and does not know his wife.",
+				"A buzzing like a hive filled the glen for a whole night.",
+				"Another farmhouse stands open to the weather, the table set for supper.",
+			},
+			Full:       "The Grey Visitors have landed: Cold Spring Glen is theirs, and no one who goes in alone comes out the same.",
+			FullDanger: map[string]int{"Cold Spring Glen": 4}},
+	},
 }

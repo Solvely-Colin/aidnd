@@ -244,10 +244,23 @@ One campaign is one shared world. A character can go off alone, and groups that 
 
 Long campaigns (every saga; `Campaign.LongForm()`) are played over weeks, so a fight waits for its players.
 
-- In a fight, the player whose turn it is has `TurnDeadline` (12 hours) to play it. Other players can't skip it before then.
+- In a fight, the player whose turn it is has `TurnDeadline` (12 hours) to play it. A group of one waits on nobody, so solo fights have no deadline. Other players can't skip it before then.
 - Past the deadline, autopilot plays it (`gm.autopilot`, `game.AutopilotActions`): a plain strike at the weakest foe in reach, or a dodge, never a spell slot, item or limited feature. A dying character's death save is rolled by the engine. The turn is logged as "(away) ... fights on by instinct" and narrated like any other.
 - `GM.Sweep` runs every turn that's overdue, in every group of every long campaign. The server runs it every minute, and the Worker's hourly cron calls `POST /tick` so a sleeping container wakes up and catches up.
 - Alerts stay in the app: `/me/campaigns` marks `your_turn` (and `deadline`), the home screen leads with that story ("Your turn · autopilot in 11h"), the tab title says "Your turn", and the dock shows the time left.
+
+## The living world (2026-10-30)
+
+A long campaign's world takes a turn once a real day (`game.WorldTick`), even when nobody plays. The state is `Campaign.Living`: the world week, the Tide, the factions and the latest Gazette.
+
+- **When:** the day turns over at 10:00 UTC (about 5am in New England, `TickDay`). `GM.Sweep` runs the ticks a campaign is owed, catching up at most `MaxCatchUpTicks` (7) after the server slept. The first sweep only starts the clock.
+- **Idle:** a tick with no player turn since the one before is idle. Idle ticks can't push the Tide past 66 and can't fill a threat clock.
+- **Factions** come with each region and start acting when the region is built (`saga.Faction` becomes `game.Faction`). Each tick, each faction whose clock runs rolls a d6 and moves a step on 5 or 6. Each step adds a public fact (a chronicle `news` entry). A filled clock records its result, can raise places' danger (never a hub's), and for threats raises the Tide 2 to 5. At most one threat clock fills per tick. A faction stops once its region's storyline is over. Innsmouth has the Order (threat), the Marchetti outfit and the Bureau (from week 6). Arkham has the Corvid Society and the Grey Visitors (threat).
+- **The Tide** (0 to 100, starting at 5) rises 1 a tick, rises 3 when a promise breaks, and rises when a threat's clock fills. It falls 2 when a quest is done and 10 when a storyline ends, and the band it ended in (Ebb at 33 or less, Slack at 66 or less, Flood above 66) is recorded for that storyline.
+- **The Gazette:** one model call turns a tick's facts into three or four headlines, a classified ad that's a hook, and a weather line. Without the model, the facts are the headlines. It's sent as a `world_tick` event (untagged, so every group sees it in its feed) and kept on `Living.Gazette`.
+- The narrator gets a THE WORLD line: the week, the Tide and its band, and this week's headlines.
+- The app shows a World tab in the journal (date, Tide gauge, front page) and the paper in the story feed.
+- Not yet: downtime orders, NPC routes and shop restocks on ticks, Tide effects on encounters and rests, and travel between regions taking world time.
 
 ## Changes from the live play-test (deepseek-v4.1-flash)
 

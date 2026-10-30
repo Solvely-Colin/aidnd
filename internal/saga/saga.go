@@ -29,6 +29,9 @@ type Saga struct {
 	Regions []Region
 }
 
+// StartTide is where the Tide stands when a saga begins.
+const StartTide = 5
+
 // Region is a part of the world: a safe hub, the places around it, its
 // people, and a storyline that ends with a boss. Regions can be played in
 // any order; Levels is only the range it is pitched at.
@@ -49,6 +52,20 @@ type Region struct {
 	Secrets []Secret
 	Beats   []Beat
 	Boss    Boss
+	// Factions move on world ticks once the region is built.
+	Factions []Faction
+}
+
+// Faction is a group with an agenda clock (see game.Faction). FullDanger
+// names places by name; FromWeek delays its first move.
+type Faction struct {
+	Key, Name, Clock string
+	Threat           bool
+	Steps            int
+	FromWeek         int
+	Moves            []string
+	Full             string
+	FullDanger       map[string]int
 }
 
 // Place is a location. From names the place it connects to (the region's
@@ -178,6 +195,7 @@ func Build(s *Saga, id string, opt Options) (*game.World, error) {
 	w := &game.World{Campaign: game.Campaign{ID: id, Title: s.Title, Premise: s.Premise, Pitch: s.Pitch,
 		Setting: s.Setting, Status: game.StatusLobby, MaxSetbacks: opt.MaxSetbacks, MaxPlayers: opt.MaxPlayers, CreatedAt: opt.Now}}
 	w.Campaign.Saga, w.Campaign.Dread, w.Campaign.Async = s.Key, true, true
+	w.Campaign.Living = &game.Living{Tide: StartTide}
 	w.Campaign.Scene = game.Scene{Day: 1, Time: 1, Tension: 2}
 	w.Campaign.Turns.Budget = game.FullBudget(false)
 	w.Campaign.Milestones = map[string]int{}
@@ -379,6 +397,16 @@ func buildRegion(w *game.World, r *Region, hub *game.Location) (*game.NPC, *game
 		w.Lore = append(w.Lore, lo)
 	}
 
+	if w.Campaign.Living != nil {
+		for _, f := range r.Factions {
+			gf, err := makeFaction(w, r, f, mq)
+			if err != nil {
+				return nil, nil, err
+			}
+			w.Campaign.Living.Factions = append(w.Campaign.Living.Factions, gf)
+		}
+	}
+
 	for _, b := range r.Beats {
 		beat := &game.Beat{ID: w.NewID("beat"), Title: b.Title, Text: b.Text, Trigger: b.Trigger, Value: b.Value, Effects: b.Effects}
 		switch b.Trigger {
@@ -532,4 +560,57 @@ func firstOf(xs ...string) string {
 		}
 	}
 	return ""
+}
+
+// EnsureLiving gives a saga world made before the living world its clock
+// and the factions of the regions already built. It reports whether it
+// changed anything.
+func EnsureLiving(w *game.World) bool {
+	s := Get(w.Campaign.Saga)
+	if s == nil || w.Campaign.Living != nil {
+		return false
+	}
+	w.Campaign.Living = &game.Living{Tide: StartTide}
+	for i := range s.Regions {
+		r := &s.Regions[i]
+		hub := exact(w, r.Hub.Name)
+		if hub == nil || hub.Stub {
+			continue
+		}
+		var mq *game.Quest
+		for _, q := range w.Quests {
+			if q.IsMain && q.Title == r.Main.Title {
+				mq = q
+			}
+		}
+		for _, f := range r.Factions {
+			if gf, err := makeFaction(w, r, f, mq); err == nil {
+				w.Campaign.Living.Factions = append(w.Campaign.Living.Factions, gf)
+			}
+		}
+	}
+	return true
+}
+
+// makeFaction places a region's faction in the world.
+func makeFaction(w *game.World, r *Region, f Faction, storyline *game.Quest) (*game.Faction, error) {
+	gf := &game.Faction{Key: f.Key, Name: f.Name, Threat: f.Threat, Region: r.Key, Clock: f.Clock,
+		Steps: f.Steps, FromWeek: f.FromWeek, Moves: f.Moves, Full: f.Full}
+	if gf.Steps < 2 {
+		return nil, fmt.Errorf("faction %q needs at least 2 steps", f.Name)
+	}
+	if storyline != nil {
+		gf.Storyline = storyline.ID
+	}
+	for name, d := range f.FullDanger {
+		l := exact(w, name)
+		if l == nil {
+			return nil, fmt.Errorf("faction %q: unknown place %q", f.Name, name)
+		}
+		if gf.FullDanger == nil {
+			gf.FullDanger = map[string]int{}
+		}
+		gf.FullDanger[l.ID] = d
+	}
+	return gf, nil
 }

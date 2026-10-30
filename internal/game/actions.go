@@ -1079,8 +1079,12 @@ func completeMain(w *World, mq *Quest) []string {
 				}
 			}
 		}
+		done := mq.Status == QuestCompleted || mq.Status == QuestTurnedIn
 		mq.Status = QuestTurnedIn
 		keepQuestPromise(w, mq)
+		if !done {
+			tideOnQuest(w, mq)
+		}
 	}
 	if w.Campaign.Saga == "" {
 		w.Campaign.Status = StatusCompleted

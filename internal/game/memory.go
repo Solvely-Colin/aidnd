@@ -148,6 +148,7 @@ func settlePromise(w *World, f *ChronicleEntry, kept bool, outcome string) {
 	delta, verb := 1, "kept their word"
 	if !kept {
 		f.Status, delta, verb = PromiseBroken, -1, "broke their word"
+		MoveTide(w, 3) // a broken promise feeds the dark
 	}
 	for _, id := range f.NPCIDs {
 		n := w.NPC(id)
