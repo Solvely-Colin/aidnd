@@ -112,6 +112,25 @@ func TestBuildValidation(t *testing.T) {
 	}
 }
 
+// A player who looks at Magic Initiate's lists and then takes Tough is not
+// held to the Magic Initiate pick.
+func TestSwitchedFeatDropsItsPicks(t *testing.T) {
+	spec := FillBuild(CharacterSpec{Name: "Clark", ClassKey: "rogue", Species: "human", Background: "criminal"})
+	spec.Picks["versatile"] = []string{"tough"}
+	spec.Picks["magic_initiate"] = []string{"wizard"}
+	spec.Picks["mi_cantrips"] = []string{"fire_bolt", "mage_hand"}
+	if _, p := ValidateBuild(spec); len(p) > 0 {
+		t.Fatalf("stale Magic Initiate picks blocked the build: %v", p)
+	}
+	f := newFixture(t)
+	f.w.Players = append(f.w.Players, &Player{ID: "p9", Name: "Colin"})
+	c, err := CreateCharacter(f.w, "p9", spec)
+	must(t, err)
+	if _, ok := c.Picks["magic_initiate"]; ok || c.HasFeat("magic_initiate") {
+		t.Errorf("stale pick kept: %v", c.Picks)
+	}
+}
+
 func TestSneakAttackAndExtraAttack(t *testing.T) {
 	f := newFixture(t)
 	e := f.fight(t, 0, 0, EnemySpec{Name: "Ogre", HP: 60, AC: 10, AttackBonus: 3, Damage: "1d6"})

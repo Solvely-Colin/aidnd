@@ -232,7 +232,30 @@ func buildFrom(spec CharacterSpec) *Character {
 			c.Picks[k] = append([]string(nil), v...)
 		}
 	}
+	dropStalePicks(c)
 	return c
+}
+
+// dropStalePicks forgets picks for choices the build no longer offers: a
+// player who looks at Magic Initiate's lists and then takes Tough instead
+// should not be held to the Magic Initiate list. Feats open choices, so
+// dropping one can close others; repeat until nothing changes.
+func dropStalePicks(c *Character) {
+	for {
+		offered := map[string]bool{}
+		for _, ch := range ChoicesFor(c) {
+			offered[ch.Key] = true
+		}
+		n := len(c.Picks)
+		for k := range c.Picks {
+			if !offered[k] {
+				delete(c.Picks, k)
+			}
+		}
+		if len(c.Picks) == n {
+			return
+		}
+	}
 }
 
 // PreviewBuild is the unsaved character a spec makes, for the builder.
@@ -333,15 +356,6 @@ func ValidateBuild(spec CharacterSpec) (Scores, Problems) {
 		p = append(p, checkPick(ch, c.Picks[ch.Key])...)
 		if len(c.Picks[ch.Key]) < ch.Count {
 			p = append(p, fmt.Sprintf("%s: pick %d", ch.Label, ch.Count))
-		}
-	}
-	for k := range c.Picks {
-		found := false
-		for _, ch := range ChoicesFor(c) {
-			found = found || ch.Key == k
-		}
-		if !found {
-			p = append(p, fmt.Sprintf("no %q choice at level 1", k))
 		}
 	}
 	if len(spec.Spells) > 0 {
