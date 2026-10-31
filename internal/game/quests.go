@@ -23,7 +23,7 @@ func AcceptQuest(w *World, questID string) (*Quest, error) {
 	if q.Status != QuestOffered {
 		return nil, fmt.Errorf("quest %q is %s, not on offer", q.Title, q.Status)
 	}
-	if g := w.NPC(q.GiverID); g != nil && g.LocationID != w.Campaign.LocationID {
+	if g := w.NPC(q.GiverID); g != nil && g.Alive && g.LocationID != w.Campaign.LocationID {
 		return nil, fmt.Errorf("%s offered that quest; find them at their location to accept", g.Name)
 	}
 	q.Status = QuestActive
@@ -219,7 +219,7 @@ func completeObjective(w *World, q *Quest, o *Objective) ([]QuestUpdate, []strin
 		}
 		ups = append(ups, QuestUpdate{QuestID: q.ID, Title: q.Title, Text: text, Status: q.Status})
 		changes = append(changes, text)
-		if q.GiverID == "" {
+		if q.GiverID == "" || giverDead(w, q) {
 			changes = append(changes, grantRewards(w, q, nil)...)
 			q.Status = QuestTurnedIn
 			keepQuestPromise(w, q)
@@ -275,7 +275,9 @@ func grantRewards(w *World, q *Quest, c *Character) []string {
 		if it == nil || c == nil {
 			continue
 		}
-		if q.GiverID != "" && (it.Owner.Kind != OwnerNPC || it.Owner.ID != q.GiverID) {
+		held := it.Owner.Kind == OwnerNPC && it.Owner.ID == q.GiverID
+		fell := giverDead(w, q) && it.Owner.Kind == OwnerLocation // dropped where the giver died
+		if q.GiverID != "" && !held && !fell {
 			continue // the giver no longer has it
 		}
 		it.Owner = Owner{Kind: OwnerCharacter, ID: c.ID}

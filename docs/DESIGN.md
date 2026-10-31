@@ -325,3 +325,12 @@ The engine always owned the state, but the narrator's prose was only held to the
 - **Where:** turn narration, quick answers, enemy narration and the opening.
 - **No laundering into memory:** the story summary drops sentences that kill living people before it is saved, and `record_lore` and `npc_note` refuse text that does (the model gets the reason back). Items and travel aren't checked there, because those lines are about the past.
 - Secrets were already safe: locked lore never reaches the model.
+
+## Story integrity (2026-10-31)
+
+Players may kill anyone, the saga's protected people included, but the story must stay finishable. `game.RepairStory` reroutes quests around the dead. It runs when an NPC dies (so the changes show that turn) and before every save (so campaigns from before it get fixed too), and it is idempotent.
+
+- What the dead carried falls where they died, so quest items and rewards are never lost with them.
+- A side quest still on offer from a dead giver is withdrawn (failed).
+- A quest whose giver is dead pays out as soon as it is done, reward items included (taken from where they fell). One already done and waiting for turn-in pays out at once.
+- "Talk to X" with X dead becomes "Search what X left behind": reach the place they died. "Deliver the item to X" becomes "Recover the item".
