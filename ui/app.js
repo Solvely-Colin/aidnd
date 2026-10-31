@@ -1021,7 +1021,7 @@ function renderFeed(force) {
   const pend = pendingHTML();
   if (!pend && items.at(-1)?.k === "turn" && items.at(-1).you) items.pop();
   const lastNarr = items.map(it => it.k === "narr").lastIndexOf(true);
-  feed.innerHTML = items.map((it, i) => itemHTML(it, i === lastNarr)).join("") + pend + suggestHTML();
+  feed.innerHTML = items.map((it, i) => itemHTML(it, i === lastNarr)).join("") + dispatchHTML() + pend + suggestHTML();
   if (force || stick) requestAnimationFrame(toBottom);
 }
 
@@ -1238,6 +1238,28 @@ function rollHTML(it) {
 
 // pendingHTML shows the action in flight: what was said, the dice once
 // they have landed, and which step the game master is on.
+// dispatchHTML: "while you were away", what the world did since this
+// player last played, grouped from closest to home to furthest.
+const DISPATCH_HEADS = { you: "Your character", deed: "Meanwhile, other investigators", people: "People you know", near: "Around you", far: "Further off" };
+function dispatchHTML() {
+  const d = S.view?.dispatch;
+  if (!d || S.view.status !== "active") return "";
+  const weeks = d.weeks === 1 ? "a week" : `${d.weeks} weeks`;
+  const dt = d.tide - d.tide_from;
+  const tide = dt > 0 ? `The Tide rose ${dt}, to ${d.tide}` : dt < 0 ? `The Tide fell ${-dt}, to ${d.tide}` : `The Tide held at ${d.tide}`;
+  const groups = [];
+  for (const l of d.lines || []) {
+    const g = groups.at(-1);
+    if (g && g.kind === l.kind) g.lines.push(l); else groups.push({ kind: l.kind, lines: [l] });
+  }
+  return `<section class="dispatch" aria-label="While you were away">
+    <header><span class="mono-k">While you were away · ${weeks}</span><span class="dp-tide">${esc(tide)} · ${esc(d.band)}</span></header>
+    ${groups.map(g => `<div class="dp-group"><p class="dp-h">${esc(DISPATCH_HEADS[g.kind] || "")}</p>
+      <ul>${g.lines.map(l => `<li>${esc(l.text)}${l.where ? ` <span class="dp-where">Now at ${esc(l.where)}</span>` : ""}</li>`).join("")}</ul></div>`).join("")}
+    <button class="btn dp-ok" data-act="seen">Back to it</button>
+  </section>`;
+}
+
 function pendingHTML() {
   if (!isThinking()) return "";
   const p = S.progress, me = mine();
@@ -2240,6 +2262,7 @@ document.addEventListener("click", async e => {
   try {
     switch (act) {
       case "solo": return groupMove("solo", {}, t);
+      case "seen": return groupMove("seen", {}, t);
       case "signout": await fetch("/auth/logout", { method: "POST" }); S.me = null; leaveCampaign(); S.route = ""; location.hash = ""; return renderSignin();
       case "home": return go("#/");
       case "create": return createCampaign();

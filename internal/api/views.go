@@ -336,6 +336,9 @@ type CampaignView struct {
 	Deadline int64 `json:"deadline,omitempty"`
 	// World is the long campaign's shared calendar, Tide and newspaper.
 	World *WorldView `json:"world,omitempty"`
+	// Dispatch is what the caller missed while they were away (world
+	// ticks since they last played); POST me/seen clears it.
+	Dispatch *game.Dispatch `json:"dispatch,omitempty"`
 }
 
 // WorldView is what players see of the living world.
@@ -682,6 +685,7 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	v.Groups = groupsView(w, v.Group)
 	v.Deadline = turnDeadline(w)
 	v.World = worldView(w)
+	v.Dispatch = game.BuildDispatch(w, playerID)
 	v.Saga, v.Dread = c.Saga, c.Dread
 	if mq := w.MainQuest(); mq != nil {
 		v.Storyline = mq.ID

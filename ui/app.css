@@ -817,6 +817,18 @@ details.feat p { margin: 0 0 12px; font-size: 14px; color: var(--ink2); line-hei
 .gazette .weather { font-style: italic; font-size: 12px; }
 .ev-gazette { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
 
+/* "while you were away": a dispatch card at the foot of the story */
+.dispatch { display: flex; flex-direction: column; gap: 12px; margin: 14px 0; padding: 14px 16px 16px; border-left: 3px solid var(--acc); background: var(--bg2); border-radius: 0 8px 8px 0; animation: reveal .18s ease both; }
+.dispatch header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
+.dispatch header .mono-k { color: var(--acc); }
+.dp-tide { font-size: 12.5px; color: var(--ink3); }
+.dp-group { display: flex; flex-direction: column; gap: 4px; }
+.dp-h { margin: 0; font-size: 12px; font-weight: 700; color: var(--ink2); }
+.dp-group ul { margin: 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 4px; }
+.dp-group li { font-size: 14.5px; line-height: 1.45; color: var(--ink); }
+.dp-where { display: inline-block; font: 11px/1.3 var(--mono); color: var(--ink3); letter-spacing: .04em; }
+.dp-ok { align-self: flex-start; padding: 9px 16px; font-size: 14px; }
+
 /* downtime orders */
 .downtime { display: flex; flex-direction: column; gap: 4px; }
 .downtime .row-line .nm small { display: block; font: 13px/1.4 var(--sans); color: var(--ink3); margin-top: 2px; }

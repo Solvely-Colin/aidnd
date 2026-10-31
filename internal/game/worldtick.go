@@ -42,6 +42,12 @@ type Living struct {
 	Bands map[string]string `json:"bands,omitempty"`
 	// Gazette is the latest front page.
 	Gazette *Gazette `json:"gazette,omitempty"`
+	// Agendas are named people's own goals, moving on ticks.
+	Agendas []*Agenda `json:"agendas,omitempty"`
+	// Log is what recent ticks did, for "while you were away".
+	Log []WorldBeat `json:"log,omitempty"`
+	// Seen is where each player (by id) last caught up with the world.
+	Seen map[string]*Seen `json:"seen,omitempty"`
 }
 
 // Faction is a group with an agenda clock that fills on world ticks.
@@ -85,6 +91,8 @@ type TickReport struct {
 	Tide     int      `json:"tide"`
 	Facts    []string `json:"facts"`
 	Filled   []string `json:"filled,omitempty"` // faction names
+	// People are the steps named people took toward their own goals.
+	People []AgendaMove `json:"people,omitempty"`
 	// Downtime is what each queued downtime order came to.
 	Downtime []DowntimeResult `json:"downtime,omitempty"`
 }
@@ -135,10 +143,17 @@ func (f *Faction) active(w *World) bool {
 	return true
 }
 
+// FloodRoll is the d6 a threat's clock needs while the Tide is in Flood:
+// the worse things get, the faster the dark moves.
+const FloodRoll = 4
+
 // WorldTick advances the world a week. Each faction whose clock runs rolls
-// a d6 and moves a step on 5 or 6. At most one threat clock fills per tick,
-// and a tick with nobody playing can't fill a threat clock at all or push
-// the Tide past TideIdleCap. The world must be settled.
+// a d6 and moves a step on 5 or 6 (a threat on 4 or more in Flood). At most
+// one threat clock fills per tick, and a tick with nobody playing can't
+// fill a threat clock at all or push the Tide past TideIdleCap. Then named
+// people take steps toward their own goals (see RunAgendas). Everything a
+// tick does goes in the world log for players who were away. The world
+// must be settled.
 func WorldTick(w *World, r *dice.Roller, now int64, idle bool) *TickReport {
 	lv := w.Campaign.Living
 	if lv == nil {
@@ -147,14 +162,22 @@ func WorldTick(w *World, r *dice.Roller, now int64, idle bool) *TickReport {
 	lv.Week++
 	lv.LastTick = now
 	rep := &TickReport{Week: lv.Week, Idle: idle, TideFrom: lv.Tide}
-	fact := func(text string) {
+	fact := func(text string, f *Faction, kind string) {
 		rep.Facts = append(rep.Facts, text)
 		w.Record(ChronicleEntry{Kind: FactNews, Source: SourceEngine, Text: fmt.Sprintf("Week %d: %s", lv.Week, text)})
+		logBeat(w, WorldBeat{Week: lv.Week, Kind: kind, Text: text, Region: f.Region})
 	}
 	rep.Downtime = ResolveDowntime(w, r)
+	for _, d := range rep.Downtime {
+		logBeat(w, WorldBeat{Week: lv.Week, Kind: BeatDowntime, Text: d.Text, CharacterID: d.CharacterID})
+	}
 	threatFilled := false
 	for _, f := range lv.Factions {
-		if !f.active(w) || r.Die(6) < 5 {
+		need := 5
+		if f.Threat && TideBand(lv.Tide) == TideFlood {
+			need = FloodRoll
+		}
+		if !f.active(w) || r.Die(6) < need {
 			continue
 		}
 		last := f.Progress+1 >= f.Steps
@@ -163,7 +186,7 @@ func WorldTick(w *World, r *dice.Roller, now int64, idle bool) *TickReport {
 		}
 		f.Progress++
 		if len(f.Moves) > 0 {
-			fact(f.Moves[(f.Progress-1)%len(f.Moves)])
+			fact(f.Moves[(f.Progress-1)%len(f.Moves)], f, BeatFaction)
 		}
 		if !last {
 			continue
@@ -171,7 +194,7 @@ func WorldTick(w *World, r *dice.Roller, now int64, idle bool) *TickReport {
 		f.Filled = true
 		rep.Filled = append(rep.Filled, f.Name)
 		if f.Full != "" {
-			fact(f.Full)
+			fact(f.Full, f, BeatFilled)
 		}
 		for id, d := range f.FullDanger {
 			if l := w.Location(id); l != nil && l.Danger < d && !l.IsHub {
@@ -181,6 +204,17 @@ func WorldTick(w *World, r *dice.Roller, now int64, idle bool) *TickReport {
 		if f.Threat {
 			threatFilled = true
 			MoveTide(w, 1+r.Die(4)) // 2..5
+		}
+	}
+	for _, mv := range RunAgendas(w, r) {
+		rep.People = append(rep.People, mv)
+		rep.Facts = append(rep.Facts, mv.Text)
+		agendaFact(w, lv.Week, mv)
+		logBeat(w, WorldBeat{Week: lv.Week, Kind: BeatPerson, Text: mv.Text, LocationID: mv.LocationID, NPCID: mv.NPCID})
+		if mv.Clock != "" {
+			rep.Facts = append(rep.Facts, mv.Clock)
+			w.Record(ChronicleEntry{Kind: FactNews, Source: SourceEngine, Text: fmt.Sprintf("Week %d: %s", lv.Week, mv.Clock)})
+			logBeat(w, WorldBeat{Week: lv.Week, Kind: BeatFaction, Text: mv.Clock, LocationID: mv.LocationID})
 		}
 	}
 	if !idle || lv.Tide < TideIdleCap {

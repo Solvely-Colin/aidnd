@@ -296,6 +296,10 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	if !quick && w.Campaign.Turn-w.Campaign.SummaryTurn >= g.Cfg.SummaryEvery {
 		g.summarize(ctx, w, append(recent, actor.Name+": "+text, "GM: "+nar.Text))
 	}
+	// a player who takes a turn is caught up with the world
+	if !hints.Autopilot {
+		game.NoteSeen(w, playerID)
+	}
 	// 7. save + broadcast
 	if _, err := g.commit(ctx, w, evs...); err != nil {
 		return nil, err

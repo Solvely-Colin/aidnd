@@ -210,4 +210,43 @@ var innsmouth = Region{
 			},
 			Full: "Federal agents raided Innsmouth: Martha Sargent was taken in for questioning and the Marsh refinery was shut."},
 	},
+	// What the town's people do while nobody is watching.
+	Agendas: []Agenda{
+		{Key: "hannah", Who: "Hannah Coyle", Goal: "Find out what happened to her brother Tom",
+			Steps: []AgendaStep{
+				{Text: "Hannah Coyle has taken to asking after her brother on the Innsmouth wharves; the fishermen turn their backs on her.", MoveTo: "Innsmouth Harbor"},
+				{Text: "Hannah Coyle was seen at the edge of the salt marsh at dusk, calling her brother's name across the water."},
+				{Text: "Hannah Coyle came back to the Gilman House soaked to the knees and would not say where she had been.", MoveTo: "Gilman House"},
+				{Text: "Hannah Coyle has written to the Newburyport police about the Mary Alder. No one has written back."},
+			}},
+		{Key: "martha", Who: "Martha Sargent", Goal: "Keep the hotel quiet and the money coming",
+			Steps: []AgendaStep{
+				{Text: "The Gilman House has doubled its rates for out-of-town guests, payable in advance."},
+				{Text: "Martha Sargent was seen crossing New Church Green to the Order Hall after dark, with the hotel register under her arm.",
+					IfDispositionAtMost: atMost(-1), Clock: "eod"},
+			}},
+		{Key: "deacon", Who: "Deacon Joseph Gilman", Goal: "Learn everything about the strangers in town", FromWeek: 1,
+			Steps: []AgendaStep{
+				{Text: "Deacon Gilman paid a call on the Gilman House and asked which rooms the strangers keep.", On: "Martha Sargent", Disposition: -1},
+				{Text: "Deacon Gilman led a silent procession of the Order down to the wharves at low tide.", Clock: "eod"},
+				{Text: "The deacon has started greeting strangers by name in the street, though no one introduced them."},
+			}},
+		{Key: "babson", Who: "Mr. Babson", Goal: "Square the refinery books before anyone notices",
+			Steps: []AgendaStep{
+				{Text: "The lamp in the Marsh Refinery office has burned past midnight every night this week."},
+				{Text: "Mr. Babson has taken a room at the Gilman House and stopped going home.", MoveTo: "Gilman House"},
+				{Text: "Mr. Babson asked at the grocery whether the Arkham bus still runs on Sundays."},
+			}},
+		{Key: "eliza", Who: "Eliza Pell", Goal: "Call the Mary Alder's crew home",
+			Steps: []AgendaStep{
+				{Text: "Gull Point Light burned red instead of white for three nights running."},
+				{Text: "Eliza Pell rowed out toward Devil Reef at slack water and rowed back alone before dawn."},
+				{Text: "Eliza Pell has left her logbooks open on the watch-room table, as if waiting for someone to read them.", Disposition: 1},
+			}},
+		{Key: "moretti", Who: "Rafe Moretti", Goal: "Make Innsmouth harbor the outfit's back door", FromWeek: 1,
+			Steps: []AgendaStep{
+				{Text: "Rafe Moretti has been paying the harbor watch in pale gold coins instead of dollars.", Clock: "marchetti"},
+				{Text: "Rafe Moretti has a second launch now, and a quiet man with a Thompson gun to crew it."},
+			}},
+	},
 }

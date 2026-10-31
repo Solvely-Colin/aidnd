@@ -290,7 +290,7 @@ func anyWord(ws []string, set map[string]bool, except ...string) bool {
 }
 
 var (
-	deathRe   = regexp.MustCompile(`(?i)\b(dies|died|is dead|lies dead|lay dead|lying dead|drops dead|falls dead|was killed|is killed|were killed|been killed|is slain|was slain|lifeless|breathes? (his|her|their|its) last|corpse of|body of|dead body)\b`)
+	deathRe   = regexp.MustCompile(`(?i)\b(dies|died|is dead|lies dead|lay dead|lying dead|drops dead|found dead|falls dead|was killed|is killed|were killed|been killed|is slain|was slain|lifeless|breathes? (his|her|their|its) last|corpse of|body of|dead body)\b`)
 	acquireRe = regexp.MustCompile(`(?i)\b(pockets?|pocketed|picks? up|picked up|scoops? up|receives?|received|hands? (you|over|it to)|gives? you|passes? you|slips? you|press(es)? [^.!?]{0,30}into (your|their|his|her) (hand|palm)s?|tucks? [^.!?]{0,30}into (your|their)|you (now )?(carry|hold) (a|an|the)|\b(finds?|found|discovers?|uncovers?|turns? up|comes? up with|hides?|hid|hidden|hiding|conceals?|concealed|reveals?|revealed|yields?|slides?|tosses?|pushes?) (you |her |him |them |over )?(only )?(a|an|some)\b[^.!?]{0,40}\b(key|keys|coin|coins|gold|dagger|knife|sword|blade|pistol|revolver|gun|rifle|shotgun|ring|amulet|locket|letter|note|map|journal|ledger|book|scroll|potion|vial|lantern|idol|bottle|pouch|purse|gem|jewel|medallion|talisman|charm|tome|diary|photograph|ammunition|bullets|cash|money|wallet|satchel|relic|statuette))`)
 	moneyRe   = regexp.MustCompile(`(?i)(\$\s?(\d+)|\b(\d+)\s+(gold|gold pieces|coins?|gp|dollars|bucks|silver|crowns|credits)\b)`)
 	damageRe  = regexp.MustCompile(`(?i)\b(\d+)\s+(points? of\s+)?(damage|hit points?|hp|wounds?)\b`)
