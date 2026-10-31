@@ -688,3 +688,48 @@ func TestStartSagaCampaign(t *testing.T) {
 		t.Fatalf("unknown saga should fail, got %d", r.code)
 	}
 }
+
+func TestVisionsReachOnlyTheirPlayer(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ben"}, "k", "u2")
+	w, _ := e.g.Store.Load(t.Context(), id)
+	if _, err := e.g.Store.Save(t.Context(), w,
+		store.NewEvent(gm.EventVision, "", map[string]any{"for": "u1", "text": "SECRETVISION"}),
+		store.NewEvent("narration", "", map[string]any{"text": "after"})); err != nil {
+		t.Fatal(err)
+	}
+	log := func(p string) string { return string(e.do("GET", "/campaigns/"+id+"/log", nil, "k", p).body) }
+	if !strings.Contains(log("u1"), "SECRETVISION") {
+		t.Fatal("the player who had the vision can't see it")
+	}
+	for _, p := range []string{"u2", ""} {
+		if l := log(p); strings.Contains(l, "SECRETVISION") || !strings.Contains(l, "after") {
+			t.Fatalf("%q sees %s", p, l)
+		}
+	}
+	// the stream filters it too, for replay and live events
+	tok := e.do("POST", "/campaigns/"+id+"/stream-token", nil, "k", "u2").json(t)["token"].(string)
+	req, _ := http.NewRequest("GET", e.srv.URL+"/campaigns/"+id+"/events?stream_token="+tok, nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	sr := newSSEReader(res.Body)
+	for _, ev := range sr.next(3, 2*time.Second) {
+		if ev["type"] == gm.EventVision {
+			t.Fatalf("u2's replay has a vision: %v", ev)
+		}
+	}
+	for i := 0; i < 50 && e.api.Hub().Subscribers(id) == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	evs, _ := e.g.Store.Save(t.Context(), w, store.NewEvent(gm.EventVision, "", map[string]any{"for": "u1", "text": "LIVEVISION"}), store.NewEvent("narration", "", map[string]any{"text": "live"}))
+	e.api.Hub().Publish(id, evs)
+	got := sr.next(1, 2*time.Second)
+	if len(got) != 1 || got[0]["type"] != "narration" {
+		t.Fatalf("u2 live %v", got)
+	}
+}

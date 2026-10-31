@@ -754,7 +754,7 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	if len(evs) > 0 {
 		last = evs[len(evs)-1].ID
 	}
-	writeJSON(w, 200, map[string]any{"events": evs, "last_id": last})
+	writeJSON(w, 200, map[string]any{"events": visibleOnly(evs, whoFrom(r).PlayerID), "last_id": last})
 }
 
 // --- player notes: private to their author, never shown to the model.

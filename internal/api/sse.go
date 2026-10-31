@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Solvely-Colin/aidnd/internal/gm"
 	"github.com/Solvely-Colin/aidnd/internal/store"
 )
 
@@ -67,6 +68,29 @@ func (h *Hub) Subscribers(campaignID string) int {
 	return len(h.subs[campaignID])
 }
 
+// visibleTo reports whether a player may read an event. Visions are
+// private: only the player they were shown to sees them.
+func visibleTo(e store.Event, player string) bool {
+	if e.Type != gm.EventVision {
+		return true
+	}
+	var d struct {
+		For string `json:"for"`
+	}
+	return json.Unmarshal(e.Data, &d) == nil && d.For != "" && d.For == player
+}
+
+// visibleOnly drops the events a player may not read.
+func visibleOnly(evs []store.Event, player string) []store.Event {
+	out := evs[:0:0]
+	for _, e := range evs {
+		if visibleTo(e, player) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func writeSSE(w http.ResponseWriter, e store.Event) error {
 	b, err := json.Marshal(e)
 	if err != nil {
@@ -88,7 +112,8 @@ var heartbeat = 15 * time.Second
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, ok := s.streamAuth(w, r, id); !ok {
+	player, ok := s.streamAuth(w, r, id)
+	if !ok {
 		return
 	}
 	fl, ok := w.(http.Flusher)
@@ -118,10 +143,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, e := range evs {
+			last = e.ID
+			if !visibleTo(e, player) {
+				continue
+			}
 			if writeSSE(w, e) != nil {
 				return
 			}
-			last = e.ID
 		}
 		if len(evs) < 500 {
 			break
@@ -139,6 +167,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return // dropped as too slow; client reconnects with Last-Event-ID
 			}
 			if e.ID != 0 && e.ID <= last {
+				continue
+			}
+			if !visibleTo(e, player) {
+				last = max(last, e.ID)
 				continue
 			}
 			if writeSSE(w, e) != nil {

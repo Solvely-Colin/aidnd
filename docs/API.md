@@ -404,6 +404,7 @@ data: {"id":42,"campaign_id":"c_...","type":"narration","data":{...},"created_at
 | `player_action` | `{character_id, character, text, hints}` |
 | `action_resolved` | `{character_id, steps, skipped, changes, rolls, world_changes}` |
 | `narration` | `{text, quick?, opening?, skip?, setback?, character_id?}` |
+| `vision` | `{for, character_id, text}`: something strain showed one character (dread campaigns). Private: `/log` and `/events` send it only to the player in `for`. It never says whether it was real. |
 | `turn_budget` | `{character_id, budget}`, sent when the turn continues |
 | `enemy_turns` | `{turns, narration}` |
 | `conditions` | `{changes, rolls, lost_turn}`: conditions ticking at a turn boundary (saves, wearing off, standing up, a stunned turn passing) |

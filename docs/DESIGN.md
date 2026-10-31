@@ -233,6 +233,21 @@ more regions join the world as they are written.
   (once per character per kind, at the start of the enemies' turns) and the
   narrator's `hazard` tool with condition `horror`. Scars are played by the
   narrator; "Hears whispers" also lowers passive Perception by 2.
+- **Visions** (`game/visions.go`, `gm/visions.go`, 2026-10-31). From strain
+  2, after each non-quick turn one party member may perceive something the
+  others don't: 8% x strain a turn (+10 with "Hears whispers"), at most one
+  a turn, never twice within three turns. The engine decides whether it is
+  true (40% false at strain 2, +10 per point, cap 85) and picks the seed:
+  true ones point at real state (a hidden exit here, a hostile NPC here, a
+  dangerous place next door); false ones are a dead NPC, an absent NPC, an
+  uncanny detail on someone present, a phantom figure, or a whisper. The
+  model only words the seed. Only that player gets the `vision` event, and
+  `Character.Visions` keeps `Real` server-side. Visions never enter the
+  narration, the recent log, the summary, the judge or the chronicle. False
+  ones from the last 40 turns are listed to the narrator as UNREAL (a player
+  who acts on one finds nothing), phantoms can't be spawned as enemies, and
+  the canon guard cuts any prose (narration, summary, lore, NPC notes) that
+  puts a phantom in the scene unless it denies or only reports it.
 
 ## Shared world: groups (2026-10-30)
 
