@@ -160,4 +160,28 @@ var arkham = Region{
 			Full:       "The Grey Visitors have landed: Cold Spring Glen is theirs, and no one who goes in alone comes out the same.",
 			FullDanger: map[string]int{"Cold Spring Glen": 4}},
 	},
+	Agendas: []Agenda{
+		{Key: "morgan", Who: "Prof. Francis Morgan", Goal: "Read the stolen Codex before anyone burns it",
+			Steps: []AgendaStep{
+				{Text: "Professor Morgan has been seen in the Restricted Stacks long after closing.", MoveTo: "The Restricted Stacks"},
+				{Text: "Professor Morgan has stopped returning Dr. Armitage's notes and keeps his office door locked.",
+					IfClock: "corvid", IfClockAtLeast: 4, Disposition: -2},
+			}},
+		{Key: "sawyer", Who: "Earl Sawyer", Goal: "Keep what is left of his herd",
+			Steps: []AgendaStep{
+				{Text: "Earl Sawyer lost another cow; all he found was a ring of scorched grass on the pasture."},
+				{Text: "Earl Sawyer has started sitting up all night on his porch with a shotgun across his knees."},
+				{Text: "Earl Sawyer walked into Dunwich asking if anyone would buy his farm, cheap.", Disposition: 1},
+			}},
+		{Key: "mamie", Who: "Mamie Bishop", Goal: "Know everything that happens in Dunwich",
+			Steps: []AgendaStep{
+				{Text: "Mamie Bishop is telling anyone who will listen that the Whateley place had a light on last week."},
+				{Text: "Mamie Bishop swears she heard buzzing voices in the glen speaking her late husband's name."},
+			}},
+		{Key: "hale", Who: "Ezra Hale", Goal: "Keep his post at the library",
+			Steps: []AgendaStep{
+				{Text: "Ezra Hale was found at dawn standing in the Orne Library reading room, smiling at an empty chair."},
+				{Text: "Ezra Hale has asked to be put on day shifts. He would not say why."},
+			}},
+	},
 }

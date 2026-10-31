@@ -158,3 +158,40 @@ func TestListShowsSaga(t *testing.T) {
 		t.Fatalf("List: %+v", List())
 	}
 }
+
+func TestEveryRegionsAgendasBuild(t *testing.T) {
+	s := Get("long-dark")
+	w := buildSaga(t, "long-dark")
+	for _, l := range w.Locations {
+		if l.IsHub && l.Stub {
+			if _, err := Arrive(w, l); err != nil {
+				t.Fatalf("arrive %s: %v", l.Name, err)
+			}
+		}
+	}
+	want := 0
+	for _, r := range s.Regions {
+		want += len(r.Agendas)
+	}
+	lv := w.Campaign.Living
+	if want == 0 || len(lv.Agendas) != want {
+		t.Fatalf("agendas: %d, want %d", len(lv.Agendas), want)
+	}
+	// a world made before agendas gets them back for the regions it built
+	lv.Agendas = nil
+	if !EnsureAgendas(w) || len(lv.Agendas) != want || EnsureAgendas(w) {
+		t.Fatalf("EnsureAgendas: %d, want %d", len(lv.Agendas), want)
+	}
+	for _, a := range lv.Agendas {
+		for _, st := range a.Steps {
+			for _, e := range st.Effects {
+				if e.Clock != "" && lv.Faction(e.Clock) == nil {
+					t.Fatalf("agenda %s pushes unknown clock %q", a.Key, e.Clock)
+				}
+			}
+			if st.If != nil && st.If.Clock != "" && lv.Faction(st.If.Clock) == nil {
+				t.Fatalf("agenda %s waits on unknown clock %q", a.Key, st.If.Clock)
+			}
+		}
+	}
+}
