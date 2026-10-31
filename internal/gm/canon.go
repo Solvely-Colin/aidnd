@@ -253,7 +253,7 @@ var actVerbs = wordSet("says", "asks", "replies", "answers", "whispers", "mutter
 var recollection = wordSet("remember", "remembers", "remembered", "recall", "recalls", "once", "earlier", "yesterday", "memory",
 	"memories", "told", "grave", "ghost", "spirit", "portrait", "photograph", "photo", "letter", "name", "named", "corpse", "body",
 	"remains", "dead", "late", "mourn", "mourns", "buried", "funeral", "rumor", "rumour", "rumors", "rumours", "heard", "dream", "dreams",
-	"vision", "visions", "voice", "echo", "echoes", "used", "had", "would", "said")
+	"vision", "visions", "used", "had", "would", "said")
 
 func wordSet(ws ...string) map[string]bool {
 	m := make(map[string]bool, len(ws))
@@ -322,16 +322,19 @@ func (c *canon) checkSentence(s string) string {
 	ls := strings.ToLower(s)
 	for _, n := range c.npcs {
 		at := c.mentions(ws, n)
-		if len(at) == 0 {
+		if len(at) == 0 && !n.Alive {
+			at = c.roleMentions(ws, n) // "the innkeeper nods" when the innkeeper lies dead here
+		}
+		if len(at) == 0 && len(c.mentionsAll(ws, n)) == 0 {
 			continue
 		}
 		inAllowed := strings.Contains(c.allowed, strings.ToLower(n.Name))
 		switch {
-		case !n.Alive && !inAllowed && acts(ws, at) && !anyWord(ws, recollection):
+		case !n.Alive && !inAllowed && c.personActs(s, ws, at, n) && !anyWord(ws, recollection):
 			return fmt.Sprintf("%s is dead; the dead don't speak or act", n.Name)
 		case n.Alive && !inAllowed && dies(ws, at):
 			return fmt.Sprintf("%s is alive; nothing killed them", n.Name)
-		case n.Alive && !inAllowed && !c.lifeOnly && c.here != nil && n.LocationID != c.here.ID && acts(ws, at) &&
+		case n.Alive && !inAllowed && !c.lifeOnly && c.here != nil && n.LocationID != c.here.ID && c.personActs(s, ws, at, n) &&
 			!anyWord(ws, recollection) && !strings.Contains(ls, strings.ToLower(placeName(c, n.LocationID))):
 			return fmt.Sprintf("%s is not here (they are at %s); they can't speak or act in this scene", n.Name, placeName(c, n.LocationID))
 		}
@@ -488,4 +491,132 @@ func issueTexts(is []canonIssue) []string {
 		out = append(out, i.Why+": "+i.Sentence)
 	}
 	return out
+}
+
+// quotedRe matches quoted speech.
+var quotedRe = regexp.MustCompile(`"[^"]*"|“[^”]*”`)
+
+// appositiveRe matches a comma-fenced aside: "Ada, the innkeeper, nods".
+var appositiveRe = regexp.MustCompile(`,\s*[^,.;!?"“”—]{1,40}?,|\s—\s?[^—.;!?"“”]{1,40}?\s?—`)
+
+// speechTagRe finds a dialogue tag after a quote: `"Go," says Ada.`
+var speechTagRe = regexp.MustCompile(`(?i)[,!?.…—-]["”'’]\s+(says|asks|replies|answers|whispers|mutters|murmurs|shouts|calls|cries|adds|continues|growls|hisses|snaps|laughs|insists|warns)\s+(.{0,40})`)
+
+// bodyParts are what a person does things with ("Ada's hand closes").
+var bodyParts = wordSet("hand", "hands", "eyes", "eye", "voice", "face", "fingers", "gaze", "head", "lips", "mouth", "arm", "arms", "shoulders", "jaw", "smile", "breath")
+
+// personActs reports whether the sentence has n speaking or acting, in
+// any of the usual shapes: "Ada nods", "Ada, the innkeeper, nods",
+// `"Go," says Ada`, "Ada's hand closes on yours".
+func (c *canon) personActs(s string, ws []string, at [][2]int, n *game.NPC) bool {
+	// words inside quotes are speech: "Where is Vane?" doesn't have Vane act
+	full := s
+	if q := quotedRe.ReplaceAllString(s, `" "`); q != s {
+		s = q
+		ws = words(s)
+		at = c.mentions(ws, n)
+	}
+	if acts(ws, at) {
+		return true
+	}
+	// strip asides that hold no verb of their own, then look again
+	stripped := appositiveRe.ReplaceAllStringFunc(s, func(m string) string {
+		if anyWord(words(m), actVerbs) {
+			return m
+		}
+		return " "
+	})
+	if stripped != s {
+		ws2 := words(stripped)
+		if acts(ws2, c.mentions(ws2, n)) {
+			return true
+		}
+	}
+	for _, m := range speechTagRe.FindAllStringSubmatch(full, -1) {
+		tail := words(m[2])
+		if len(tail) > 0 && tail[0] == "the" {
+			tail = tail[1:]
+		}
+		for _, mm := range c.mentions(tail, n) {
+			if mm[0] == 0 {
+				return true
+			}
+		}
+		if !n.Alive {
+			for _, mm := range c.roleMentions(words(m[2]), n) {
+				if mm[0] <= 1 {
+					return true
+				}
+			}
+		}
+	}
+	// "Ada's hand closes on yours"
+	for i := 0; i+2 < len(ws); i++ {
+		if ws[i+1] != "'s" || !bodyParts[ws[i+2]] {
+			continue
+		}
+		hit := false
+		for _, mm := range c.mentionsAll(ws, n) {
+			if mm[1] == i+1 {
+				hit = true
+			}
+		}
+		if !hit {
+			continue
+		}
+		for j := i + 3; j < len(ws) && j < i+6; j++ {
+			if actVerbs[ws[j]] || bodyVerbs[ws[j]] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// bodyVerbs are what a hand, a voice or a gaze does.
+var bodyVerbs = wordSet("closes", "tightens", "grips", "trembles", "shakes", "rests", "falls", "drops", "lingers", "narrows", "widens",
+	"softens", "hardens", "rises", "cracks", "breaks", "follows", "flicks", "darts", "brushes", "touches", "finds", "settles", "goes", "moves")
+
+// mentionsAll is mentions without skipping possessives.
+func (c *canon) mentionsAll(ws []string, n *game.NPC) [][2]int {
+	full := words(n.Name)
+	var at [][2]int
+	for i := range ws {
+		if len(full) > 0 && i+len(full) <= len(ws) && equalWords(ws[i:i+len(full)], full) {
+			at = append(at, [2]int{i, i + len(full)})
+		} else if id, ok := c.parts[ws[i]]; ok && id == n.ID {
+			at = append(at, [2]int{i, i + 1})
+		}
+	}
+	return at
+}
+
+// roleMentions finds "the <role>" for a dead NPC whose body lies here,
+// when nobody else here shares that role word: "the innkeeper nods".
+func (c *canon) roleMentions(ws []string, n *game.NPC) [][2]int {
+	if n.Alive || c.here == nil || n.LocationID != c.here.ID {
+		return nil
+	}
+	rw := words(n.Role)
+	if len(rw) == 0 {
+		return nil
+	}
+	role := rw[len(rw)-1]
+	if len(role) < 4 {
+		return nil
+	}
+	for _, o := range c.npcs {
+		if o.ID != n.ID && o.LocationID == n.LocationID {
+			if ow := words(o.Role); len(ow) > 0 && ow[len(ow)-1] == role {
+				return nil
+			}
+		}
+	}
+	var at [][2]int
+	for i := 1; i < len(ws); i++ {
+		if ws[i] == role && ws[i-1] == "the" {
+			at = append(at, [2]int{i - 1, i + 1})
+		}
+	}
+	return at
 }
