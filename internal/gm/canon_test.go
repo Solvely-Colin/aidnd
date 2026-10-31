@@ -199,3 +199,38 @@ func TestCanonSlidAcross(t *testing.T) {
 		t.Errorf("known key flagged: %+v", is)
 	}
 }
+
+func TestCanonOtherShapesOfActing(t *testing.T) {
+	w := canonWorld()
+	w.NPCs[2].Role = "harbor innkeeper" // Old Corbin, dead, here
+	c := newCanon(w, "", nil)
+	for _, s := range []string{
+		"Corbin, the old harbor man, nods slowly.",
+		"Corbin — grey and stooped — beckons you in.",
+		`"Get out," says Old Corbin.`,
+		`"Not tonight," mutters Corbin, turning away.`,
+		"Corbin's hand closes on your sleeve.",
+		"The innkeeper nods and pours you a drink.",
+		`"Rooms are paid in advance," says the innkeeper.`,
+	} {
+		if is := c.check(s); len(is) != 1 || !strings.Contains(is[0].Why, "dead") {
+			t.Errorf("%q: got %+v, want the dead acting", s, is)
+		}
+	}
+	for _, s := range []string{
+		"Constable Vane, they say, went up to the chapel.",
+		`"Find Corbin's killer," Ada says.`,
+		"Ada asks Corbin's ghost nothing; the room is silent.",
+		"You remember Corbin's voice, rough as rope.",
+		"Ada, the barmaid, wipes the counter.",
+		`"Where is Vane?" asks Ada.`,
+	} {
+		if is := c.check(s); len(is) != 0 {
+			t.Errorf("false positive on %q: %+v", s, is)
+		}
+	}
+	// someone elsewhere, in the same shapes
+	if is := c.check("Vane, rain dripping from his hat, steps out of the fog."); len(is) != 1 || !strings.Contains(is[0].Why, "not here") {
+		t.Errorf("absent Vane in an aside: %+v", is)
+	}
+}
