@@ -32,8 +32,9 @@ Answer briefly in at most 60 words using only the facts given, as a storyteller:
 // narration is the narrator's output for one turn.
 type narration struct {
 	Text    string
-	Changes []string    // world changes from directives (and the pacing backstop)
-	Rolls   []game.Roll // saves the engine rolled for a hazard directive
+	Changes []string     // world changes from directives (and the pacing backstop)
+	Rolls   []game.Roll  // saves the engine rolled for a hazard directive
+	Canon   []canonIssue // contradictions the canon guard found (and fixed)
 }
 
 func wordCount(s string) int { return len(strings.Fields(s)) }
@@ -69,6 +70,8 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 			out.Text = fallbackNarration(res)
 		} else {
 			out.Text = g.dejargon(ctx, out.Text)
+			c := newCanon(w, res.Arrived, res.Changes, happened)
+			out.Text, out.Canon = g.guard(ctx, c, "narrate_quick", out.Text, fallbackNarration(res))
 		}
 		return out
 	}
@@ -186,6 +189,15 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		}
 	} else {
 		textOut = g.dejargon(ctx, textOut)
+		allowed := append(append(append([]string{}, res.Changes...), out.Changes...), dir.BeatChanges...)
+		if dir.Beat != nil {
+			allowed = append(allowed, dir.Beat.Title, dir.Beat.Text)
+		}
+		fb := fallbackNarration(res)
+		if len(out.Changes) > 0 {
+			fb += " " + strings.Join(out.Changes, ". ") + "."
+		}
+		textOut, out.Canon = g.guard(ctx, newCanon(w, res.Arrived, allowed, happened), "narrate", textOut, fb)
 	}
 	out.Text = textOut
 	return out
@@ -493,6 +505,11 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		if n == nil {
 			return "", fmt.Errorf("unknown npc %q", a.NPCID)
 		}
+		nc := newCanon(w, "", nil)
+		nc.lifeOnly = true
+		if is := nc.check(a.Note); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
 		if a.Important {
 			n.Keep(fmt.Sprintf("day %d: %s", w.Campaign.Scene.Day, trim(a.Note, 140)))
 		} else {
@@ -568,6 +585,11 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			if a.Kind == k {
 				kind = k
 			}
+		}
+		lc := newCanon(w, "", nil)
+		lc.lifeOnly = true
+		if is := lc.check(a.Text); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
 		}
 		ids := npcIDs(w, a.NPCIDs)
 		if kind == game.FactPromise && len(ids) == 0 {
@@ -667,6 +689,15 @@ func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.Ene
 	if wordCount(text) > 160 {
 		text = g.tighten(ctx, text, 80)
 	}
+	var plain []string
+	for _, t := range turns {
+		for _, re := range t.Reactions {
+			plain = append(plain, re.Text)
+		}
+		plain = append(plain, t.Text)
+	}
+	fb := strings.Join(plain, ". ") + "."
+	text, _ = g.guard(ctx, newCanon(w, "", lines, last), "narrate_enemies", text, fb)
 	return text
 }
 
@@ -752,7 +783,19 @@ func (g *GM) summarize(ctx context.Context, w *game.World, recent []string) {
 		llm.System("Summarize the story so far in at most 120 words: key events, promises, enemies and open threads. Facts only."),
 		llm.User(fmt.Sprintf("PREVIOUS SUMMARY: %s\n\nFACTS RECORDED SINCE:\n%s\n\nRECENT LOG:\n%s", w.Campaign.Summary, orNone(factsSince(w, w.Campaign.SummaryTurn)), strings.Join(recent, "\n")))}})
 	if err == nil && strings.TrimSpace(resp.Content) != "" {
-		w.Campaign.Summary = trim(resp.Content, 1200)
+		// a summary that kills the living would become canon in every
+		// later prompt: drop those sentences
+		c := newCanon(w, "", nil)
+		c.lifeOnly = true
+		sum := strings.TrimSpace(resp.Content)
+		if is := c.check(sum); len(is) > 0 {
+			g.debugf("summary canon issues:\n%s", issueList(is))
+			sum = cut(sum, is)
+		}
+		if strings.TrimSpace(sum) == "" {
+			return
+		}
+		w.Campaign.Summary = trim(sum, 1200)
 		w.Campaign.SummaryTurn = w.Campaign.Turn
 	}
 }

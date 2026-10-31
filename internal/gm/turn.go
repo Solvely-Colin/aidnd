@@ -113,8 +113,11 @@ func (g *GM) Start(ctx context.Context, campaignID string) (*game.World, string,
 			loreBlock(selectLore(w, w.Campaign.Pitch, g.Cfg.LoreBudget)), snapshot(w, nil, true), strings.Join(party, ", "), dir.SceneGoal)),
 	}})
 	opening := strings.TrimSpace(resp.Content)
+	plain := fmt.Sprintf("%s %s", w.Campaign.Pitch, hub.Description)
 	if err != nil || opening == "" {
-		opening = fmt.Sprintf("%s %s", w.Campaign.Pitch, hub.Description)
+		opening = plain
+	} else {
+		opening, _ = g.guard(ctx, newCanon(w, hub.ID, nil, w.Campaign.Pitch, hub.Description), "narrate_opening", opening, plain)
 	}
 	first := w.ActiveCharacter()
 	_, err = g.commit(ctx, w,
@@ -248,7 +251,7 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	}
 	evs := []store.Event{
 		store.NewEvent("player_action", playerID, map[string]any{"character_id": actor.ID, "character": actor.Name, "text": text, "hints": hints}),
-		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": append(res.Rolls(), nar.Rolls...), "world_changes": out.WorldChanges}),
+		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": append(res.Rolls(), nar.Rolls...), "world_changes": out.WorldChanges, "canon_fixes": issueTexts(nar.Canon)}),
 		store.NewEvent("narration", "", map[string]any{"text": nar.Text, "quick": quick, "skipped": res.Skipped, "character_id": actor.ID}),
 	}
 	quests := append([]game.QuestUpdate{}, res.Quests...)

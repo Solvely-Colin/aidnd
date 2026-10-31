@@ -315,3 +315,13 @@ The chronicle is the world's long-term memory, and the engine writes to it, not 
 - NPCs keep up to 6 permanent memories (`keeps`: attacked, subdued, gifts, quests done, promises settled, `npc_note` with important) next to the 8 rolling notes. `adjust_disposition` takes a reason, which the NPC remembers.
 - Locations store the day the party was last there; coming back on a later day adds "returns after N days away" to the resolution.
 - Each narration prompt carries a WORLD MEMORY block: up to 4 facts set in this place, 2 about each person in the scene, open promises with ids, 3 other recent facts, and the named dead. Quick answers get it too. The story summary is rebuilt from the facts recorded since the last summary as well as the log.
+
+## Canon guard (2026-10-31)
+
+The engine always owned the state, but the narrator's prose was only held to the state by its prompt. Now every piece of model prose is read against the world before anyone sees it (`gm/canon.go`).
+
+- **What is checked** (plain Go, same answer every time): a named NPC who is alive written as dying or dead; a dead NPC speaking or acting; an NPC who is somewhere else speaking or acting in this scene; someone getting, finding or being handed an item that nobody carries, nothing here matches and the engine didn't report; a gold or damage figure the engine never rolled; the party arriving at a place the engine didn't move it to. Whatever the engine's CHANGES name this turn is allowed (an NPC killed this turn may die in the prose). Past tense, memories, graves, rumours and someone else's speech about a person don't count.
+- **What happens:** one rewrite with the exact contradictions listed (`canon_repair`). If the rewrite still contradicts the state, those sentences are cut; if too little is left, the engine's own lines stand in. Fixes are logged on the turn's `action_resolved` event as `canon_fixes`, for play-test review.
+- **Where:** turn narration, quick answers, enemy narration and the opening.
+- **No laundering into memory:** the story summary drops sentences that kill living people before it is saved, and `record_lore` and `npc_note` refuse text that does (the model gets the reason back). Items and travel aren't checked there, because those lines are about the past.
+- Secrets were already safe: locked lore never reaches the model.
