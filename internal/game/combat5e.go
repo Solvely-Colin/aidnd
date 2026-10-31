@@ -437,6 +437,9 @@ func hurtEnemy(w *World, c *Character, e *Enemy, dmg int) []string {
 	out = append(out, bossPhase(w, e)...)
 	if e.HP == 0 {
 		out = append(out, defeat(w, e, false)...)
+		if c != nil && (e.NPCID != "" || e.Boss != nil) {
+			Note(w, c, RecordEntry{Kind: RecDeed, Source: SourceEngine, NPCID: e.NPCID, Text: fmt.Sprintf("Killed %s at %s", e.Name, placeName(w))})
+		}
 		if c != nil && c.HasFeature("dark_ones_blessing") {
 			t := max(1, c.Mod(CHA)+c.Level)
 			if t > c.TempHP {

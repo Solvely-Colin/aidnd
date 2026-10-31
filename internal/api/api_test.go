@@ -739,3 +739,32 @@ func TestVisionsReachOnlyTheirPlayer(t *testing.T) {
 		t.Fatalf("u2 live %v", got)
 	}
 }
+
+func TestPlayersWriteTheirOwnGoals(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet}, "k", "u1")
+	base := "/campaigns/" + id + "/me/goals"
+	if r := e.do("POST", base, map[string]string{"text": "x"}, "k", "u9"); r.code != 403 {
+		t.Fatalf("outsider set a goal: %d", r.code)
+	}
+	if r := e.do("POST", base, map[string]string{"text": " "}, "k", "u1"); r.code != 400 {
+		t.Fatalf("empty goal %d", r.code)
+	}
+	r := e.do("POST", base, map[string]string{"text": "Find my sister"}, "k", "u1")
+	if r.code != 200 {
+		t.Fatalf("add %d %s", r.code, r.body)
+	}
+	c := r.json(t)["campaign"].(map[string]any)["party"].([]any)[0].(map[string]any)
+	goals := c["goals"].([]any)
+	if len(goals) != 1 || goals[0].(map[string]any)["source"] != "player" {
+		t.Fatalf("goals %v", goals)
+	}
+	gid := goals[0].(map[string]any)["id"].(string)
+	r = e.do("POST", base, map[string]string{"drop": gid}, "k", "u1")
+	c = r.json(t)["campaign"].(map[string]any)["party"].([]any)[0].(map[string]any)
+	if g := c["goals"].([]any)[0].(map[string]any); g["status"] != "dropped" || len(c["record"].([]any)) != 1 {
+		t.Fatalf("after drop %v %v", g, c["record"])
+	}
+}

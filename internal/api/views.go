@@ -179,6 +179,10 @@ type CharacterView struct {
 	// holds a grudge against them, owes them, or is owed by them.
 	Marks    []MarkView     `json:"marks"`
 	Standing []StandingView `json:"standing"`
+	// Goals are what they want (open first); Record is their own story,
+	// newest first.
+	Goals  []game.Goal        `json:"goals"`
+	Record []game.RecordEntry `json:"record"`
 }
 
 // MarkView is one lasting mark on a character.
@@ -203,6 +207,30 @@ type StandingView struct {
 
 var markLabels = map[string]string{game.MarkScar: "Scar", game.MarkBrand: "Mark", game.MarkLoss: "Loss", game.MarkName: "Known as"}
 var tieLabels = map[string]string{game.TieGrudge: "Holds a grudge", game.TieDebt: "Owes you", game.TieOwed: "You owe them"}
+
+// goalsView lists open goals first, then settled ones, newest first.
+func goalsView(c *game.Character) []game.Goal {
+	out := []game.Goal{}
+	for i := len(c.Goals) - 1; i >= 0; i-- {
+		if c.Goals[i].Status == game.GoalOpen {
+			out = append(out, c.Goals[i])
+		}
+	}
+	for i := len(c.Goals) - 1; i >= 0; i-- {
+		if c.Goals[i].Status != game.GoalOpen {
+			out = append(out, c.Goals[i])
+		}
+	}
+	return out
+}
+
+func recordView(c *game.Character) []game.RecordEntry {
+	out := []game.RecordEntry{}
+	for i := len(c.Record) - 1; i >= 0; i-- {
+		out = append(out, c.Record[i])
+	}
+	return out
+}
 
 func marksView(c *game.Character) []MarkView {
 	out := []MarkView{}
@@ -505,7 +533,7 @@ func characterView(w *game.World, c *game.Character) CharacterView {
 		Scores: c.Scores, Modifiers: map[string]int{}, Proficient: c.Proficient, ProfBonus: game.ProficiencyBonus(c.Level),
 		Level: c.Level, XP: c.XP, HP: c.HP, MaxHP: c.MaxHP, Down: c.Down(), AC: game.ArmorClass(w, c), Gold: c.Gold, ZoneID: c.ZoneID,
 		LevelXP: game.XPTable[max(c.Level, 1)-1], ACParts: game.ArmorClassParts(w, c), Conditions: conditions(w, c), Inventory: []ItemView{},
-		Strain: strainView(w, c), Marks: marksView(c), Standing: standingView(w, c)}
+		Strain: strainView(w, c), Marks: marksView(c), Standing: standingView(w, c), Goals: goalsView(c), Record: recordView(c)}
 	if c.Level < game.MaxLevel {
 		v.NextLevel = game.XPTable[c.Level]
 		v.LevelUp = &LevelUpView{Level: c.Level + 1, HP: game.HPPerLevel(c), ProfBonus: game.ProficiencyBonus(c.Level + 1)}

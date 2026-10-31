@@ -73,3 +73,36 @@ func TestNarratorTieCannotKillTheLiving(t *testing.T) {
 		t.Fatalf("a tie that contradicts the world was accepted: %v", err)
 	}
 }
+
+func TestNarratorKeepsEachCharactersOwnStory(t *testing.T) {
+	r := newRig(t, 2, 1)
+	w := r.start(t)
+	a, b := w.Characters[0], w.Characters[1]
+	if _, err := r.g.applyDirective(bg, w, llm.Call(DirPersonalGoal, map[string]any{"character_id": a.ID, "action": "add", "text": "Learn who rang the bell the night her father drowned"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.g.applyDirective(bg, w, llm.Call(DirRecordChoice, map[string]any{"character_id": a.ID, "kind": "choice", "text": "Lied to the elder about the drowned man's ring"})); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Goals) != 1 || len(a.Record) != 1 || len(b.Goals) != 0 || len(b.Record) != 0 {
+		t.Fatalf("a %+v %+v b %+v %+v", a.Goals, a.Record, b.Goals, b.Record)
+	}
+	mem := worldMemory(w, a)
+	if !strings.Contains(mem, "YOUR STORY ("+a.Name) || !strings.Contains(mem, "[goal1] Learn who rang") || !strings.Contains(mem, "CHOSE: day") {
+		t.Fatalf("own story missing:\n%s", mem)
+	}
+	if strings.Contains(worldMemory(w, b), "YOUR STORY") {
+		t.Fatal("another character's story leaked into b's narration")
+	}
+	xp := a.XP
+	if _, err := r.g.applyDirective(bg, w, llm.Call(DirPersonalGoal, map[string]any{"character_id": a.ID, "action": "done", "goal_id": "goal1", "text": "the bell-founder confessed"})); err != nil {
+		t.Fatal(err)
+	}
+	if a.Goals[0].Status != game.GoalDone || a.XP != xp+game.GoalXP {
+		t.Fatalf("goal %+v xp %d", a.Goals[0], a.XP)
+	}
+	game.AddGoal(w, a, "Another thing", game.SourcePlayer)
+	if _, err := r.g.applyDirective(bg, w, llm.Call(DirPersonalGoal, map[string]any{"character_id": a.ID, "action": "done", "goal_id": "goal2", "text": "too easy"})); err == nil {
+		t.Fatal("two goals settled in a day")
+	}
+}

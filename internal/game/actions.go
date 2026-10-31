@@ -569,6 +569,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 			Text: fmt.Sprintf("%s promised %s: %s", c.Name, n.Name, trimTo(p, 200))}); f != nil {
 			n.Remember(fmt.Sprintf("%s promised me: %s", c.Name, trimTo(p, 120)))
 			st.Info = append(st.Info, fmt.Sprintf("%s gives %s their word (%s)", c.Name, n.Name, trimTo(p, 200)))
+			Note(w, c, RecordEntry{Kind: RecChoice, Source: SourceEngine, NPCID: n.ID, Text: fmt.Sprintf("Gave %s their word: %s", n.Name, trimTo(p, 140))})
 		}
 	}
 	st.Changes = append(st.Changes, fmt.Sprintf("%s talks with %s", c.Name, n.Name))
@@ -920,6 +921,7 @@ func findFoe(w *World, ref string, by *Character) (*Enemy, error) {
 			n.Disposition = -3
 			n.Keep(fmt.Sprintf("day %d: was attacked by the party", w.Campaign.Scene.Day))
 			n.Bind(w, by, TieGrudge, "attacked them", SourceEngine)
+			Note(w, by, RecordEntry{Kind: RecChoice, Source: SourceEngine, NPCID: n.ID, Text: fmt.Sprintf("Turned on %s and attacked them at %s", n.Name, placeName(w))})
 			if e := npcAsEnemy(w, n); e != nil {
 				return e, nil
 			}
@@ -1037,6 +1039,9 @@ func subdue(ctx *Ctx, c *Character, a Action, st *Step) error {
 	}
 	e.Subdued = true
 	st.Changes = append(st.Changes, defeat(w, e, true)...)
+	if e.NPCID != "" || e.Boss != nil {
+		Note(w, c, RecordEntry{Kind: RecChoice, Source: SourceEngine, NPCID: e.NPCID, Text: fmt.Sprintf("Spared %s and subdued them at %s", e.Name, placeName(w))})
+	}
 	return nil
 }
 

@@ -153,6 +153,9 @@ type CharExtra struct {
 	Downtime *Downtime `json:"downtime,omitempty"`
 	// Marks are lasting signs of what happened to them (see marks.go).
 	Marks []Mark `json:"marks,omitempty"`
+	// Goals and Record are the character's own story (see record.go).
+	Goals  []Goal        `json:"goals,omitempty"`
+	Record []RecordEntry `json:"record,omitempty"`
 }
 
 // Concentration is a spell being held.

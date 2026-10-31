@@ -363,3 +363,12 @@ World memory is party-wide; this adds what follows one character. Both live in J
 - **They change play:** `NPC.AttitudeTo(c)` is the party disposition, one worse per grudge and one better per debt. It sets that character's prices, whether a merchant refuses them, whether an NPC hands them a quest item, and whether an NPC will gift them something. Another character can still trade with a merchant who won't serve the one they hold a grudge against.
 - **The narrator sees them:** WORLD MEMORY lists the grudges and debts of the people in the scene and the marks of the party there; the snapshot shows an NPC's attitude toward the actor when it differs; talking to someone puts their ties to the speaker in the info lines.
 - **The sheet shows them:** "Marks" and "Who remembers you" sections on the character sheet.
+
+## Each character's own story (2026-10-31)
+
+Colin: track personal actions, goals, outcomes, memory and choices so nothing gets lost. See `game/record.go`; all in `CharExtra` (no schema change).
+
+- **Goals:** up to 4 open per character. Players write their own on the sheet (`POST /campaigns/{id}/me/goals`) and can let one go; the narrator can add one with `personal_goal`. Only the narrator settles a goal (done or failed), at most one per character per day; reaching one is worth 25 XP. The newest 24 goals are kept, open ones never dropped.
+- **Record:** a per-character log of choices, deeds and outcomes (max 60; deeds and outcomes go first when full, choices are kept). The engine writes promises made in conversation, turning on an NPC, sparing (subduing) or killing a named foe, finishing a quest, the party's word kept or broken, and settled goals. The narrator adds choices that matter with `record_choice` (canon-checked).
+- **Narrator:** WORLD MEMORY ends with YOUR STORY for the acting character only: open goals with ids, their last 5 choices and 3 other recent entries.
+- **Sheet:** "What you want" (with an add box for your own character) and "Your story so far" (newest 6, the rest behind "earlier").
