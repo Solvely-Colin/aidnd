@@ -284,6 +284,9 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		res.CampaignEnded = true
 		res.TurnEnded = true
 	}
+	if w.InCombat() && actor.Down() {
+		res.TurnEnded = true // knocked out mid-turn (an opportunity attack, an ambush): nothing left to do
+	}
 	if res.AllFree {
 		for _, s := range res.Steps {
 			if s.OK && s.Action.Kind == ActEndTurn {

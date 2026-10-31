@@ -140,6 +140,7 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	if w.Campaign.Status != game.StatusActive {
 		return nil, Conflict("the campaign is %s", w.Campaign.Status)
 	}
+	game.DropStaleDeathSaves(w)
 	actor, err := g.actorFor(w, playerID)
 	if err != nil {
 		return nil, err
@@ -329,7 +330,9 @@ func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []stor
 	}
 	for passes := 0; ; passes++ {
 		if w.InCombat() {
-			turns, _ := game.RunEnemyTurns(w, g.Dice)
+			turns, extra := game.RunEnemyTurns(w, g.Dice)
+			// nerve saves and a fight won by a reaction aren't in the turns
+			evs = append(evs, conditionEvents(out, game.ConditionTick{Changes: extra})...)
 			if len(turns) > 0 {
 				out.EnemyTurns = append(out.EnemyTurns, turns...)
 				nar := g.narrateEnemies(ctx, w, turns, out.Narration)
@@ -439,7 +442,7 @@ func (g *GM) Skip(ctx context.Context, campaignID, playerID string, mode SkipMod
 	}
 	out := &TurnResult{TurnEnded: true}
 	var evs []store.Event
-	if p := w.Campaign.TakePending(actor.ID); p != nil && p.Kind == game.PendingDeathSave {
+	if p := w.Campaign.TakePending(actor.ID); p != nil && p.Kind == game.PendingDeathSave && actor.Dying() {
 		// nobody rolled for them, so the engine does
 		ds := game.DeathSave(w, g.Dice, actor)
 		evs = append(evs, deathSaveEvent(out, ds))

@@ -92,3 +92,31 @@ func TestDeathSaveWaitsForThePlayer(t *testing.T) {
 		t.Fatalf("the turn should pass: %+v", res.NextActor)
 	}
 }
+
+// A character healed from the DM console while their death save waits
+// must not stay stuck being asked to roll it.
+func TestHealedFromTheConsoleSkipsTheWaitingDeathSave(t *testing.T) {
+	r := fightRig(t, 5, game.EnemySpec{Name: "Marsh Ghoul", HP: 30, AC: 5, AttackBonus: 2, Damage: "1d4"})
+	r.g.Cfg.PlayerDice = true
+	r.f.Default("narrate_enemies", llm.Text("The ghoul looms."))
+	w := r.world(t)
+	game.KnockOut(w, w.Characters[1])
+	_, err := r.g.Store.Save(bg, w)
+	must(t, err)
+	must(t, r.g.SetAutoRoll(bg, r.id, "u1", true))
+	r.act(t, "u1", "I wait", llm.Call("end_turn", map[string]any{}))
+	w = r.world(t)
+	if p := w.Campaign.Pending[w.Characters[1].ID]; p == nil || p.Kind != game.PendingDeathSave {
+		t.Fatal("death save should wait for its player")
+	}
+	_, _, err = r.g.DM(bg, r.id, "u1", DMAction{Kind: "heal_party"})
+	must(t, err)
+	w = r.world(t)
+	if w.Campaign.Pending[w.Characters[1].ID] != nil {
+		t.Fatal("the healed character still owes a death save")
+	}
+	r.f.On("interpret", llm.Calls(llm.Call("end_turn", map[string]any{})))
+	if _, err := r.g.TakeAction(bg, r.id, "u2", "I get up", Hints{}); err != nil {
+		t.Fatalf("the healed character should act on their turn: %v", err)
+	}
+}

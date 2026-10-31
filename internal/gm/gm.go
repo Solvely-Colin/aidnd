@@ -133,6 +133,7 @@ func (g *GM) commit(ctx context.Context, w *game.World, evs ...store.Event) ([]s
 			}
 		}
 	}
+	game.DropStaleDeathSaves(w)
 	saved, err := g.Store.Save(ctx, w, evs...)
 	if err != nil {
 		return nil, err
