@@ -185,7 +185,9 @@ func (g *GM) logf(format string, a ...any) {
 }
 
 // Join seats a player. It is idempotent per player id. It fails with
-// ErrConflict if the table is full or the game has started.
+// ErrConflict if the table is full or the story has ended. A player who
+// joins a campaign under way makes a character and is written in where
+// the party stands (see joinRunning).
 func (g *GM) Join(ctx context.Context, campaignID, playerID, name string) (*game.Player, bool, error) {
 	defer g.lock(campaignID)()
 	w, err := g.Store.Load(ctx, campaignID)
@@ -195,8 +197,8 @@ func (g *GM) Join(ctx context.Context, campaignID, playerID, name string) (*game
 	if p := w.Player(playerID); p != nil {
 		return p, false, nil
 	}
-	if w.Campaign.Status != game.StatusLobby {
-		return nil, false, Conflict("the campaign has already started")
+	if w.Campaign.Status != game.StatusLobby && w.Campaign.Status != game.StatusActive {
+		return nil, false, Conflict("the story has ended")
 	}
 	max := w.Campaign.MaxPlayers
 	if max <= 0 {
@@ -231,8 +233,12 @@ func (g *GM) SaveCharacter(ctx context.Context, campaignID, playerID string, spe
 		return nil, ErrForbidden
 	}
 	if w.Campaign.Status == game.StatusActive {
-		if old := w.CharacterOf(playerID); old != nil && old.Dead {
+		old := w.CharacterOf(playerID)
+		if old != nil && old.Dead {
 			return g.replaceDead(ctx, w, playerID, old, spec)
+		}
+		if old == nil {
+			return g.joinRunning(ctx, w, playerID, spec)
 		}
 	}
 	if w.Campaign.Status != game.StatusLobby {

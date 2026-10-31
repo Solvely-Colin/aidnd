@@ -68,10 +68,11 @@ func (h *Hub) Subscribers(campaignID string) int {
 	return len(h.subs[campaignID])
 }
 
-// visibleTo reports whether a player may read an event. Visions are
-// private: only the player they were shown to sees them.
+// visibleTo reports whether a player may read an event. Visions and a
+// newcomer's story-so-far are private: only the player they were for
+// sees them.
 func visibleTo(e store.Event, player string) bool {
-	if e.Type != gm.EventVision {
+	if e.Type != gm.EventVision && e.Type != gm.EventCatchUp {
 		return true
 	}
 	var d struct {
