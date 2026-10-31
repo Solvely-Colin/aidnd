@@ -462,6 +462,10 @@ type EventThreadView struct {
 	Kind string `json:"kind"`
 	Text string `json:"text"`
 	Mine bool   `json:"mine,omitempty"`
+	// Who is the character the thread ties in, NPC the person it runs
+	// through (the UI draws the threads converging from them).
+	Who string `json:"who,omitempty"`
+	NPC string `json:"npc,omitempty"`
 }
 
 // EventMemberView is one character called to a world event.
@@ -494,7 +498,14 @@ func eventView(w *game.World, playerID string) *EventView {
 	}
 	me := w.CharacterOf(playerID)
 	for _, t := range e.Threads {
-		v.Threads = append(v.Threads, EventThreadView{Kind: t.Kind, Text: t.Text, Mine: me != nil && t.CharID == me.ID})
+		tv := EventThreadView{Kind: t.Kind, Text: t.Text, Mine: me != nil && t.CharID == me.ID}
+		if c := w.Character(t.CharID); t.CharID != "" && c != nil {
+			tv.Who = c.Name
+		}
+		if n := w.NPC(t.NPCID); t.NPCID != "" && n != nil {
+			tv.NPC = n.Name
+		}
+		v.Threads = append(v.Threads, tv)
 	}
 	for _, id := range e.Summoned {
 		if c := w.Character(id); c != nil && !c.Dead {
