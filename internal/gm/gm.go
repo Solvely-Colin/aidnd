@@ -134,6 +134,9 @@ func (g *GM) commit(ctx context.Context, w *game.World, evs ...store.Event) ([]s
 		}
 	}
 	game.DropStaleDeathSaves(w)
+	if ch := game.RepairStory(w); len(ch) > 0 {
+		g.logf("story repaired: %v", ch) // a death outside a fight, or a campaign saved before the repair existed
+	}
 	saved, err := g.Store.Save(ctx, w, evs...)
 	if err != nil {
 		return nil, err

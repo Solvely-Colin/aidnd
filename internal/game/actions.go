@@ -1052,6 +1052,7 @@ func defeat(w *World, e *Enemy, subdued bool) []string {
 		if !subdued {
 			n.Alive = false
 			w.Record(ChronicleEntry{Kind: FactDeath, Source: SourceEngine, NPCIDs: []string{n.ID}, Text: fmt.Sprintf("%s was killed by the party at %s", n.Name, where)})
+			changes = append(changes, RepairStory(w)...)
 		} else {
 			n.Keep(fmt.Sprintf("day %d: was subdued by the party", w.Campaign.Scene.Day))
 			w.Record(ChronicleEntry{Kind: FactDeed, Source: SourceEngine, NPCIDs: []string{n.ID}, Text: fmt.Sprintf("The party subdued %s at %s", n.Name, where)})
