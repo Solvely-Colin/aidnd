@@ -502,6 +502,7 @@ func HurtCharacter(w *World, r *dice.Roller, c *Character, dmg int, attacker *En
 	}
 	if c.HP == 0 {
 		KnockOut(w, c)
+		scarFromFall(w, c, attacker)
 		endConcentration(w, c)
 		return dmg, lines
 	}

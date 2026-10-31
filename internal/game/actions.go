@@ -526,7 +526,10 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 		st.Changes = append(st.Changes, fmt.Sprintf("%s moves to %s", c.Name, ZoneName(l, n.ZoneID)))
 	}
 	n.LastTalked = w.Campaign.Turn
-	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.Disposition))
+	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.AttitudeTo(c)))
+	for _, t := range n.TiesTo(c.ID) {
+		st.Info = append(st.Info, TieLine(w, n, t))
+	}
 	if a.Text != "" {
 		st.Info = append(st.Info, fmt.Sprintf("%s says: %q", c.Name, trimTo(a.Text, 300)))
 	}
@@ -541,7 +544,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	// an NPC who holds what an active quest needs hands it over when asked,
 	// unless they are hostile
 	for _, q := range w.Quests {
-		if q.Status != QuestActive || n.Disposition < 0 {
+		if q.Status != QuestActive || n.AttitudeTo(c) < 0 {
 			continue
 		}
 		for _, o := range q.Objectives {
@@ -557,7 +560,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	if n.Merchant {
 		for _, it := range w.ItemsOf(OwnerNPC, n.ID) {
 			if !isReward(w, it.ID) && it.Kind != ItemQuest {
-				st.Info = append(st.Info, fmt.Sprintf("%s sells %s for %d gold", n.Name, it.Name, BuyPrice(it, n)))
+				st.Info = append(st.Info, fmt.Sprintf("%s sells %s for %d gold", n.Name, it.Name, BuyPrice(it, n, c)))
 			}
 		}
 	}
@@ -901,11 +904,13 @@ func npcAsEnemy(w *World, n *NPC) *Enemy {
 	return e
 }
 
-func findFoe(w *World, ref string, allowNPC bool) (*Enemy, error) {
+// findFoe finds an enemy by ref. With by set, an NPC present may be
+// attacked too: they turn hostile and hold a grudge against by.
+func findFoe(w *World, ref string, by *Character) (*Enemy, error) {
 	if e := w.Enemy(ref); e != nil {
 		return e, nil
 	}
-	if allowNPC {
+	if by != nil {
 		if n := w.NPC(ref); n != nil && n.Alive && n.LocationID == w.Campaign.LocationID {
 			for _, e := range w.encounterEnemies() {
 				if e.NPCID == n.ID && !e.Defeated() {
@@ -914,6 +919,7 @@ func findFoe(w *World, ref string, allowNPC bool) (*Enemy, error) {
 			}
 			n.Disposition = -3
 			n.Keep(fmt.Sprintf("day %d: was attacked by the party", w.Campaign.Scene.Day))
+			n.Bind(w, by, TieGrudge, "attacked them", SourceEngine)
 			if e := npcAsEnemy(w, n); e != nil {
 				return e, nil
 			}
@@ -935,7 +941,7 @@ func (w *World) encounterEnemies() []*Enemy {
 func attack(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	l := w.Here()
-	e, err := findFoe(w, a.Target, true)
+	e, err := findFoe(w, a.Target, c)
 	if err != nil {
 		return err
 	}
@@ -995,7 +1001,7 @@ func nextFoeInReach(w *World, c *Character, reach Reach) *Enemy {
 func subdue(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	l := w.Here()
-	e, err := findFoe(w, a.Target, false)
+	e, err := findFoe(w, a.Target, nil)
 	if err != nil {
 		return err
 	}

@@ -112,6 +112,7 @@ func DeathSave(w *World, r *dice.Roller, c *Character) DeathSaveResult {
 		out.Died = true
 		out.Line = fmt.Sprintf("%s fails a third death save and dies", c.Name)
 		w.Record(ChronicleEntry{Kind: FactDeath, Source: SourceEngine, Text: fmt.Sprintf("%s died at %s", c.Name, placeName(w))})
+		mournCharacter(w, c)
 	case d.Failures >= 3:
 		d.Stable = true
 		out.Stable = true

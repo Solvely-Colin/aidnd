@@ -1875,8 +1875,24 @@ function sheetHTML(inRail) {
         return verb ? `<button class="row-line" data-send="I ${verb.toLowerCase()} the ${esc(i.name)}">${body}<span class="verb">${verb}</span></button>` : `<div class="row-line">${body}</div>`;
       }).join("") || `<span class="empty-line">Nothing.</span>`}
     </section>
+    ${consequencesHTML(c, own)}
     ${c.backstory || c.concept ? `<section><span class="mono-k">Story</span><p class="story-p">${esc(c.backstory || c.concept)}</p></section>` : ""}
     ${own ? `<section><span class="mono-k">Dice</span><button class="row-line" data-act="auto-roll"><span class="nm">${v.you?.auto_roll ? "The game rolls for you" : "You roll your own dice"}<small>${v.you?.auto_roll ? "turns resolve as soon as you send them" : "attacks and checks wait for your roll"}</small></span><span class="verb">${v.you?.auto_roll ? "Roll myself" : "Roll for me"}</span></button></section>` : ""}`;
+}
+
+// consequencesHTML is what follows a character between sessions: the
+// marks they carry and the people who hold something toward them.
+function consequencesHTML(c, own) {
+  const marks = c.marks || [], ties = c.standing || [];
+  const day = d => d ? ` · day ${d}` : "";
+  const you = own ? "you" : firstName(c.name);
+  const tieWord = t => t.kind === "grudge" ? "holds a grudge" : t.kind === "debt" ? `owes ${you}` : `${you} owe${own ? "" : "s"} them`;
+  return `${marks.length ? `<section class="marks"><span class="mono-k">Marks</span>
+      ${marks.map(m => `<div class="row-line cmark k-${esc(m.kind)}"><span class="nm">${esc(m.text)}<small>${esc(m.label.toLowerCase())}${day(m.day)}</small></span></div>`).join("")}
+    </section>` : ""}
+    ${ties.length ? `<section class="standing"><span class="mono-k">Who remembers ${own ? "you" : esc(firstName(c.name))}</span>
+      ${ties.map(t => `<div class="row-line tie k-${esc(t.kind)}${t.alive ? "" : " gone"}"><span class="nm">${esc(t.name)}${t.alive ? "" : " (dead)"}<small><em>${esc(tieWord(t))}</em> · ${esc(t.text)}${day(t.day)}</small></span></div>`).join("")}
+    </section>` : ""}`;
 }
 
 // sheetBuildHTML is the class half of a sheet: level-up picks waiting,

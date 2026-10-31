@@ -208,7 +208,7 @@ func useFeature(ctx *Ctx, c *Character, a Action, st *Step) error {
 		return fmt.Errorf("%s: %v", f.Name, err)
 	}
 	foe := func() (*Enemy, error) {
-		e, err := findFoe(w, a.Target, true)
+		e, err := findFoe(w, a.Target, c)
 		if err != nil && a.Target == "" {
 			if e = nearestFoe(w, c); e == nil {
 				return nil, fmt.Errorf("no foe to target")

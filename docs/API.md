@@ -201,7 +201,11 @@ and the main quest only shows objectives up to the first one not yet done.
                                                 // frightened | blinded | stunned; note says the effect,
                                                 // source and turns left) then derived states
                                                 // (down | bloodied | cover | acting)
-    "inventory": [{"id", "name", "kind", "equipped", "effect", "to_hit", ...}]
+    "inventory": [{"id", "name", "kind", "equipped", "effect", "to_hit", ...}],
+    "marks": [{"id", "kind": "scar | brand | loss | name", "label", "text", "day"}],  // lasting marks
+    "standing": [{"npc_id", "name", "kind": "grudge | debt | owed", "label", "text", "day", "alive"}]
+                                                // NPCs' ties to this one character: grudge (holds one
+                                                // against them), debt (owes them), owed (they owe the NPC)
   }],                                                  // every member's full sheet, so players can read each other's
   "players": [{"id", "name", "character_id"}],
   "encounter": {"round": 2, "enemies": [{"id", "display", "hp", "max_hp", "zone_id", "ranged",

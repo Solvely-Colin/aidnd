@@ -24,7 +24,7 @@ Rules:
 - 40-100 words, plain language, lead with what happened. Second person plural or character names; present tense.
 - You may change the world only through the provided directive tools; code validates them. You cannot change player HP, gold or conditions. Conditions (poisoned, prone, restrained, frightened, blinded, stunned) come only from the engine: name a threat with the hazard tool and narrate the save result it returns; describe conditions already in STATE.
 - Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.
-- WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
+- WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. Grudges and debts belong to the one character they name, and a character's MARKS show on them; when one character's deed will follow them personally, record it (npc_tie, and for a true turning point mark_character). When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
 
 const quickSystem = `You are the narrator of a tabletop game. The player took only free actions (looking, a remark, readying gear).
 Answer briefly in at most 60 words using only the facts given, as a storyteller: no game words (zone, exit, NPC, attitude, HP, budget, action, engine) and no lists of who is where; answer the question asked, not everything in the state. If what they look for is not there, say so plainly. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
@@ -91,7 +91,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	b.WriteString(dir.Note())
 	tools := directiveTools()
 	if w.InCombat() || res.CombatStarted {
-		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true, DirResolvePromise: true})
+		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true, DirResolvePromise: true, DirMarkCharacter: true, DirNPCTie: true})
 	}
 	req := llm.Request{Tag: "narrate", Temperature: 0.8, MaxTokens: 600, Tools: tools,
 		Messages: []llm.Message{llm.System(narratorSystem), llm.User(b.String())}}
@@ -543,6 +543,82 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			n.Remember(fmt.Sprintf("%s: %s", feel, trim(r, 100)))
 		}
 		return "", nil
+	case DirNPCTie:
+		var a struct {
+			NPCID  string `json:"npc_id"`
+			CharID string `json:"character_id"`
+			Kind   string `json:"kind"`
+			Reason string `json:"reason"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		n := w.NPC(a.NPCID)
+		if n == nil || !n.Alive || n.LocationID != l.ID {
+			return "", fmt.Errorf("no npc %q here", a.NPCID)
+		}
+		ch := w.Character(a.CharID)
+		if ch == nil || ch.Dead {
+			return "", fmt.Errorf("unknown character %q", a.CharID)
+		}
+		if a.Kind == "settle" {
+			if !n.Settle(ch.ID, "") {
+				return "", fmt.Errorf("%s holds nothing toward %s", n.Name, ch.Name)
+			}
+			return fmt.Sprintf("%s and %s are square", n.Name, ch.Name), nil
+		}
+		if a.Kind != game.TieGrudge && a.Kind != game.TieDebt && a.Kind != game.TieOwed {
+			return "", fmt.Errorf("kind must be grudge, debt, owed or settle")
+		}
+		reason := trim(a.Reason, 100)
+		if strings.TrimSpace(reason) == "" {
+			return "", fmt.Errorf("reason is required")
+		}
+		tc := newCanon(w, "", nil)
+		tc.lifeOnly = true
+		if is := tc.check(reason); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
+		n.Bind(w, ch, a.Kind, reason, game.SourceGM)
+		ties := n.TiesTo(ch.ID)
+		return game.TieLine(w, n, ties[len(ties)-1]), nil
+	case DirMarkCharacter:
+		var a struct {
+			CharID string `json:"character_id"`
+			Kind   string `json:"kind"`
+			Text   string `json:"text"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		ch := w.Character(a.CharID)
+		if ch == nil || ch.Dead {
+			return "", fmt.Errorf("unknown character %q", a.CharID)
+		}
+		ok := false
+		for _, k := range game.NarratorMarkKinds {
+			ok = ok || a.Kind == k
+		}
+		if !ok {
+			return "", fmt.Errorf("kind must be scar, brand or name")
+		}
+		if ch.MarksToday(w, game.SourceGM) > 0 {
+			return "", fmt.Errorf("%s was already marked today", ch.Name)
+		}
+		text := trim(a.Text, 100)
+		mc := newCanon(w, "", nil)
+		mc.lifeOnly = true
+		if is := mc.check(text); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
+		m, err := game.AddMark(w, ch, game.Mark{Kind: a.Kind, Text: text, Source: game.SourceGM})
+		if err != nil {
+			return "", err
+		}
+		if m == nil {
+			return "", fmt.Errorf("%s already carries that mark", ch.Name)
+		}
+		return fmt.Sprintf("%s is marked for good: %s", ch.Name, m.Text), nil
 	case DirNPCGivesItem:
 		var a struct {
 			NPCID  string `json:"npc_id"`
@@ -556,8 +632,12 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		if n == nil || !n.Alive || n.LocationID != l.ID {
 			return "", fmt.Errorf("no npc %q here", a.NPCID)
 		}
-		if n.Disposition < 0 {
-			return "", fmt.Errorf("%s is not friendly enough to give gifts", n.Name)
+		to := w.Character(a.To)
+		if to == nil {
+			return "", fmt.Errorf("unknown character %q", a.To)
+		}
+		if n.AttitudeTo(to) < 0 {
+			return "", fmt.Errorf("%s is not friendly enough to give %s gifts", n.Name, to.Name)
 		}
 		it := w.FindItemOf(game.OwnerNPC, n.ID, a.ItemID)
 		if it == nil || isRewardItem(w, it.ID) {
@@ -565,10 +645,6 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		}
 		if it.Value > 60 {
 			return "", fmt.Errorf("%s is too valuable to give away", it.Name)
-		}
-		to := w.Character(a.To)
-		if to == nil {
-			return "", fmt.Errorf("unknown character %q", a.To)
 		}
 		it.Owner = game.Owner{Kind: game.OwnerCharacter, ID: to.ID}
 		return fmt.Sprintf("%s gives %s to %s", n.Name, it.Name, to.Name), nil

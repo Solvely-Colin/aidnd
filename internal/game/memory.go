@@ -157,6 +157,13 @@ func settlePromise(w *World, f *ChronicleEntry, kept bool, outcome string) {
 		}
 		n.Keep(fmt.Sprintf("day %d: the party %s (%s)", w.Campaign.Scene.Day, verb, f.Text))
 		n.Disposition = clamp(n.Disposition+delta, -3, 3)
+		if !kept {
+			for _, c := range w.Party() {
+				if !c.Dead {
+					n.Bind(w, c, TieGrudge, "broke their word: "+f.Text, SourceEngine)
+				}
+			}
+		}
 	}
 }
 

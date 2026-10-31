@@ -2,10 +2,11 @@ package game
 
 import "fmt"
 
-// BuyPrice is the catalog value adjusted by disposition: 10% off per point
-// of goodwill, 10% more per point of dislike. Minimum 1.
-func BuyPrice(it *Item, n *NPC) int {
-	p := it.Value * (10 - n.Disposition) / 10
+// BuyPrice is the catalog value adjusted by how the merchant feels about
+// the buyer (c may be nil for the party as a whole): 10% off per point of
+// goodwill, 10% more per point of dislike. Minimum 1.
+func BuyPrice(it *Item, n *NPC, c *Character) int {
+	p := it.Value * (10 - n.AttitudeTo(c)) / 10
 	if p < 1 {
 		p = 1
 	}
@@ -20,7 +21,7 @@ func SellPrice(it *Item) int {
 	return max(1, it.Value/2)
 }
 
-func merchantHere(w *World, npcRef string) (*NPC, error) {
+func merchantHere(w *World, c *Character, npcRef string) (*NPC, error) {
 	n := w.NPC(npcRef)
 	if n == nil || !n.Alive || n.LocationID != w.Campaign.LocationID {
 		return nil, fmt.Errorf("no merchant %q here", npcRef)
@@ -28,7 +29,7 @@ func merchantHere(w *World, npcRef string) (*NPC, error) {
 	if !n.Merchant {
 		return nil, fmt.Errorf("%s does not trade", n.Name)
 	}
-	if n.Disposition <= -3 {
+	if n.AttitudeTo(c) <= -3 {
 		return nil, fmt.Errorf("%s refuses to deal with you", n.Name)
 	}
 	return n, nil
@@ -37,7 +38,7 @@ func merchantHere(w *World, npcRef string) (*NPC, error) {
 // Buy moves an item from a merchant's stock to the character for gold.
 // Quest reward items are not for sale.
 func Buy(w *World, c *Character, npcRef, itemRef string) (string, error) {
-	n, err := merchantHere(w, npcRef)
+	n, err := merchantHere(w, c, npcRef)
 	if err != nil {
 		return "", err
 	}
@@ -45,7 +46,7 @@ func Buy(w *World, c *Character, npcRef, itemRef string) (string, error) {
 	if it == nil || isReward(w, it.ID) || it.Kind == ItemQuest {
 		return "", fmt.Errorf("%s has no %q for sale", n.Name, itemRef)
 	}
-	price := BuyPrice(it, n)
+	price := BuyPrice(it, n, c)
 	if c.Gold < price {
 		return "", fmt.Errorf("%s costs %d gold; %s has only %d", it.Name, price, c.Name, c.Gold)
 	}
@@ -57,7 +58,7 @@ func Buy(w *World, c *Character, npcRef, itemRef string) (string, error) {
 
 // Sell moves an item from the character to a merchant for gold.
 func Sell(w *World, c *Character, npcRef, itemRef string) (string, error) {
-	n, err := merchantHere(w, npcRef)
+	n, err := merchantHere(w, c, npcRef)
 	if err != nil {
 		return "", err
 	}

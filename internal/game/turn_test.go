@@ -28,7 +28,7 @@ func TestTrade(t *testing.T) {
 	}
 	// goodwill discounts
 	f.smith.Disposition = 2
-	if p := BuyPrice(&Item{Value: 50}, f.smith); p != 40 {
+	if p := BuyPrice(&Item{Value: 50}, f.smith, nil); p != 40 {
 		t.Fatalf("price %d", p)
 	}
 	// non-merchants don't trade

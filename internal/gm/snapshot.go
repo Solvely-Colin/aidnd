@@ -263,6 +263,11 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 	var npcs []string
 	for _, n := range w.NPCsAt(l.ID) {
 		s := fmt.Sprintf("%s [%s] %s, attitude %+d, in %s", n.Name, n.ID, n.Role, n.Disposition, game.ZoneName(l, n.ZoneID))
+		if actor != nil {
+			if a := n.AttitudeTo(actor); a != n.Disposition {
+				s += fmt.Sprintf(", toward %s %+d", actor.Name, a)
+			}
+		}
 		if actor != nil && !withActor(l, actor, n) {
 			s += " (elsewhere, not in the scene)"
 		}
@@ -270,7 +275,7 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 			var stock []string
 			for _, it := range w.ItemsOf(game.OwnerNPC, n.ID) {
 				if !isRewardItem(w, it.ID) && it.Kind != game.ItemQuest {
-					stock = append(stock, fmt.Sprintf("%s [%s] %dg", it.Name, it.ID, game.BuyPrice(it, n)))
+					stock = append(stock, fmt.Sprintf("%s [%s] %dg", it.Name, it.ID, game.BuyPrice(it, n, actor)))
 				}
 			}
 			s += "; STOCK: " + orNone(stock)

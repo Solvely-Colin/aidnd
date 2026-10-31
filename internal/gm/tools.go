@@ -195,6 +195,8 @@ const (
 	DirAdjustTension  = "adjust_tension"
 	DirEndEncounter   = "end_encounter"
 	DirHazard         = "hazard"
+	DirMarkCharacter  = "mark_character"
+	DirNPCTie         = "npc_tie"
 )
 
 // progressDirectives are the only tools offered when pacing forces progress.
@@ -249,6 +251,15 @@ func directiveTools() []llm.Tool {
 			"important": boolean("true for something they will never forget: a threat, a kindness, a secret shared")}, "npc_id", "note")),
 		tool(DirAdjustDisp, "Shift an NPC's attitude by one step after how the party treated them.", obj(map[string]any{
 			"npc_id": str("npc id"), "delta": num("-1 or +1", -1, 1), "reason": str("what the party did, under 15 words")}, "npc_id", "delta", "reason")),
+		tool(DirNPCTie, "One NPC here now holds something toward ONE character, not the whole party: a grudge (they wronged, threatened, shamed or cheated them), a debt (the character saved or helped them and they owe it), owed (the character took a favor, loan or help and now owes them), or settle (an old grudge forgiven or a debt repaid). Use it when what one character did will follow them personally.", obj(map[string]any{
+			"npc_id":       str("npc id (present)"),
+			"character_id": str("character id"),
+			"kind":         enum("tie", game.TieGrudge, game.TieDebt, game.TieOwed, "settle"),
+			"reason":       str("what happened, under 12 words, e.g. \"pulled her from the harbor\"")}, "npc_id", "character_id", "kind", "reason")),
+		tool(DirMarkCharacter, "Give one character a lasting mark from something that just happened in this scene and will show for the rest of the campaign: scar (a wound that heals but shows), brand (a cult sign, a curse, a mark others can see), name (what people have started calling them after a deed). Rare: only for a turning point, never for ordinary hits.", obj(map[string]any{
+			"character_id": str("character id"),
+			"kind":         enum("mark", game.NarratorMarkKinds...),
+			"text":         str("how it shows, under 12 words, e.g. \"a ring of sucker scars around the left wrist\" or \"the Bell-ringer of Innsmouth\"")}, "character_id", "kind", "text")),
 		tool(DirNPCGivesItem, "An NPC here hands one of their own items to a character as a gift.", obj(map[string]any{
 			"npc_id": str("npc id"), "item_id": str("item id owned by that npc"), "to": str("character id")}, "npc_id", "item_id", "to")),
 		tool(DirRecordLore, "Record a fact established in play, for the party's journal and the world's memory. Use kind promise when a character gives their word to someone (a promise, a deal, a debt), deed for something the party did that people will talk about, rumor for hearsay.", obj(map[string]any{

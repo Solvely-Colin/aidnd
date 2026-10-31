@@ -175,6 +175,58 @@ type CharacterView struct {
 	Build      BuildView        `json:"build"`
 	// Strain is set in dread campaigns (see game/strain.go).
 	Strain *StrainView `json:"strain,omitempty"`
+	// Marks are lasting signs of what happened to them; Standing is who
+	// holds a grudge against them, owes them, or is owed by them.
+	Marks    []MarkView     `json:"marks"`
+	Standing []StandingView `json:"standing"`
+}
+
+// MarkView is one lasting mark on a character.
+type MarkView struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`  // scar | brand | loss | name
+	Label string `json:"label"` // "Scar", "Mark", "Loss", "Known as"
+	Text  string `json:"text"`
+	Day   int    `json:"day,omitempty"`
+}
+
+// StandingView is one NPC's tie to a character.
+type StandingView struct {
+	NPCID string `json:"npc_id"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`  // grudge | debt (they owe you) | owed (you owe them)
+	Label string `json:"label"` // "Holds a grudge", "Owes you", "You owe them"
+	Text  string `json:"text"`
+	Day   int    `json:"day,omitempty"`
+	Alive bool   `json:"alive"`
+}
+
+var markLabels = map[string]string{game.MarkScar: "Scar", game.MarkBrand: "Mark", game.MarkLoss: "Loss", game.MarkName: "Known as"}
+var tieLabels = map[string]string{game.TieGrudge: "Holds a grudge", game.TieDebt: "Owes you", game.TieOwed: "You owe them"}
+
+func marksView(c *game.Character) []MarkView {
+	out := []MarkView{}
+	for _, m := range c.Marks {
+		out = append(out, MarkView{ID: m.ID, Kind: m.Kind, Label: markLabels[m.Kind], Text: m.Text, Day: m.Day})
+	}
+	return out
+}
+
+// standingView lists NPC ties to c, the living first, newest first.
+func standingView(w *game.World, c *game.Character) []StandingView {
+	out := []StandingView{}
+	for _, n := range w.NPCs {
+		for _, t := range n.TiesTo(c.ID) {
+			out = append(out, StandingView{NPCID: n.ID, Name: n.Name, Kind: t.Kind, Label: tieLabels[t.Kind], Text: t.Text, Day: t.Day, Alive: n.Alive})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Alive != out[j].Alive {
+			return out[i].Alive
+		}
+		return out[i].Day > out[j].Day
+	})
+	return out
 }
 
 // StrainView is a character's mental strain and the scars it left.
@@ -443,7 +495,7 @@ func itemView(w *game.World, it *game.Item, c *game.Character, n *game.NPC) Item
 		v.ToHit = &hit
 	}
 	if n != nil {
-		v.Price = game.BuyPrice(it, n)
+		v.Price = game.BuyPrice(it, n, c)
 	}
 	return v
 }
@@ -453,7 +505,7 @@ func characterView(w *game.World, c *game.Character) CharacterView {
 		Scores: c.Scores, Modifiers: map[string]int{}, Proficient: c.Proficient, ProfBonus: game.ProficiencyBonus(c.Level),
 		Level: c.Level, XP: c.XP, HP: c.HP, MaxHP: c.MaxHP, Down: c.Down(), AC: game.ArmorClass(w, c), Gold: c.Gold, ZoneID: c.ZoneID,
 		LevelXP: game.XPTable[max(c.Level, 1)-1], ACParts: game.ArmorClassParts(w, c), Conditions: conditions(w, c), Inventory: []ItemView{},
-		Strain: strainView(w, c)}
+		Strain: strainView(w, c), Marks: marksView(c), Standing: standingView(w, c)}
 	if c.Level < game.MaxLevel {
 		v.NextLevel = game.XPTable[c.Level]
 		v.LevelUp = &LevelUpView{Level: c.Level + 1, HP: game.HPPerLevel(c), ProfBonus: game.ProficiencyBonus(c.Level + 1)}
@@ -779,7 +831,9 @@ type NPCView struct {
 	Stock        []ItemView `json:"stock,omitempty"`
 }
 
-func npcView(w *game.World, n *game.NPC) (NPCView, bool) {
+// npcView shows an NPC; prices are what they would charge viewer (nil for
+// a spectator).
+func npcView(w *game.World, n *game.NPC, viewer *game.Character) (NPCView, bool) {
 	l := w.Location(n.LocationID)
 	if l == nil || !l.Visited || n.Antagonist && n.LocationID != w.Campaign.LocationID {
 		return NPCView{}, false
@@ -788,7 +842,7 @@ func npcView(w *game.World, n *game.NPC) (NPCView, bool) {
 	if n.Merchant {
 		for _, it := range w.ItemsOf(game.OwnerNPC, n.ID) {
 			if !rewardItem(w, it.ID) {
-				v.Stock = append(v.Stock, itemView(w, it, nil, n))
+				v.Stock = append(v.Stock, itemView(w, it, viewer, n))
 			}
 		}
 	}
@@ -856,7 +910,7 @@ func journalPeople(w *game.World) []JournalPerson {
 	}
 	out := []JournalPerson{}
 	for _, n := range w.NPCs {
-		v, ok := npcView(w, n)
+		v, ok := npcView(w, n, nil)
 		if !ok {
 			continue
 		}
