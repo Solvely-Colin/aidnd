@@ -467,6 +467,12 @@ func checkSheets(t *testing.T, v map[string]any) {
 		if weapons == 0 {
 			t.Errorf("%s: no weapons carried", c["name"])
 		}
+		if _, ok := c["marks"].([]any); !ok {
+			t.Errorf("%s: marks %v", c["name"], c["marks"])
+		}
+		if _, ok := c["standing"].([]any); !ok {
+			t.Errorf("%s: standing %v", c["name"], c["standing"])
+		}
 	}
 }
 

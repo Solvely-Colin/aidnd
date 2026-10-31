@@ -255,6 +255,10 @@ func TurnInQuest(w *World, questID string, c *Character) ([]QuestUpdate, []strin
 	q.Status = QuestTurnedIn
 	keepQuestPromise(w, q)
 	g.Keep(fmt.Sprintf("day %d: %s completed %q for me", w.Campaign.Scene.Day, c.Name, q.Title))
+	if c != nil {
+		g.Settle(c.ID, TieOwed)
+		g.Bind(w, c, TieDebt, "finished "+q.Title+" for them", SourceEngine)
+	}
 	if g.Disposition < 3 {
 		g.Disposition++
 	}

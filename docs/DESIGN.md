@@ -334,3 +334,13 @@ Players may kill anyone, the saga's protected people included, but the story mus
 - A side quest still on offer from a dead giver is withdrawn (failed).
 - A quest whose giver is dead pays out as soon as it is done, reward items included (taken from where they fell). One already done and waiting for turn-in pays out at once.
 - "Talk to X" with X dead becomes "Search what X left behind": reach the place they died. "Deliver the item to X" becomes "Recover the item".
+
+## Consequences that follow characters (2026-10-31)
+
+World memory is party-wide; this adds what follows one character. Both live in JSON columns (`CharExtra.Marks`, `NPCExtra.Ties`), so there is no schema change. See `game/marks.go`.
+
+- **Marks** (`scar`, `brand`, `loss`, `name`) are lasting signs on a character, at most 12. The engine writes a scar when a character is struck down in a fight (one a day, naming the foe and place) and a loss for every living companion when a character dies. The narrator may add a scar, brand or name with `mark_character` (one a day per character, canon-checked); losses are engine-only because they need a real death.
+- **Ties** are what one NPC holds toward one character: `grudge`, `debt` (the NPC owes them) or `owed` (they owe the NPC). The engine binds a grudge when a character attacks an NPC and a debt when a character turns in a quest (clearing anything they owed the giver); a broken promise gives every living party member a grudge from the people it was made to. The narrator adds or settles ties with `npc_tie` (canon-checked reason).
+- **They change play:** `NPC.AttitudeTo(c)` is the party disposition, one worse per grudge and one better per debt. It sets that character's prices, whether a merchant refuses them, whether an NPC hands them a quest item, and whether an NPC will gift them something. Another character can still trade with a merchant who won't serve the one they hold a grudge against.
+- **The narrator sees them:** WORLD MEMORY lists the grudges and debts of the people in the scene and the marks of the party there; the snapshot shows an NPC's attitude toward the actor when it differs; talking to someone puts their ties to the speaker in the info lines.
+- **The sheet shows them:** "Marks" and "Who remembers you" sections on the character sheet.

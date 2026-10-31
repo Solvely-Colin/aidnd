@@ -785,6 +785,15 @@ details.feat p { margin: 0 0 12px; font-size: 14px; color: var(--ink2); line-hei
 .strain-track i { display: block; height: 5px; border-radius: 3px; background: var(--bg3); }
 .strain-track i.on { background: var(--ink); }
 .strain-track i.on.hi { background: var(--bad); }
+.cmark { border-left: 3px solid var(--line2); padding-left: 10px; }
+.cmark.k-brand { border-left-color: var(--acc); }
+.cmark.k-loss { border-left-color: var(--ink3); }
+.cmark.k-loss .nm { font-style: italic; }
+.cmark.k-scar { border-left-color: var(--bad); }
+.tie small em { font-style: normal; color: var(--ink2); }
+.tie.k-grudge small em { color: var(--bad); }
+.tie.k-debt small em { color: var(--acc); }
+.tie.gone { opacity: .55; }
 .scars { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .scars div { display: flex; flex-direction: column; font-size: 13px; color: var(--ink2); }
 .scars b { color: var(--ink); font-weight: 600; }

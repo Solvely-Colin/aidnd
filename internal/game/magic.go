@@ -219,7 +219,7 @@ func planSpell(w *World, c *Character, s *SpellDef, a Action) (spellPlan, error)
 	case s.Area:
 		if l != nil && a.Zone != "" && l.Zone(a.Zone) != nil {
 			p.zone = l.Zone(a.Zone).ID
-		} else if e, err := findFoe(w, a.Target, false); err == nil {
+		} else if e, err := findFoe(w, a.Target, nil); err == nil {
 			p.zone = e.ZoneID
 		} else if e := nearestFoe(w, c); e != nil {
 			p.zone = e.ZoneID
@@ -232,7 +232,7 @@ func planSpell(w *World, c *Character, s *SpellDef, a Action) (spellPlan, error)
 		}
 		return p, nil
 	case s.Kind == SpellAttack, s.Kind == SpellSave, s.Key == "hunters_mark", s.Key == "hex", s.Key == "magic_missile", s.Key == "scorching_ray", s.Key == "spiritual_weapon":
-		e, err := findFoe(w, a.Target, true)
+		e, err := findFoe(w, a.Target, c)
 		if err != nil && a.Target == "" {
 			e = nearestFoe(w, c)
 			if e == nil {
@@ -250,7 +250,7 @@ func planSpell(w *World, c *Character, s *SpellDef, a Action) (spellPlan, error)
 		p.enemy = e
 		return p, nil
 	case s.Key == "dispel_magic" && a.Target != "" && w.Character(a.Target) == nil:
-		e, err := findFoe(w, a.Target, false)
+		e, err := findFoe(w, a.Target, nil)
 		if err != nil {
 			return p, err
 		}

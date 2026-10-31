@@ -696,7 +696,7 @@ func (s *Server) handleNPC(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	v, ok := npcView(wld, n)
+	v, ok := npcView(wld, n, wld.CharacterOf(whoFrom(r).PlayerID))
 	if !ok {
 		s.fail(w, store.ErrNotFound)
 		return
