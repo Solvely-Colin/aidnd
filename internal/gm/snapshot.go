@@ -347,6 +347,9 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 		}
 		line("THE WORLD: week %d. The Tide is %d/100 (%s): %s.%s", lv.Week, lv.Tide, game.TideBand(lv.Tide), mood, gz)
 	}
+	if ev := game.CurrentEvent(w); ev != nil {
+		line("%s", eventLine(w, ev))
+	}
 	if other := w.Elsewhere(); len(other) > 0 {
 		line("OTHER PLAYER CHARACTERS IN THE WORLD (separate groups; they act on their own turns, so never narrate them acting): %s", strings.Join(other, "; "))
 	}
@@ -505,4 +508,33 @@ func eventLines(evs []store.Event, w *game.World) []string {
 		}
 	}
 	return out
+}
+
+// eventLine tells the narrator about the world event that is open: why it
+// is happening (engine threads only) and whether this scene is it.
+func eventLine(w *game.World, ev *game.WorldEvent) string {
+	site := ev.SiteID
+	if l := w.Location(ev.SiteID); l != nil {
+		site = l.Name
+	}
+	var why []string
+	for _, t := range ev.Threads {
+		if len(why) < 6 {
+			why = append(why, t.Text)
+		}
+	}
+	if ev.Status == game.EventEngaged && w.Encounter != nil && w.Encounter.ID == ev.EncounterID {
+		var allies []string
+		for _, id := range ev.Allies {
+			if n := w.NPC(id); n != nil && n.Alive && n.LocationID == w.Campaign.LocationID {
+				allies = append(allies, n.Name)
+			}
+		}
+		return fmt.Sprintf("WORLD EVENT, HAPPENING NOW: this fight is %q, the moment the players' own choices led to. Why it came to this: %s People here because of those choices: %s. Make the stakes felt and name these threads as they pay off; the engine decides how it ends.",
+			ev.Title, strings.Join(why, " "), orNone(allies))
+	}
+	if w.Campaign.LocationID == ev.SiteID {
+		return fmt.Sprintf("WORLD EVENT CALLED: %q is about to break here at %s. Why: %s Build the dread of it gathering; it begins when the players start it or the others arrive, not before.", ev.Title, site, strings.Join(why, " "))
+	}
+	return fmt.Sprintf("WORLD EVENT CALLED: %q at %s; everyone is needed there within two days. Why: %s The players choose whether to go (they answer the call themselves); never move them there or play it out here.", ev.Title, site, strings.Join(why, " "))
 }

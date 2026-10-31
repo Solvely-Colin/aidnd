@@ -386,7 +386,7 @@ function restartFeed() {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done", "world_event"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
@@ -1021,7 +1021,7 @@ function renderFeed(force) {
   const pend = pendingHTML();
   if (!pend && items.at(-1)?.k === "turn" && items.at(-1).you) items.pop();
   const lastNarr = items.map(it => it.k === "narr").lastIndexOf(true);
-  feed.innerHTML = items.map((it, i) => itemHTML(it, i === lastNarr)).join("") + dispatchHTML() + pend + suggestHTML();
+  feed.innerHTML = items.map((it, i) => itemHTML(it, i === lastNarr)).join("") + dispatchHTML() + callHTML() + pend + suggestHTML();
   if (force || stick) requestAnimationFrame(toBottom);
 }
 
@@ -1059,6 +1059,10 @@ function feedItems(evs) {
     switch (e.type) {
       case "location_changed": out.push({ k: "place", name: d.name }); break;
       case "downtime_done": out.push({ k: "sys", text: d.text + (d.roll ? ` (rolled ${d.roll.total} against ${d.roll.target})` : "") }); break;
+      case "world_event":
+        if (d.phase === "answered") out.push({ k: "sys", text: `${isMe(d.character_id) ? "You answer" : `${d.character} answers`} the call: ${d.title}.` });
+        else out.push({ k: "wevent", ...d });
+        break;
       case "world_tick": {
         // days in a row with nothing between them show only the latest paper
         const it = { k: "gazette", g: d.gazette, tide: d.tide, band: d.band };
@@ -1185,6 +1189,7 @@ function itemHTML(it, latest) {
     case "quest": return `<div class="ev-quest"><b>${esc(it.label)}</b><span>${esc(it.text)}</span></div>`;
     case "warn": return `<div class="ev-warn ${it.hit ? "hit" : ""}"><b>${it.hit ? "Signature move" : "Incoming"}</b><span>${esc(it.text)}</span></div>`;
     case "dm": return `<div class="ev-dm"><b>Table</b><span>${esc(it.text)}</span></div>`;
+    case "wevent": return weventHTML(it);
   }
   return "";
 }
@@ -1261,6 +1266,54 @@ function dispatchHTML() {
     ${groups.map(g => `<div class="dp-group"><p class="dp-h">${esc(DISPATCH_HEADS[g.kind] || "")}</p>
       <ul>${g.lines.map(l => `<li>${esc(l.text)}${l.where ? ` <span class="dp-where">Now at ${esc(l.where)}</span>` : ""}</li>`).join("")}</ul></div>`).join("")}
     <button class="btn dp-ok" data-act="seen">Back to it</button>
+  </section>`;
+}
+
+// World events: the engine calls everyone to one place when what the
+// players did meets what a faction has been building. weventHTML is the
+// story's record of one; callHTML is the standing call at the foot of the
+// story while it is open; eventPanel is the full card in the World tab.
+const THREAD_HEADS = { ally: "Comes to help", debt: "A debt comes due", grudge: "Grudges", goal: "At stake", crossed: "What you did", brand: "Marked", pressure: "Unchecked", agenda: "Their plans" };
+function weventHTML(it) {
+  if (it.phase === "called") return `<section class="wev ev-wev"><span class="mono-k">The world calls</span><b class="wev-t">${esc(it.title)}</b><p>${esc(it.call)}</p></section>`;
+  const head = it.phase === "begun" ? "It begins" : it.won ? "Won, for good" : "Lost, for good";
+  return `<section class="wev ev-wev ${it.phase === "settled" ? (it.won ? "won" : "lost") : ""}"><span class="mono-k">${head}</span><b class="wev-t">${esc(it.title)}</b>
+    <ul>${(it.changes || []).map(c => `<li>${esc(c)}</li>`).join("")}</ul></section>`;
+}
+function eventButtons(ev) {
+  if (ev.can_answer) return `<button class="btn" data-act="answer">Answer the call · go to ${esc(ev.site)}</button>`;
+  if (ev.can_begin) return `<button class="btn" data-act="begin">Start it now</button><span class="wev-wait">or wait for the others</span>`;
+  return "";
+}
+function comingHTML(ev) {
+  return `<p class="wev-coming">${ev.coming.map(m => `<span class="${m.came ? "came" : ""}">${esc(m.name)}${m.came ? " · there" : ""}</span>`).join("")}</p>`;
+}
+function callHTML() {
+  const ev = S.view?.world?.event;
+  if (!ev || S.view.status !== "active" || ev.status !== "gathering") return "";
+  const mine = ev.threads.filter(t => t.mine);
+  return `<section class="wev call" aria-label="The world calls">
+    <header><span class="mono-k">The world calls · ${untilText(ev.deadline)} left</span>${ev.here ? `<span class="wev-here">You are here</span>` : ""}</header>
+    <b class="wev-t">${esc(ev.title)}</b>
+    <p>${esc(ev.call)}</p>
+    ${mine.length ? `<ul>${mine.map(t => `<li>${esc(t.text)}</li>`).join("")}</ul>` : ""}
+    ${comingHTML(ev)}
+    <div class="wev-acts">${eventButtons(ev)}</div>
+  </section>`;
+}
+function eventPanel(ev) {
+  const groups = [];
+  for (const t of ev.threads) {
+    const g = groups.find(x => x.kind === t.kind);
+    if (g) g.lines.push(t); else groups.push({ kind: t.kind, lines: [t] });
+  }
+  const when = ev.status === "engaged" ? "Being fought now" : `${untilText(ev.deadline)} left to get there`;
+  return `<section class="wev wev-panel"><span class="mono-k">World event · ${esc(when)}</span>
+    <b class="wev-t">${esc(ev.title)}</b><p>${esc(ev.call)}</p>
+    <p class="dp-h">Why it came to this</p>
+    ${groups.map(g => `<div class="dp-group"><p class="dp-h">${esc(THREAD_HEADS[g.kind] || g.kind)}</p><ul>${g.lines.map(t => `<li class="${t.mine ? "mine" : ""}">${esc(t.text)}</li>`).join("")}</ul></div>`).join("")}
+    ${comingHTML(ev)}
+    <div class="wev-acts">${ev.status === "gathering" ? eventButtons(ev) : ""}</div>
   </section>`;
 }
 
@@ -2080,8 +2133,10 @@ function worldTab() {
   return `<div class="world-now"><span class="mono-k">Week ${wv.week} · ${esc(wv.date)}</span>
       ${tideHTML(wv)}
     </div>
+    ${wv.event ? eventPanel(wv.event) : ""}
     ${wv.gazette ? gazetteHTML(wv.gazette, wv.date) : none("The first paper comes out after the world's next turn, each morning.")}
-    <span class="hint-line">The world takes a turn every morning, even when nobody plays: the week moves on, the factions push their plans and the Tide rises. Finishing quests holds it back.</span>`;
+    <span class="hint-line">The world takes a turn every morning, even when nobody plays: the week moves on, the factions push their plans and the Tide rises. Finishing quests holds it back. When what you have done collides with what a faction is building, everyone is called to one place, and what happens there lasts.</span>
+    ${wv.past_events?.length ? `<div class="dp-group"><p class="dp-h">Turning points</p><ul>${wv.past_events.map(e => `<li><b>${esc(e.title)}</b> · week ${e.week} · ${e.won ? "won" : "lost"}. ${esc(e.outcome)}</li>`).join("")}</ul></div>` : ""}`;
 }
 
 function tideHTML(wv) {
@@ -2308,6 +2363,8 @@ document.addEventListener("click", async e => {
     switch (act) {
       case "solo": return groupMove("solo", {}, t);
       case "seen": return groupMove("seen", {}, t);
+      case "answer": return groupMove("answer", {}, t);
+      case "begin": return groupMove("begin", {}, t);
       case "signout": await fetch("/auth/logout", { method: "POST" }); S.me = null; leaveCampaign(); S.route = ""; location.hash = ""; return renderSignin();
       case "home": return go("#/");
       case "create": return createCampaign();

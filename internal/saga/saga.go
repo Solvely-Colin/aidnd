@@ -85,7 +85,9 @@ type AgendaStep struct {
 func atMost(d int) *int { return &d }
 
 // Faction is a group with an agenda clock (see game.Faction). FullDanger
-// names places by name; FromWeek delays its first move.
+// names places by name; FromWeek delays its first move. Foe, Champion and
+// Call shape a world event about it (see game.WorldEvent); a faction
+// without a Foe never brings one.
 type Faction struct {
 	Key, Name, Clock string
 	Threat           bool
@@ -94,6 +96,11 @@ type Faction struct {
 	Moves            []string
 	Full             string
 	FullDanger       map[string]int
+	Foe              string
+	FoeHorror        int
+	Champion         string
+	ChampionHorror   int
+	Call             string
 }
 
 // Place is a location. From names the place it connects to (the region's
@@ -628,6 +635,33 @@ func EnsureLiving(w *game.World) bool {
 	return true
 }
 
+// eventLook copies what a faction's world event looks like.
+func eventLook(gf *game.Faction, f Faction) {
+	gf.Foe, gf.FoeHorror, gf.Champion, gf.ChampionHorror, gf.Call = f.Foe, f.FoeHorror, f.Champion, f.ChampionHorror, f.Call
+}
+
+// EnsureEventLooks gives factions placed before world events existed
+// their foes and calls. It reports whether it changed anything.
+func EnsureEventLooks(w *game.World) bool {
+	s := Get(w.Campaign.Saga)
+	lv := w.Campaign.Living
+	if s == nil || lv == nil {
+		return false
+	}
+	changed := false
+	for i := range s.Regions {
+		for _, f := range s.Regions[i].Factions {
+			gf := lv.Faction(f.Key)
+			if gf == nil || gf.Foe == f.Foe && gf.Call == f.Call && gf.Champion == f.Champion {
+				continue
+			}
+			eventLook(gf, f)
+			changed = true
+		}
+	}
+	return changed
+}
+
 // EnsureAgendas gives a living world the agendas of the regions already
 // built that it doesn't have yet (worlds made before agendas existed). It
 // reports whether it changed anything.
@@ -715,6 +749,7 @@ func makeAgenda(w *game.World, r *Region, a Agenda, storyline *game.Quest) (*gam
 func makeFaction(w *game.World, r *Region, f Faction, storyline *game.Quest) (*game.Faction, error) {
 	gf := &game.Faction{Key: f.Key, Name: f.Name, Threat: f.Threat, Region: r.Key, Clock: f.Clock,
 		Steps: f.Steps, FromWeek: f.FromWeek, Moves: f.Moves, Full: f.Full}
+	eventLook(gf, f)
 	if gf.Steps < 2 {
 		return nil, fmt.Errorf("faction %q needs at least 2 steps", f.Name)
 	}

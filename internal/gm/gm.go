@@ -125,10 +125,11 @@ func (g *GM) lock(id string) func() {
 
 // commit saves the world with events and publishes them.
 func (g *GM) commit(ctx context.Context, w *game.World, evs ...store.Event) ([]store.Event, error) {
+	evs = append(evs, eventEvents(w)...)
 	if party := w.Focused(); party != "" {
 		for i := range evs {
 			// the shared story is everyone's news
-			if t := evs[i].Type; t != "quest_updated" && t != "campaign_ended" {
+			if t := evs[i].Type; t != "quest_updated" && t != "campaign_ended" && t != "world_event" {
 				evs[i] = tagParty(evs[i], party)
 			}
 		}

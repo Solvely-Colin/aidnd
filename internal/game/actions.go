@@ -1123,6 +1123,10 @@ func endEncounter(w *World) []string {
 	}
 	changes := append([]string{"The fight is won"}, StabilizeDying(w)...)
 	changes = append(changes, rollLoot(w)...)
+	encID := ""
+	if w.Encounter != nil {
+		encID = w.Encounter.ID
+	}
 	w.Encounter = nil
 	ClearFightConditions(w)
 	for _, c := range w.Characters {
@@ -1130,6 +1134,10 @@ func endEncounter(w *World) []string {
 	}
 	AdjustTension(w, -2)
 	w.Campaign.Turns.Budget.Free = Unlimited
+	if res := eventFightWon(w, encID); res != nil {
+		changes = append(changes, res.Changes...)
+		w.eventDone = append(w.eventDone, res)
+	}
 	return changes
 }
 

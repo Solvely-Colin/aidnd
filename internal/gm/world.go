@@ -27,6 +27,7 @@ func (g *GM) worldTicks(ctx context.Context, campaignID string) (int, error) {
 	}
 	changed := saga.EnsureLiving(w)
 	changed = saga.EnsureAgendas(w) || changed
+	changed = saga.EnsureEventLooks(w) || changed
 	lv := w.Campaign.Living
 	if lv == nil {
 		return 0, nil
@@ -62,6 +63,9 @@ func (g *GM) worldTicks(ctx context.Context, campaignID string) (int, error) {
 		evs = append(evs, store.NewEvent("world_tick", "", map[string]any{
 			"week": rep.Week, "tide": rep.Tide, "tide_from": rep.TideFrom, "band": game.TideBand(rep.Tide), "idle": rep.Idle, "gazette": gz,
 			"people": len(rep.People)}))
+		if e := game.MaybeCallEvent(w, now); e != nil {
+			evs = append(evs, eventCalled(w, e))
+		}
 	}
 	if _, err := g.commit(ctx, w, evs...); err != nil {
 		return 0, err

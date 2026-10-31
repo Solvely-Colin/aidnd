@@ -89,6 +89,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/me/solo", s.auth(s.handleSolo))
 	mux.HandleFunc("POST /campaigns/{id}/me/goals", s.auth(s.handleGoal))
 	mux.HandleFunc("POST /campaigns/{id}/me/join", s.auth(s.handleJoinGroup))
+	mux.HandleFunc("POST /campaigns/{id}/me/answer", s.auth(s.handleAnswer))
+	mux.HandleFunc("POST /campaigns/{id}/me/begin", s.auth(s.handleBegin))
 	mux.HandleFunc("POST /campaigns/{id}/roll", s.auth(s.handleRoll))
 	mux.HandleFunc("POST /campaigns/{id}/roll/cancel", s.auth(s.handleCancelRoll))
 	mux.HandleFunc("POST /campaigns/{id}/me/dice", s.auth(s.handleDice))
@@ -894,6 +896,36 @@ func (s *Server) handleSolo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wld, err := s.gm.GoSolo(r.Context(), r.PathValue("id"), p)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
+// handleAnswer answers a world event's call: the player's group goes to
+// its site and joins whoever is there.
+func (s *Server) handleAnswer(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	wld, err := s.gm.AnswerEvent(r.Context(), r.PathValue("id"), p)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
+// handleBegin starts a world event's confrontation now, for a player at
+// its site.
+func (s *Server) handleBegin(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	wld, err := s.gm.BeginEventNow(r.Context(), r.PathValue("id"), p)
 	if err != nil {
 		s.fail(w, err)
 		return

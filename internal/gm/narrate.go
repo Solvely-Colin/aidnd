@@ -777,6 +777,9 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 				return "", fmt.Errorf("the antagonist does not flee")
 			}
 		}
+		if ev := game.CurrentEvent(w); ev != nil && ev.EncounterID == w.Encounter.ID {
+			return "", fmt.Errorf("this fight decides %s; it ends only when it is won or lost", ev.Title)
+		}
 		w.Encounter = nil
 		w.Campaign.Turns.Budget.Free = game.Unlimited
 		game.AdjustTension(w, -1)

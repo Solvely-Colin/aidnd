@@ -430,6 +430,83 @@ type WorldView struct {
 	Gazette *game.Gazette `json:"gazette,omitempty"`
 	// Downtime lists the orders a character can queue at a safe place.
 	Downtime []DowntimeKind `json:"downtime"`
+	// Event is the world event now calling everyone, if any; Past are the
+	// ones settled, newest first.
+	Event *EventView      `json:"event,omitempty"`
+	Past  []PastEventView `json:"past_events,omitempty"`
+}
+
+// EventView is a world event as a player sees it.
+type EventView struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Call     string `json:"call"`
+	Faction  string `json:"faction"`
+	Site     string `json:"site"`
+	SiteID   string `json:"site_id"`
+	Deadline int64  `json:"deadline"`
+	Status   string `json:"status"`
+	// Threads are why it is happening; Mine marks the caller's own.
+	Threads []EventThreadView `json:"threads"`
+	// Coming lists everyone called and whether they have come.
+	Coming []EventMemberView `json:"coming"`
+	// Here is set when the caller stands at the site; CanAnswer when they
+	// can go there now; CanBegin when they can start it without waiting.
+	Here      bool `json:"here"`
+	CanAnswer bool `json:"can_answer"`
+	CanBegin  bool `json:"can_begin"`
+}
+
+// EventThreadView is one reason for a world event.
+type EventThreadView struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+	Mine bool   `json:"mine,omitempty"`
+}
+
+// EventMemberView is one character called to a world event.
+type EventMemberView struct {
+	CharacterID string `json:"character_id"`
+	Name        string `json:"name"`
+	Came        bool   `json:"came"`
+}
+
+// PastEventView is a settled world event.
+type PastEventView struct {
+	Title   string `json:"title"`
+	Week    int    `json:"week"`
+	Won     bool   `json:"won"`
+	Outcome string `json:"outcome"`
+}
+
+func eventView(w *game.World, playerID string) *EventView {
+	e := game.CurrentEvent(w)
+	if e == nil {
+		return nil
+	}
+	v := &EventView{ID: e.ID, Title: e.Title, Call: e.Call, Faction: e.Faction, SiteID: e.SiteID, Deadline: e.Deadline, Status: e.Status,
+		Threads: []EventThreadView{}, Coming: []EventMemberView{}}
+	if f := w.Campaign.Living.Faction(e.Faction); f != nil {
+		v.Faction = f.Name
+	}
+	if l := w.Location(e.SiteID); l != nil {
+		v.Site = l.Name
+	}
+	me := w.CharacterOf(playerID)
+	for _, t := range e.Threads {
+		v.Threads = append(v.Threads, EventThreadView{Kind: t.Kind, Text: t.Text, Mine: me != nil && t.CharID == me.ID})
+	}
+	for _, id := range e.Summoned {
+		if c := w.Character(id); c != nil && !c.Dead {
+			v.Coming = append(v.Coming, EventMemberView{CharacterID: c.ID, Name: c.Name, Came: e.Came(c.ID)})
+		}
+	}
+	if me != nil && !me.Dead {
+		v.Here = w.Campaign.LocationID == e.SiteID
+		v.CanAnswer = !v.Here && !w.InCombat()
+		v.CanBegin = v.Here && e.Status == game.EventGathering && !w.InCombat()
+	}
+	return v
 }
 
 // DowntimeKind is one downtime order.
@@ -451,6 +528,10 @@ func worldView(w *game.World) *WorldView {
 	v := &WorldView{Week: lv.Week, Date: d.Format("January 2, 2006"), Tide: lv.Tide, Band: game.TideBand(lv.Tide), Gazette: lv.Gazette}
 	for _, k := range game.DowntimeKinds {
 		v.Downtime = append(v.Downtime, DowntimeKind{Key: k.Key, Name: k.Name, Desc: k.Desc})
+	}
+	for i := len(lv.Past) - 1; i >= 0; i-- {
+		e := lv.Past[i]
+		v.Past = append(v.Past, PastEventView{Title: e.Title, Week: e.Settled, Won: e.Status == game.EventWon, Outcome: e.Outcome})
 	}
 	return v
 }
@@ -765,6 +846,9 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	v.Groups = groupsView(w, v.Group)
 	v.Deadline = turnDeadline(w)
 	v.World = worldView(w)
+	if v.World != nil {
+		v.World.Event = eventView(w, playerID)
+	}
 	v.Dispatch = game.BuildDispatch(w, playerID)
 	v.Saga, v.Dread = c.Saga, c.Dread
 	if mq := w.MainQuest(); mq != nil {
