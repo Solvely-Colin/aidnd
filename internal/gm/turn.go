@@ -254,6 +254,10 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": append(res.Rolls(), nar.Rolls...), "world_changes": out.WorldChanges, "canon_fixes": issueTexts(nar.Canon)}),
 		store.NewEvent("narration", "", map[string]any{"text": nar.Text, "quick": quick, "skipped": res.Skipped, "character_id": actor.ID}),
 	}
+	if !quick {
+		// strain may show one character something the others don't see
+		evs = append(evs, g.vision(ctx, w)...)
+	}
 	quests := append([]game.QuestUpdate{}, res.Quests...)
 	// 5. judge freeform objectives
 	if !quick && w.Campaign.Status == game.StatusActive && (w.Campaign.Turn+1)%g.Cfg.ObjectiveCheckEvery == 0 {

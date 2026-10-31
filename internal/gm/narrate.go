@@ -57,7 +57,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	if quick {
 		req := llm.Request{Tag: "narrate_quick", Temperature: 0.6, MaxTokens: 200, Messages: []llm.Message{
 			llm.System(quickSystem),
-			llm.User(fmt.Sprintf("%s%s\nPLAYER (%s): %s\n\nWHAT HAPPENED:\n%s", snapshot(w, actor, false), worldMemory(w, actor), actor.Name, text, happened)),
+			llm.User(fmt.Sprintf("%s%s%s\nPLAYER (%s): %s\n\nWHAT HAPPENED:\n%s", snapshot(w, actor, false), worldMemory(w, actor), unrealBlock(w), actor.Name, text, happened)),
 		}}
 		resp, err := g.LLM.Chat(ctx, req)
 		if err == nil {
@@ -83,6 +83,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	b.WriteString("\nSTATE:\n")
 	b.WriteString(snapshot(w, actor, true))
 	b.WriteString(worldMemory(w, actor))
+	b.WriteString(unrealBlock(w))
 	if len(recent) > 0 {
 		fmt.Fprintf(&b, "\nRECENT LOG:\n%s\n", strings.Join(recent, "\n"))
 	}
@@ -354,6 +355,9 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			a.Enemies = a.Enemies[:3]
 		}
 		for i := range a.Enemies {
+			if p := phantomOf(w, a.Enemies[i].Name); p != "" {
+				return "", fmt.Errorf("there is no %s; a character under strain only imagined it", p)
+			}
 			// the narrator can't turn the antagonist or a saga's protected
 			// people into foes; players can still pick that fight
 			if n := w.NPC(a.Enemies[i].NPCID); n == nil || n.LocationID != l.ID || n.Antagonist || n.Protected {

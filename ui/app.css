@@ -356,6 +356,10 @@ img.gen.on { opacity: 1; }
 .ev-act.you .face { border-color: var(--acc); }
 .ev-act p { margin: 0; font-size: 16.5px; line-height: 1.45; font-style: italic; color: var(--ink2); overflow-wrap: anywhere; }
 .ev-act p b { font-style: normal; font-weight: 700; color: var(--ink); }
+/* a private perception: set apart from the shared story, for one reader */
+.ev-vision { margin: 0 0 0 20px; padding: 2px 0 2px 16px; border-left: 2px dashed var(--ink3); display: flex; flex-direction: column; gap: 6px; }
+.ev-vision .mono-k { color: var(--ink3); }
+.ev-vision p { margin: 0; font-size: 17px; line-height: 1.7; font-style: italic; color: var(--ink2); }
 .ev-narr { display: flex; flex-direction: column; gap: 14px; color: var(--ink2); }
 .ev-narr.latest { color: var(--ink); }
 .ev-narr p { margin: 0; font-size: 18.5px; line-height: 1.75; text-wrap: pretty; }

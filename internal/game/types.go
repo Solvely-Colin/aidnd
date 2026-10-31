@@ -142,6 +142,9 @@ type CharExtra struct {
 	Strain int      `json:"strain,omitempty"`
 	Scars  []string `json:"scars,omitempty"`
 	Faced  []string `json:"faced,omitempty"`
+	// Visions are what strain has shown this character alone, true or
+	// not (see visions.go). Never sent to players with Real.
+	Visions []Vision `json:"visions,omitempty"`
 
 	// Group is the split-off group the character travels with ("" for
 	// the main one; see groups.go).

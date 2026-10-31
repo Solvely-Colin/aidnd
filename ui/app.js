@@ -1118,6 +1118,9 @@ function feedItems(evs) {
         });
         if (d.narration) out.push({ k: "narr", text: d.narration });
         break;
+      // a private perception from strain: the server sends it only to the
+      // player it happened to, and never says whether it was real
+      case "vision": if (d.text) out.push({ k: "vision", text: d.text }); break;
       case "conditions": (d.changes || []).forEach(t => out.push({ k: "sys", cond: true, text: t })); break;
       case "rewound": out.push({ k: "place", name: "Rewound" }); out.push({ k: "sys", text: d.text }); break;
       case "dm_action": out.push({ k: "dm", text: d.text }); break;
@@ -1176,6 +1179,7 @@ function itemHTML(it, latest) {
     case "turn": return `<div class="ev-turn ${it.you ? "you" : ""}">· ${it.you ? "Your turn" : `${esc(it.name)}’s turn`} ·</div>`;
     case "act": return actHTML(it.c, it.you, it.text);
     case "narr": return narrHTML(it, latest);
+    case "vision": return `<aside class="ev-vision"><span class="mono-k">Only you notice</span><p>${esc(it.text)}</p></aside>`;
     case "gazette": return it.g ? `<div class="ev-gazette">${gazetteHTML(it.g)}<span class="mono-k">The Tide ${it.tide} · ${esc(it.band || "")}</span></div>` : "";
     case "roll": return rollHTML(it);
     case "quest": return `<div class="ev-quest"><b>${esc(it.label)}</b><span>${esc(it.text)}</span></div>`;

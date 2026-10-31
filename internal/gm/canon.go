@@ -44,6 +44,10 @@ type canon struct {
 	// the past (summaries, recorded facts) where travel and trades that
 	// already happened are fair to mention.
 	lifeOnly bool
+
+	// phantoms name figures from the party's false visions (see
+	// visions.go): never present, in any text.
+	phantoms []string
 }
 
 // newCanon builds the canon for w as it stands after this turn's
@@ -86,6 +90,11 @@ func newCanon(w *game.World, arrived string, changes []string, numbers ...string
 			for _, it := range w.ItemsOf(game.OwnerNPC, n.ID) {
 				c.items = append(c.items, strings.ToLower(it.Name))
 			}
+		}
+	}
+	for _, u := range game.UnrealVisions(w) {
+		if u.Vision.Phantom != "" {
+			c.phantoms = append(c.phantoms, u.Vision.Phantom)
 		}
 	}
 	for _, l := range w.Locations {
@@ -326,6 +335,9 @@ func (c *canon) checkSentence(s string) string {
 			!anyWord(ws, recollection) && !strings.Contains(ls, strings.ToLower(placeName(c, n.LocationID))):
 			return fmt.Sprintf("%s is not here (they are at %s); they can't speak or act in this scene", n.Name, placeName(c, n.LocationID))
 		}
+	}
+	if p := c.phantomIn(ws, ls); p != "" {
+		return fmt.Sprintf("there is no %s: a character under strain only imagined it, and it must not appear as real", p)
 	}
 	if c.lifeOnly {
 		return ""
