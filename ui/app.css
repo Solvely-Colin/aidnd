@@ -855,3 +855,23 @@ details.feat p { margin: 0 0 12px; font-size: 14px; color: var(--ink2); line-hei
 .goal.k-failed .nm, .goal.k-dropped .nm { color: var(--ink3); text-decoration: line-through; text-decoration-color: var(--line2); }
 .rec.k-choice .nm small { color: var(--ink2); }
 .record details.more summary { cursor: pointer; padding: 10px 0; font: 11.5px/1.4 var(--mono); color: var(--ink3); }
+
+/* world events: a call that pulls everyone to one place */
+.wev { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; padding: 14px 16px 16px; border: 1px solid var(--line2); border-top: 3px solid var(--bad); background: var(--bg2); border-radius: 0 0 8px 8px; animation: reveal .18s ease both; }
+.wev header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
+.wev .mono-k { color: var(--bad); }
+.wev-t { font: 700 19px/1.25 var(--display); color: var(--ink); }
+.wev p { margin: 0; font-size: 14.5px; line-height: 1.45; }
+.wev ul { margin: 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 4px; }
+.wev li { font-size: 14px; line-height: 1.45; }
+.wev li.mine { color: var(--acc); }
+.wev.won { border-top-color: var(--acc); }
+.wev.won .mono-k { color: var(--acc); }
+.wev.wev-panel { margin: 0; }
+.wev-here { font: 11px/1.3 var(--mono); color: var(--acc); letter-spacing: .04em; text-transform: uppercase; }
+.wev-coming { display: flex; flex-wrap: wrap; gap: 6px; }
+.wev-coming span { font: 11.5px/1.3 var(--mono); padding: 3px 7px; border: 1px solid var(--line2); border-radius: 3px; color: var(--ink3); }
+.wev-coming span.came { color: var(--ink); border-color: var(--acc); }
+.wev-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.wev-acts .btn { padding: 9px 16px; font-size: 14px; }
+.wev-wait { font-size: 12.5px; color: var(--ink3); }

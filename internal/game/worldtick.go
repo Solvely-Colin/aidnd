@@ -48,6 +48,11 @@ type Living struct {
 	Log []WorldBeat `json:"log,omitempty"`
 	// Seen is where each player (by id) last caught up with the world.
 	Seen map[string]*Seen `json:"seen,omitempty"`
+	// Event is the world event now open (see events.go); Past are settled
+	// ones, oldest first; LastEventWeek is the week the last one ended.
+	Event         *WorldEvent  `json:"event,omitempty"`
+	Past          []WorldEvent `json:"past_events,omitempty"`
+	LastEventWeek int          `json:"last_event_week,omitempty"`
 }
 
 // Faction is a group with an agenda clock that fills on world ticks.
@@ -73,6 +78,18 @@ type Faction struct {
 	Full       string         `json:"full,omitempty"`
 	FullDanger map[string]int `json:"full_danger,omitempty"`
 	Filled     bool           `json:"filled,omitempty"`
+	// Broken is set when players beat the faction in a world event: its
+	// clock never moves again.
+	Broken bool `json:"broken,omitempty"`
+	// Foe (and FoeHorror) is what its people look like in a fight; a
+	// faction without one never brings a world event. Champion is the
+	// stronger one who leads them once the clock is nearly full.
+	Foe            string `json:"foe,omitempty"`
+	FoeHorror      int    `json:"foe_horror,omitempty"`
+	Champion       string `json:"champion,omitempty"`
+	ChampionHorror int    `json:"champion_horror,omitempty"`
+	// Call is how a world event about this faction is announced.
+	Call string `json:"call,omitempty"`
 }
 
 // Gazette is a world tick's front page.
@@ -134,7 +151,7 @@ func NoteActed(w *World, now int64) {
 
 // active reports whether a faction's clock still runs.
 func (f *Faction) active(w *World) bool {
-	if f.Filled || w.Campaign.Living.Week < f.FromWeek {
+	if f.Filled || f.Broken || w.Campaign.Living.Week < f.FromWeek {
 		return false
 	}
 	if q := w.Quest(f.Storyline); q != nil && (q.Status == QuestCompleted || q.Status == QuestTurnedIn || q.Status == QuestFailed) {
@@ -183,6 +200,9 @@ func WorldTick(w *World, r *dice.Roller, now int64, idle bool) *TickReport {
 		last := f.Progress+1 >= f.Steps
 		if last && f.Threat && (threatFilled || idle) {
 			continue // story safety: the clock waits a tick
+		}
+		if last && eventHolds(w, f.Key) {
+			continue // a world event is deciding this one
 		}
 		f.Progress++
 		if len(f.Moves) > 0 {

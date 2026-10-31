@@ -117,6 +117,8 @@ they/them, and drafts fill it from the concept.
 | `POST /campaigns/{id}/actions` | active player | `{text, target_id?, zone_id?, check?, act?}` → turn result, or a pending turn when the player rolls their own dice. |
 | `POST /campaigns/{id}/roll` | acting player | Rolls the d20s for the caller's pending turn or death save and resolves it → turn result. |
 | `POST /campaigns/{id}/roll/cancel` | acting player | Takes back a pending turn before the roll (not a death save). |
+| `POST /campaigns/{id}/me/answer` | joined player | Answers the open world event's call: your whole group goes to its site and joins whoever is there (a fight already going is joined). Once every living character is there, the confrontation begins → `{campaign}`. |
+| `POST /campaigns/{id}/me/begin` | joined player | At the site of a gathering world event, starts the confrontation without waiting for the others → `{campaign}`. |
 | `POST /campaigns/{id}/me/goals` | joined player | `{text}` adds a personal goal to your character (max 4 open), or `{drop: "goal2"}` lets one go → `{campaign}`. |
 | `POST /campaigns/{id}/me/dice` | joined player | `{auto_roll}`: true lets the engine roll for this player. |
 | `POST /campaigns/{id}/skip` | player / service | Ends the active turn. See Skipping. |
@@ -240,6 +242,8 @@ In a long campaign (a saga), the campaign view's `deadline` is the unix time whe
 A long campaign's view has `world: {week, date, tide, band, gazette: {week, headlines, classified, weather}}`. Each daily world tick sends a `world_tick` event `{week, tide, tide_from, band, idle, gazette}`. `POST /tick` also runs any world ticks that are owed.
 
 A long campaign's view also carries `dispatch` when the caller missed at least one world tick since they last played: `{weeks, from_week, week, tide_from, tide, band, lines: [{kind, week, text, where}]}`. `kind` is `you` (your downtime), `deed` (what others did), `people` (people the party has met; `where` is where they are now), `near` (your region) or `far`. `POST /campaigns/{id}/me/seen` clears it and returns `{campaign}`; taking a turn clears it too.
+
+`world.event` is the open world event, if any: `{id, title, call, faction, site, site_id, deadline, status (gathering|engaged), threads: [{kind, text, mine}], coming: [{character_id, name, came}], here, can_answer, can_begin}`. Thread kinds: `ally`, `debt`, `grudge`, `goal`, `crossed`, `brand`, `pressure`, `agenda`. `world.past_events` lists settled ones, newest first: `{title, week, won, outcome}`. The `world_event` stream event (never party-tagged) carries `phase`: `called` `{title, call, site, site_id, deadline}`, `answered` `{character_id, character}`, `begun` `{changes}` or `settled` `{won, outcome, changes}`.
 
 `POST /campaigns/{id}/me/downtime {kind}` queues the caller's downtime order for the next world tick (`research`, `work`, `rest`, `contacts`, `carouse`; `""` cancels). It needs a safe place and no fight (otherwise 409), and returns `{campaign}`. The view's `you.downtime` is the queued order, `you.can_downtime` says whether one can be queued here, and `world.downtime` lists the orders. Results arrive as `downtime_done {character_id, name, kind, roll, text}` events.
 

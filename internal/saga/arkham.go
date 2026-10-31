@@ -148,7 +148,9 @@ var arkham = Region{
 				"A Society member was taken to the Arkham Sanitarium, raving about a book.",
 			},
 			Full:       "Morgan's circle read too deep: something walks the Restricted Stacks at night now.",
-			FullDanger: map[string]int{"The Restricted Stacks": 2}},
+			FullDanger: map[string]int{"The Restricted Stacks": 2},
+			Foe:        "Spellbound student", Champion: "Thing from the stacks", ChampionHorror: 2,
+			Call: "Morgan's circle has gathered to read aloud from what it stole, and the library is not empty tonight."},
 		{Key: "outer-ones", Name: "Grey Visitors", Threat: true, Clock: "The Landing", Steps: 6,
 			Moves: []string{
 				"Lights moved over the Dunwich hills; a farm on the Aylesbury pike stands empty.",
@@ -158,7 +160,9 @@ var arkham = Region{
 				"Another farmhouse stands open to the weather, the table set for supper.",
 			},
 			Full:       "The Grey Visitors have landed: Cold Spring Glen is theirs, and no one who goes in alone comes out the same.",
-			FullDanger: map[string]int{"Cold Spring Glen": 4}},
+			FullDanger: map[string]int{"Cold Spring Glen": 4},
+			Foe:        "Taken farmhand", FoeHorror: 1, Champion: "Grey Visitor", ChampionHorror: 2,
+			Call: "The buzzing has come back to the glen, louder than ever, and the lights are setting down."},
 	},
 	Agendas: []Agenda{
 		{Key: "morgan", Who: "Prof. Francis Morgan", Goal: "Read the stolen Codex before anyone burns it",

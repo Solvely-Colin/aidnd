@@ -13,6 +13,7 @@ const (
 	BeatFilled   = "filled"   // a faction's clock filled
 	BeatPerson   = "person"   // someone took a step toward their goal
 	BeatDowntime = "downtime" // a character's downtime order came to something
+	BeatEvent    = "event"    // a world event was called or settled
 )
 
 // MaxWorldLog is how many beats the world log keeps.

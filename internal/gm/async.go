@@ -51,6 +51,9 @@ func (g *GM) Sweep(ctx context.Context) (int, error) {
 		if _, err := g.worldTicks(ctx, cs.ID); err != nil {
 			g.logf("world tick %s: %v", cs.ID, err)
 		}
+		if err := g.eventTimer(ctx, cs.ID); err != nil {
+			g.logf("world event %s: %v", cs.ID, err)
+		}
 		for _, grp := range w.GroupIDs() {
 			// a few in a row, in case the server slept through several
 			for i := 0; i < 8; i++ {
