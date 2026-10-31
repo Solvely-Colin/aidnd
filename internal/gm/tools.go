@@ -197,6 +197,8 @@ const (
 	DirHazard         = "hazard"
 	DirMarkCharacter  = "mark_character"
 	DirNPCTie         = "npc_tie"
+	DirPersonalGoal   = "personal_goal"
+	DirRecordChoice   = "record_choice"
 )
 
 // progressDirectives are the only tools offered when pacing forces progress.
@@ -260,6 +262,16 @@ func directiveTools() []llm.Tool {
 			"character_id": str("character id"),
 			"kind":         enum("mark", game.NarratorMarkKinds...),
 			"text":         str("how it shows, under 12 words, e.g. \"a ring of sucker scars around the left wrist\" or \"the Bell-ringer of Innsmouth\"")}, "character_id", "kind", "text")),
+		tool(DirRecordChoice, "Write one line in a character's own story when they make a choice that shapes things (take a side, show mercy, refuse a bargain, lie to someone who trusts them), do something people will talk about, or something turns out for them. The engine already records promises, attacks, kills and quests.", obj(map[string]any{
+			"character_id": str("character id"),
+			"kind":         enum("kind", game.RecordKinds...),
+			"text":         str("one sentence naming who and what, e.g. \"Let the Deacon's son go free on the harbor steps\""),
+			"npc_id":       str("optional: npc id it involved")}, "character_id", "kind", "text")),
+		tool(DirPersonalGoal, "Manage one character's personal goals (YOUR STORY in WORLD MEMORY). add: the story gives them something to want (at most 4 open). done: they clearly reached one (worth XP; at most one goal settled per character per day). failed: it can no longer happen.", obj(map[string]any{
+			"character_id": str("character id"),
+			"action":       enum("what to do", "add", game.GoalDone, game.GoalFailed),
+			"goal_id":      str("goal id for done or failed, e.g. goal2"),
+			"text":         str("add: the goal, under 15 words; done/failed: what happened, one short sentence")}, "character_id", "action")),
 		tool(DirNPCGivesItem, "An NPC here hands one of their own items to a character as a gift.", obj(map[string]any{
 			"npc_id": str("npc id"), "item_id": str("item id owned by that npc"), "to": str("character id")}, "npc_id", "item_id", "to")),
 		tool(DirRecordLore, "Record a fact established in play, for the party's journal and the world's memory. Use kind promise when a character gives their word to someone (a promise, a deal, a debt), deed for something the party did that people will talk about, rumor for hearsay.", obj(map[string]any{

@@ -1875,9 +1875,34 @@ function sheetHTML(inRail) {
         return verb ? `<button class="row-line" data-send="I ${verb.toLowerCase()} the ${esc(i.name)}">${body}<span class="verb">${verb}</span></button>` : `<div class="row-line">${body}</div>`;
       }).join("") || `<span class="empty-line">Nothing.</span>`}
     </section>
+    ${storyHTML(c, own)}
     ${consequencesHTML(c, own)}
     ${c.backstory || c.concept ? `<section><span class="mono-k">Story</span><p class="story-p">${esc(c.backstory || c.concept)}</p></section>` : ""}
     ${own ? `<section><span class="mono-k">Dice</span><button class="row-line" data-act="auto-roll"><span class="nm">${v.you?.auto_roll ? "The game rolls for you" : "You roll your own dice"}<small>${v.you?.auto_roll ? "turns resolve as soon as you send them" : "attacks and checks wait for your roll"}</small></span><span class="verb">${v.you?.auto_roll ? "Roll myself" : "Roll for me"}</span></button></section>` : ""}`;
+}
+
+// storyHTML is a character's own story: what they want and what they
+// chose, did and lived through, newest first. Players write their own
+// goals; the story settles them.
+const REC_WORD = { choice: "chose", deed: "did", outcome: "came of it" };
+function storyHTML(c, own) {
+  const goals = c.goals || [], rec = c.record || [];
+  const open = goals.filter(g => g.status === "open"), past = goals.filter(g => g.status !== "open").slice(0, 4);
+  const day = d => d ? `day ${d}` : "";
+  const canAdd = own && !c.dead && open.length < 4;
+  if (!goals.length && !rec.length && !own) return "";
+  const row = e => `<div class="row-line rec k-${esc(e.kind)}"><span class="nm">${esc(e.text)}<small>${[REC_WORD[e.kind] || e.kind, day(e.day)].filter(Boolean).join(" · ")}</small></span></div>`;
+  return `<section class="goals"><span class="mono-k">${own ? "What you want" : `What ${esc(firstName(c.name))} wants`}</span>
+      ${open.map(g => `<div class="row-line goal"><span class="nm">${esc(g.text)}<small>${g.source === "player" ? "set by you" : "the story gave this"}${g.day ? ` · day ${g.day}` : ""}</small></span>${own ? `<button class="verb" data-act="goal-drop" data-goal="${esc(g.id)}">Let go</button>` : ""}</div>`).join("")}
+      ${past.map(g => `<div class="row-line goal k-${esc(g.status)}"><span class="nm">${esc(g.text)}<small>${g.status === "done" ? "reached" : g.status === "failed" ? "lost" : "let go"}${g.outcome ? ` · ${esc(g.outcome)}` : ""}${g.settled ? ` · day ${g.settled}` : ""}</small></span></div>`).join("")}
+      ${!goals.length && !canAdd ? `<span class="empty-line">Nothing yet.</span>` : ""}
+      ${canAdd ? `<div class="goal-add"><input class="under" id="goal-in" maxlength="140" placeholder="${open.length ? "Something else you want" : "Something you want: find my brother, clear my name"}"><button class="btn" data-act="goal-add">Add</button></div>
+        <span class="small-note">The story decides when a goal is reached or lost. Reaching one is worth ${25} XP.</span>` : ""}
+    </section>
+    ${rec.length ? `<section class="record"><span class="mono-k">${own ? "Your story so far" : "Their story so far"}</span>
+      ${rec.slice(0, 6).map(row).join("")}
+      ${rec.length > 6 ? `<details class="more"><summary>${rec.length - 6} earlier</summary>${rec.slice(6).map(row).join("")}</details>` : ""}
+    </section>` : ""}`;
 }
 
 // consequencesHTML is what follows a character between sessions: the
@@ -2354,6 +2379,16 @@ document.addEventListener("click", async e => {
         await refreshView();
         $("#say")?.focus();
         return;
+      }
+      case "goal-add": case "goal-drop": {
+        const body = ds.act === "goal-add" ? { text: ($("#goal-in")?.value || "").trim() } : { drop: ds.goal };
+        if (ds.act === "goal-add" && !body.text) return $("#goal-in")?.focus();
+        t.disabled = true;
+        try {
+          const r = await api("POST", `/campaigns/${S.route}/me/goals`, body);
+          S.view = r.campaign;
+        } catch (e) { toast(e.message); t.disabled = false; return; }
+        return stageMode() ? renderRails() : renderPanel();
       }
       case "auto-roll": {
         const auto = !S.view.you?.auto_roll;

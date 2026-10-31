@@ -117,6 +117,7 @@ they/them, and drafts fill it from the concept.
 | `POST /campaigns/{id}/actions` | active player | `{text, target_id?, zone_id?, check?, act?}` → turn result, or a pending turn when the player rolls their own dice. |
 | `POST /campaigns/{id}/roll` | acting player | Rolls the d20s for the caller's pending turn or death save and resolves it → turn result. |
 | `POST /campaigns/{id}/roll/cancel` | acting player | Takes back a pending turn before the roll (not a death save). |
+| `POST /campaigns/{id}/me/goals` | joined player | `{text}` adds a personal goal to your character (max 4 open), or `{drop: "goal2"}` lets one go → `{campaign}`. |
 | `POST /campaigns/{id}/me/dice` | joined player | `{auto_roll}`: true lets the engine roll for this player. |
 | `POST /campaigns/{id}/skip` | player / service | Ends the active turn. See Skipping. |
 | `GET /campaigns/{id}/map` | any caller | Known places and passable/locked paths only. |
@@ -203,7 +204,9 @@ and the main quest only shows objectives up to the first one not yet done.
                                                 // (down | bloodied | cover | acting)
     "inventory": [{"id", "name", "kind", "equipped", "effect", "to_hit", ...}],
     "marks": [{"id", "kind": "scar | brand | loss | name", "label", "text", "day"}],  // lasting marks
-    "standing": [{"npc_id", "name", "kind": "grudge | debt | owed", "label", "text", "day", "alive"}]
+    "standing": [{"npc_id", "name", "kind": "grudge | debt | owed", "label", "text", "day", "alive"}],
+    "goals": [{"id", "text", "status": "open | done | failed | dropped", "source": "player | gm", "day", "settled", "outcome"}],
+    "record": [{"day", "turn", "kind": "choice | deed | outcome", "text", "source", "npc_id", "goal_id"}]  // newest first
                                                 // NPCs' ties to this one character: grudge (holds one
                                                 // against them), debt (owes them), owed (they owe the NPC)
   }],                                                  // every member's full sheet, so players can read each other's

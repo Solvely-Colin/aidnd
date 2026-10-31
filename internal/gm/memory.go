@@ -16,6 +16,8 @@ const (
 	memDead     = 6
 	memTies     = 6 // grudges and debts of the people here
 	memMarks    = 4 // marks shown per character
+	memChoices  = 5 // the actor's own choices shown
+	memDone     = 3 // the actor's other recent deeds and outcomes
 )
 
 // worldMemory renders what the world remembers that bears on this scene:
@@ -81,10 +83,48 @@ func worldMemory(w *game.World, actor *game.Character) string {
 	line("PARTY'S OPEN PROMISES (call resolve_promise when one is clearly kept or broken)", promises)
 	line("EARLIER", recent)
 	line("DEAD (never bring them back or have them appear)", dead)
+	b.WriteString(yourStory(w, actor))
 	if b.Len() == 0 {
 		return ""
 	}
 	return "WORLD MEMORY (established facts; stay consistent with them):\n" + b.String()
+}
+
+// yourStory renders the actor's own goals and record: open goals with ids
+// (for personal_goal), their latest choices, and a few recent deeds and
+// outcomes.
+func yourStory(w *game.World, actor *game.Character) string {
+	if actor == nil || len(actor.Goals) == 0 && len(actor.Record) == 0 {
+		return ""
+	}
+	var goals, choices, done []string
+	for _, g := range actor.OpenGoals() {
+		goals = append(goals, fmt.Sprintf("[%s] %s", g.ID, g.Text))
+	}
+	for i := len(actor.Record) - 1; i >= 0; i-- {
+		e := actor.Record[i]
+		s := e.Text
+		if e.Day > 0 {
+			s = fmt.Sprintf("day %d, %s", e.Day, s)
+		}
+		if e.Kind == game.RecChoice && len(choices) < memChoices {
+			choices = append([]string{s}, choices...)
+		} else if e.Kind != game.RecChoice && len(done) < memDone {
+			done = append([]string{s}, done...)
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "YOUR STORY (%s's own; it follows them, not the party):\n", actor.Name)
+	if len(goals) > 0 {
+		fmt.Fprintf(&b, "  WANTS (personal_goal done/failed when the story settles one): %s\n", strings.Join(goals, "; "))
+	}
+	if len(choices) > 0 {
+		fmt.Fprintf(&b, "  CHOSE: %s\n", strings.Join(choices, "; "))
+	}
+	if len(done) > 0 {
+		fmt.Fprintf(&b, "  LATELY: %s\n", strings.Join(done, "; "))
+	}
+	return b.String()
 }
 
 // partyMarks lists the marks of the actor and the living party, losses

@@ -258,6 +258,7 @@ func TurnInQuest(w *World, questID string, c *Character) ([]QuestUpdate, []strin
 	if c != nil {
 		g.Settle(c.ID, TieOwed)
 		g.Bind(w, c, TieDebt, "finished "+q.Title+" for them", SourceEngine)
+		Note(w, c, RecordEntry{Kind: RecOutcome, Source: SourceEngine, NPCID: g.ID, Text: fmt.Sprintf("Finished %s for %s", q.Title, g.Name)})
 	}
 	if g.Disposition < 3 {
 		g.Disposition++

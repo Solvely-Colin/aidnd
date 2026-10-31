@@ -201,3 +201,29 @@ func (g *GM) SetDowntime(ctx context.Context, campaignID, playerID, kind string)
 	}
 	return w, nil
 }
+
+// SetGoal lets a player write a personal goal for their character (text)
+// or let one go (drop, a goal id). Reaching or losing a goal is the
+// story's call, made by the narrator.
+func (g *GM) SetGoal(ctx context.Context, campaignID, playerID, text, drop string) (*game.World, error) {
+	defer g.lock(campaignID)()
+	w, err := g.Store.Load(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	c := w.CharacterOf(playerID)
+	if c == nil {
+		return nil, ErrForbidden
+	}
+	if drop != "" {
+		if _, err := game.SettleGoal(w, c, drop, game.GoalDropped, ""); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
+		}
+	} else if _, err := game.AddGoal(w, c, text, game.SourcePlayer); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	if _, err := g.commit(ctx, w); err != nil {
+		return nil, err
+	}
+	return w, nil
+}

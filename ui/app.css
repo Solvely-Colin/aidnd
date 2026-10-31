@@ -847,3 +847,11 @@ details.feat p { margin: 0 0 12px; font-size: 14px; color: var(--ink2); line-hei
 .downtime .row-line .nm small { display: block; font: 13px/1.4 var(--sans); color: var(--ink3); margin-top: 2px; }
 .downtime .row-line.on .nm { color: var(--acc); }
 .downtime .row-line:disabled { opacity: .45; }
+
+/* a character's own story */
+.goal-add { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+.goal-add input { flex: 1; min-width: 0; }
+.goal.k-done .nm { color: var(--acc); }
+.goal.k-failed .nm, .goal.k-dropped .nm { color: var(--ink3); text-decoration: line-through; text-decoration-color: var(--line2); }
+.rec.k-choice .nm small { color: var(--ink2); }
+.record details.more summary { cursor: pointer; padding: 10px 0; font: 11.5px/1.4 var(--mono); color: var(--ink3); }

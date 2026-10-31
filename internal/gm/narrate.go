@@ -24,7 +24,7 @@ Rules:
 - 40-100 words, plain language, lead with what happened. Second person plural or character names; present tense.
 - You may change the world only through the provided directive tools; code validates them. You cannot change player HP, gold or conditions. Conditions (poisoned, prone, restrained, frightened, blinded, stunned) come only from the engine: name a threat with the hazard tool and narrate the save result it returns; describe conditions already in STATE.
 - Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.
-- WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. Grudges and debts belong to the one character they name, and a character's MARKS show on them; when one character's deed will follow them personally, record it (npc_tie, and for a true turning point mark_character). When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
+- WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. Grudges and debts belong to the one character they name, and a character's MARKS show on them; when one character's deed will follow them personally, record it (npc_tie, and for a true turning point mark_character). YOUR STORY is the acting character's own goals, choices and how things turned out: let it color what they notice and who reacts to them, record new choices that matter (record_choice) and settle their goals when the story clearly does (personal_goal). When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
 
 const quickSystem = `You are the narrator of a tabletop game. The player took only free actions (looking, a remark, readying gear).
 Answer briefly in at most 60 words using only the facts given, as a storyteller: no game words (zone, exit, NPC, attitude, HP, budget, action, engine) and no lists of who is where; answer the question asked, not everything in the state. If what they look for is not there, say so plainly. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
@@ -91,7 +91,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	b.WriteString(dir.Note())
 	tools := directiveTools()
 	if w.InCombat() || res.CombatStarted {
-		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true, DirResolvePromise: true, DirMarkCharacter: true, DirNPCTie: true})
+		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true, DirResolvePromise: true, DirMarkCharacter: true, DirNPCTie: true, DirRecordChoice: true})
 	}
 	req := llm.Request{Tag: "narrate", Temperature: 0.8, MaxTokens: 600, Tools: tools,
 		Messages: []llm.Message{llm.System(narratorSystem), llm.User(b.String())}}
@@ -582,6 +582,72 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		n.Bind(w, ch, a.Kind, reason, game.SourceGM)
 		ties := n.TiesTo(ch.ID)
 		return game.TieLine(w, n, ties[len(ties)-1]), nil
+	case DirRecordChoice:
+		var a struct {
+			CharID string `json:"character_id"`
+			Kind   string `json:"kind"`
+			Text   string `json:"text"`
+			NPCID  string `json:"npc_id"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		ch := w.Character(a.CharID)
+		if ch == nil || ch.Dead {
+			return "", fmt.Errorf("unknown character %q", a.CharID)
+		}
+		text := trim(a.Text, 200)
+		rc := newCanon(w, "", nil)
+		rc.lifeOnly = true
+		if is := rc.check(text); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
+		npc := ""
+		if n := w.NPC(a.NPCID); n != nil {
+			npc = n.ID
+		}
+		if game.Note(w, ch, game.RecordEntry{Kind: a.Kind, Text: text, NPCID: npc, Source: game.SourceGM}) == nil {
+			return "", fmt.Errorf("already recorded, or empty")
+		}
+		return "", nil
+	case DirPersonalGoal:
+		var a struct {
+			CharID string `json:"character_id"`
+			Action string `json:"action"`
+			GoalID string `json:"goal_id"`
+			Text   string `json:"text"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		ch := w.Character(a.CharID)
+		if ch == nil || ch.Dead {
+			return "", fmt.Errorf("unknown character %q", a.CharID)
+		}
+		text := trim(a.Text, 160)
+		gc := newCanon(w, "", nil)
+		gc.lifeOnly = true
+		if is := gc.check(text); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
+		switch a.Action {
+		case "add":
+			g, err := game.AddGoal(w, ch, text, game.SourceGM)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s takes up a goal: %s", ch.Name, g.Text), nil
+		case game.GoalDone, game.GoalFailed:
+			if ch.GoalsSettledToday(w) > 0 {
+				return "", fmt.Errorf("%s already settled a goal today", ch.Name)
+			}
+			changes, err := game.SettleGoal(w, ch, a.GoalID, a.Action, text)
+			if err != nil {
+				return "", err
+			}
+			return strings.Join(changes, "; "), nil
+		}
+		return "", fmt.Errorf("action must be add, done or failed")
 	case DirMarkCharacter:
 		var a struct {
 			CharID string `json:"character_id"`

@@ -87,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/me/downtime", s.auth(s.handleDowntime))
 	mux.HandleFunc("POST /campaigns/{id}/me/seen", s.auth(s.handleSeen))
 	mux.HandleFunc("POST /campaigns/{id}/me/solo", s.auth(s.handleSolo))
+	mux.HandleFunc("POST /campaigns/{id}/me/goals", s.auth(s.handleGoal))
 	mux.HandleFunc("POST /campaigns/{id}/me/join", s.auth(s.handleJoinGroup))
 	mux.HandleFunc("POST /campaigns/{id}/roll", s.auth(s.handleRoll))
 	mux.HandleFunc("POST /campaigns/{id}/roll/cancel", s.auth(s.handleCancelRoll))
@@ -963,6 +964,28 @@ func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wld, err := s.gm.SetDowntime(r.Context(), r.PathValue("id"), p, body.Kind)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
+// handleGoal adds a personal goal ({text}) or drops one ({drop: id}).
+func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Text string `json:"text"`
+		Drop string `json:"drop"`
+	}
+	if err := decode(r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	wld, err := s.gm.SetGoal(r.Context(), r.PathValue("id"), p, body.Text, body.Drop)
 	if err != nil {
 		s.fail(w, err)
 		return
