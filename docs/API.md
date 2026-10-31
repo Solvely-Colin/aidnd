@@ -50,7 +50,12 @@ what the dev table does.
    authors the world (can take 30–90 s). A bad or failed authoring falls back
    to a built-in campaign, so this does not fail on model trouble.
 2. Each player: `POST /campaigns/{id}/players {"name": "..."}`. Idempotent per
-   player id. 409 when full or already started.
+   player id. 409 when full or the story has ended. A player can join a
+   campaign that is under way: their character (saved as below) is written
+   in where the biggest party stands, in its fight if one is on (taking
+   turns after everyone already in it), at that party's average XP, with a
+   starting goal, a first record entry, a private `catch_up` and an arrival
+   narration.
 3. Each player makes a character (replaceable until the game starts):
    - `POST /campaigns/{id}/characters/draft {"concept": "..."}` returns a
      valid draft to show in an editor, then
@@ -167,7 +172,7 @@ open mode.
 | 401 | Missing/invalid API key, player token or stream token. |
 | 403 | The player has not joined this campaign. |
 | 404 | Unknown campaign, or something players have not discovered. |
-| 409 | Not your turn, campaign full, already started, characters missing, campaign over. |
+| 409 | Not your turn, campaign full, characters missing, campaign over. |
 | 422 | Character validation failed; `problems` lists why. |
 | 500 | Internal error (logged server-side). |
 
@@ -417,6 +422,7 @@ data: {"id":42,"campaign_id":"c_...","type":"narration","data":{...},"created_at
 | `player_action` | `{character_id, character, text, hints}` |
 | `action_resolved` | `{character_id, steps, skipped, changes, rolls, world_changes}` |
 | `narration` | `{text, quick?, opening?, skip?, setback?, character_id?}` |
+| `catch_up` | `{for, character_id, catch_up: {title, pitch, so_far, day, time, location, lines: [{kind, text}]}}`: the story so far for a player who joined mid-story; `kind` is `quest`, `party`, `here`, `fight`, `promise` or `fact`. Engine state only. Private like `vision`. The `character_created` before it has `joins_midway: true`, `level` and `changes`; the `narration` after it has `arrival: true`. |
 | `vision` | `{for, character_id, text}`: something strain showed one character (dread campaigns). Private: `/log` and `/events` send it only to the player in `for`. It never says whether it was real. |
 | `turn_budget` | `{character_id, budget}`, sent when the turn continues |
 | `enemy_turns` | `{turns, narration}` |

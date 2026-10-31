@@ -255,7 +255,9 @@ async function renderHome() {
   const lead = stories.find(c => c.your_turn) || stories.find(c => c.status === "active" || c.status === "lobby");
   const rest = stories.filter(c => c !== lead);
   const mineIds = new Set(stories.map(c => c.id));
-  const open = all.campaigns.filter(c => c.status === "lobby" && !mineIds.has(c.id) && c.players < c.max_players);
+  // a story under way with a free seat can be joined too: the newcomer is
+  // written in where the party stands
+  const open = all.campaigns.filter(c => (c.status === "lobby" || c.status === "active") && !mineIds.has(c.id) && c.players < c.max_players);
   const top = `<div class="hero-top"><span class="brand">${mark()}aidnd</span><button class="chip-scrim" data-act="signout">${esc(S.me.name)} · Sign out</button></div>`;
   $("#home").innerHTML = `
     ${lead ? `<div class="hero">
@@ -268,16 +270,17 @@ async function renderHome() {
       </div></div>
     </div>` : `<div class="hero" style="height:64px">${top}</div>`}
     <div class="home-body">
-      ${rest.length ? `<section><span class="mono-k">Your other stories</span><div class="shelf">${rest.map(bookHTML).join("")}</div></section>` : ""}
-      ${open.length ? `<section><span class="mono-k">Open tables</span><div class="shelf">${open.map(bookHTML).join("")}</div></section>` : ""}
+      ${rest.length ? `<section><span class="mono-k">Your other stories</span><div class="shelf">${rest.map(c => bookHTML(c)).join("")}</div></section>` : ""}
+      ${open.length ? `<section><span class="mono-k">Open tables</span><div class="shelf">${open.map(c => bookHTML(c, true)).join("")}</div></section>` : ""}
       <section id="sagas">${sagasHTML()}</section>
       <section id="new">${newStoryHTML()}</section>
     </div>`;
 }
 
-function bookHTML(c) {
-  const meta = { lobby: "Gathering the party", active: c.your_turn ? "Your turn" : `In play · ${ago(c.updated_at)}`, completed: "Finished", failed: "Lost" }[c.status] || "";
-  return `<button class="book" data-open="${esc(c.id)}"><div class="cov">${coverArt(c.id)}</div><b>${esc(c.title)}</b><span>${esc(meta)}${c.status === "lobby" ? ` · ${c.players}/${c.max_players}` : ""}</span></button>`;
+function bookHTML(c, open) {
+  const meta = { lobby: "Gathering the party", active: open ? "Under way · join in" : c.your_turn ? "Your turn" : `In play · ${ago(c.updated_at)}`, completed: "Finished", failed: "Lost" }[c.status] || "";
+  const seats = c.status === "lobby" || (open && c.status === "active");
+  return `<button class="book" data-open="${esc(c.id)}"><div class="cov">${coverArt(c.id)}</div><b>${esc(c.title)}</b><span>${esc(meta)}${seats ? ` · ${c.players}/${c.max_players}` : ""}</span></button>`;
 }
 
 function erasHTML() {
@@ -335,7 +338,7 @@ function newStoryHTML() {
     ${erasHTML()}
     ${deathHTML()}
     <div class="new-foot"><button class="try" data-premise="${esc(sug)}">Try: <em>${esc(sug)}</em></button><button class="btn" data-act="create">Write this story</button></div>
-    <span class="help">The DM writes the places, the people and a main quest. It takes about a minute. To join a friend’s story, open it from Open tables once they have started one.</span>`;
+    <span class="help">The DM writes the places, the people and a main quest. It takes about a minute. To join a friend’s story, open it from Open tables, even once it is under way.</span>`;
 }
 
 // The world is written in one long request, so the steps are paced by the
@@ -399,7 +402,7 @@ function restartFeed() {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done", "world_event", "vision"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done", "world_event", "vision", "catch_up"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
@@ -474,16 +477,20 @@ async function refreshView() {
   S.journal = null; S.map = null;
   if (S.view.encounter && S.talkTo) S.talkTo = "";
   if (before !== S.view.status) return render();
-  if (S.view.status === "lobby") return renderLobby(true);
+  if (S.view.status === "lobby" || joining()) return renderLobby(true);
   renderChrome();
 }
 
 function render() {
   if (!S.view) return;
-  if (S.view.status === "lobby") return renderLobby();
+  if (S.view.status === "lobby" || joining()) return renderLobby();
   if (S.draft && mine()?.dead) return renderBuilder();
   renderPlay();
 }
+
+// joining: the story is under way and the caller has no character in it
+// yet (they haven't taken a seat, or are still making one).
+const joining = () => S.view?.status === "active" && !S.view.you?.character_id;
 
 function mine() {
   const v = S.view;
@@ -523,19 +530,25 @@ function renderLobby(soft) {
   }
   const ready = v.players.length > 0 && v.players.every(p => p.character_id);
   const waiting = v.players.filter(p => !p.character_id).map(p => p.name);
-  const status = !v.you?.joined ? "Take a seat to play." : !me ? "Make your character to get ready." : ready ? "Everyone is ready." : `Waiting for ${waiting.join(", ")}…`;
+  const running = v.status === "active";
+  const full = !v.you?.joined && v.players.length >= v.max_players;
+  const status = running
+    ? (full ? "Every seat is taken." : !v.you?.joined ? "This story is under way. Take a seat and you’ll be written in where the party stands." : "Make your character. You’ll join the party where it stands, at its level, with the story so far.")
+    : !v.you?.joined ? "Take a seat to play." : !me ? "Make your character to get ready." : ready ? "Everyone is ready." : `Waiting for ${waiting.join(", ")}…`;
+  const btn = v.you?.joined ? (running ? "" : `<button class="btn primary ${ready ? "" : "off"}" data-act="start">Begin the story</button>`)
+    : full ? "" : `<button class="btn primary" data-act="join">Take a seat as ${esc(S.me.name)}</button>`;
   app.innerHTML = `
   <div class="lobby">
     <div class="lobby-scroll">
       <div class="lobby-art">${coverArt(S.route)}<button class="round" data-act="home" aria-label="Back home">${ICON.back}</button></div>
       <div class="lobby-body">
-        <div><span class="mono-k">A new story${settingName() ? " · " + esc(settingName()) : ""}</span><h1 class="title-l">${esc(v.title)}</h1><p class="pitch">${esc(v.pitch || v.premise)}</p></div>
+        <div><span class="mono-k">${running ? "Under way" : "A new story"}${settingName() ? " · " + esc(settingName()) : ""}</span><h1 class="title-l">${esc(v.title)}</h1><p class="pitch">${esc(v.pitch || v.premise)}</p></div>
         <section><span class="mono-k">Around the table</span><div class="seats" id="seats">${seatsHTML()}</div></section>
         ${v.you?.joined ? `<section><span class="mono-k">Your character</span>${me ? meCardHTML(me) : conceptHTML()}</section>` : ""}
       </div>
     </div>
     <div class="foot-bar"><div><span class="status">${esc(status)}</span>
-      ${v.you?.joined ? `<button class="btn primary ${ready ? "" : "off"}" data-act="start">Begin the story</button>` : `<button class="btn primary" data-act="join">Take a seat as ${esc(S.me.name)}</button>`}
+      ${btn}
     </div></div>
   </div>`;
 }
@@ -1195,6 +1208,8 @@ function feedItems(evs) {
       // a private perception from strain: the server sends it only to the
       // player it happened to, and never says whether it was real
       case "vision": if (d.text) out.push({ k: "vision", text: d.text }); break;
+      // the story so far, for a player who joined mid-story (only they get it)
+      case "catch_up": if (d.catch_up) out.push({ k: "catchup", c: d.catch_up }); break;
       case "conditions": (d.changes || []).forEach(t => out.push({ k: "sys", cond: true, text: t })); break;
       case "rewound": out.push({ k: "place", name: "Rewound" }); out.push({ k: "sys", text: d.text }); break;
       case "dm_action": out.push({ k: "dm", text: d.text }); break;
@@ -1255,6 +1270,7 @@ function itemHTML(it, latest) {
     case "act": return actHTML(it.c, it.you, it.text);
     case "narr": return narrHTML(it, latest);
     case "vision": return visionHTML(it.text);
+    case "catchup": return catchUpHTML(it.c);
     case "gazette": return it.g ? `<div class="ev-gazette">${gazetteHTML(it.g)}<span class="ty-k">The Tide ${it.tide} · ${esc(it.band || "")}</span></div>` : "";
     case "roll": return rollHTML(it);
     case "quest": return `<div class="ev-quest"><span class="stamp">${esc(it.label)}</span><span>${esc(it.text)}</span></div>`;
@@ -1271,6 +1287,26 @@ function actHTML(c, you, text) {
 
 // A vision is torn from somewhere else and pressed into your record only:
 // misprinted, a little crooked, never the same angle twice.
+// catchUpHTML: the story so far, left for a player who joined a story
+// under way. Engine facts only, grouped like the "while you were away"
+// letter.
+const CATCH_HEADS = { quest: "The matter at hand", party: "Who you’re with", here: "Also here", fight: "The fight", promise: "The party’s word, still owed", fact: "What is known" };
+function catchUpHTML(c) {
+  const groups = [];
+  for (const l of c.lines || []) {
+    const g = groups.at(-1);
+    if (g && g.kind === l.kind) g.lines.push(l); else groups.push({ kind: l.kind, lines: [l] });
+  }
+  return `<section class="dispatch catchup" aria-label="The story so far">
+    <span class="seal" aria-hidden="true">${EYE}</span>
+    <header><span class="ty-k">The story so far · for you</span><span class="dp-tide">Day ${esc(c.day)}, ${esc(c.time)} · ${esc(c.location)}</span></header>
+    ${c.pitch ? `<p class="dp-l">${esc(c.pitch)}</p>` : ""}
+    ${c.so_far ? `<div class="dp-group"><p class="dp-h">Until now</p><p class="dp-l">${esc(c.so_far)}</p></div>` : ""}
+    ${groups.map(g => `<div class="dp-group"><p class="dp-h">${esc(CATCH_HEADS[g.kind] || "")}</p>
+      ${g.lines.map(l => `<p class="dp-l">${esc(l.text)}</p>`).join("")}</div>`).join("")}
+  </section>`;
+}
+
 function visionHTML(text) {
   const tilt = ((hash(text) % 15) - 7) / 10;
   return `<aside class="ev-vision" style="--tilt:${tilt}deg" aria-label="A vision only you see"><span class="ty-k">Only you notice</span><p>${esc(text)}</p></aside>`;

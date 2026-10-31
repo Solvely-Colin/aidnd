@@ -383,3 +383,14 @@ Every so often the living world comes to a head, and everyone is called to one p
 - **How threads play out:** each ally NPC who can come (not in another group's scene) moves to the site, gives their character temp HP (4 + 2 x level) and takes one enemy off; each debt holder comes too and is the one to get out; each grudge adds one enemy. Base strength is 2 + progress/2 foes (2..6), with the faction's `Champion` (double HP) once the clock is within two steps. The fight is one danger harder than the site. The narrator can't end it with `end_encounter`.
 - **Outcome, for good:** won (the fight ends by `EndFight`) breaks the faction (`Broken`: its clock never moves again), lowers the Tide 5 for a threat or 2, lowers the site's danger 1, gives everyone who stood EventXP 50 and a record deed, settles ally debts and debts owed by those who came. Lost (fled, fallen, or nobody came by the deadline) fills the clock with its `Full` fact and danger, raises the Tide 5 or 2, and debt holders whose character never came hold a grudge. Everyone called who didn't come gets a record choice. Settled events go to `Living.Past` (newest 12).
 - The narrator gets a WORLD EVENT line (engine threads only). Older saga worlds get foes and calls back-filled by `saga.EnsureEventLooks` on the next tick.
+
+## Drop-in play (2026-10-31)
+
+A friend can join a campaign that is already under way (`game/catchup.go`, `gm/dropin.go`).
+
+- **Seat:** `POST /players` works while the campaign is active (still capped by `max_players`; refused once it has ended). Saving a character for a seated player with none goes through `joinRunning`; a living character still can't be swapped mid-story.
+- **Where:** the group with the most characters on their feet (main on a tie), in the zone of its first standing member. Mid-fight they go to the end of the turn order and the turn in progress carries on, the same as a group walking into a fight.
+- **Level:** the average XP of the group's living characters, levelled the normal way (`JoinMidway`), at full HP.
+- **Their story:** a first record choice ("Threw in with ... at ...") and a chronicle deed. One starting goal: the narrator's `GOAL:` line from the arrival (life-checked by the canon guard), else "Earn the trust of ...". They start caught up for the "while you were away" letter.
+- **Story so far:** a private `catch_up` event from engine state only: the pitch, the running summary, the storyline and its next step, other active quests, who they're with and how they are, who else is there, the fight, open promises and the newest chronicle facts.
+- **Arrival:** one narration (`narrate_arrival`) that brings them in without anyone acting, canon-guarded like every narration, with plain engine text as the fallback.

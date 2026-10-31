@@ -768,3 +768,34 @@ func TestPlayersWriteTheirOwnGoals(t *testing.T) {
 		t.Fatalf("after drop %v %v", g, c["record"])
 	}
 }
+
+func TestFriendJoinsAStoryUnderWay(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet}, "k", "u1")
+	if r := e.do("POST", "/campaigns/"+id+"/start", nil, "k", ""); r.code != 200 {
+		t.Fatalf("start %d %s", r.code, r.body)
+	}
+	if r := e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ben"}, "k", "u2"); r.code != 201 {
+		t.Fatalf("late join %d %s", r.code, r.body)
+	}
+	v := e.do("GET", "/campaigns/"+id, nil, "k", "u2").json(t)
+	if you := v["you"].(map[string]any); you["joined"] != true || you["character_id"] != nil {
+		t.Fatalf("seated without a character yet: %v", you)
+	}
+	if r := e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet2}, "k", "u2"); r.code != 201 {
+		t.Fatalf("late character %d %s", r.code, r.body)
+	}
+	v = e.do("GET", "/campaigns/"+id, nil, "k", "u2").json(t)
+	if len(v["party"].([]any)) != 2 {
+		t.Fatalf("Bram should be in the party: %v", v["party"])
+	}
+	log := func(p string) string { return string(e.do("GET", "/campaigns/"+id+"/log", nil, "k", p).body) }
+	if !strings.Contains(log("u2"), `"catch_up"`) {
+		t.Fatal("the newcomer gets the story so far")
+	}
+	if strings.Contains(log("u1"), `"catch_up"`) {
+		t.Fatal("the story so far is only for the newcomer")
+	}
+}
