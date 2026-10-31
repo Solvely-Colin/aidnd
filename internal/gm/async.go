@@ -86,7 +86,8 @@ func (g *GM) autopilot(ctx context.Context, campaignID, group string) (bool, err
 		return false, nil
 	}
 	actor := w.ActiveCharacter()
-	if p := w.Campaign.TakePending(actor.ID); p != nil && p.Kind == game.PendingDeathSave || actor.Dying() {
+	w.Campaign.TakePending(actor.ID) // the player's planned move, if any, lapses with the deadline
+	if actor.Dying() {
 		out := &TurnResult{TurnEnded: true}
 		ds := game.DeathSave(w, g.Dice, actor)
 		evs := []store.Event{deathSaveEvent(out, ds)}

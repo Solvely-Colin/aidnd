@@ -194,6 +194,12 @@ func (g *GM) Roll(ctx context.Context, campaignID, playerID string) (*TurnResult
 		return nil, ErrForbidden
 	}
 	actor := w.Character(pl.CharacterID)
+	if actor != nil {
+		if p := w.Campaign.Pending[actor.ID]; p != nil && p.Kind == game.PendingDeathSave && !actor.Dying() {
+			w.Campaign.TakePending(actor.ID) // healed or stabilized since: nothing to roll
+			_, _ = g.commit(ctx, w)
+		}
+	}
 	if actor == nil || w.Campaign.Pending[actor.ID] == nil {
 		return nil, Conflict("there is nothing waiting for your roll")
 	}

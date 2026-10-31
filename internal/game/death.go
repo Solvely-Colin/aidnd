@@ -205,6 +205,20 @@ func (c *Campaign) SetPending(p *PendingAction) {
 	c.Pending[p.CharacterID] = p
 }
 
+// DropStaleDeathSaves forgets waiting death saves for characters who are
+// no longer dying (healed, stabilized, or the fight was called), so a
+// healed player is not stuck being asked for a death save.
+func DropStaleDeathSaves(w *World) {
+	for id, p := range w.Campaign.Pending {
+		if p == nil || p.Kind != PendingDeathSave {
+			continue
+		}
+		if c := w.Character(id); c != nil && c.ID == id && !c.Dying() {
+			w.Campaign.TakePending(id)
+		}
+	}
+}
+
 // TakePending removes and returns a character's pending turn.
 func (c *Campaign) TakePending(characterID string) *PendingAction {
 	p := c.Pending[characterID]
@@ -216,11 +230,12 @@ func (c *Campaign) TakePending(characterID string) *PendingAction {
 }
 
 // JoinMidway sets up a character joining a campaign in progress: they
-// arrive with xp (levels and HP to match) in the given zone.
+// arrive with xp in the given zone, levelled up the same way XP levels
+// anyone (class hit dice and new spells for class sheets), at full HP.
 func JoinMidway(w *World, c *Character, xp int, zone string) {
-	c.XP = xp
-	c.Level = LevelForXP(xp)
-	c.MaxHP = StartingHP(c.Scores) + (c.Level-1)*HPPerLevel(c)
+	if xp > c.XP {
+		AwardXP(c, xp-c.XP)
+	}
 	c.HP = c.MaxHP
 	if l := w.Here(); l != nil && l.Zone(zone) == nil && len(l.Zones) > 0 {
 		zone = l.Zones[0].ID

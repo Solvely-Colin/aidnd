@@ -436,13 +436,17 @@ func enemiesActingNow(w *World) []*Enemy {
 // in reach (sometimes the weakest), otherwise step one zone toward the
 // nearest. Conditions apply at the start and end of each enemy's turn, and
 // a hit from an enemy that inflicts a condition forces a save.
+//
+// The lines it returns are what the turns themselves don't carry: nerve
+// saves on first sight of a horror, and the fight's end (rewards, loot)
+// when a reaction cuts down the last foe. Callers must show them.
 func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 	if !w.InCombat() {
 		return nil, nil
 	}
 	l := w.Here()
 	var out []EnemyTurn
-	changes := FaceEnemyHorrors(w, r)
+	extra := FaceEnemyHorrors(w, r)
 	w.RefreshMagic()
 	for _, e := range enemiesActingNow(w) {
 		var targets, hidden []*Character
@@ -474,23 +478,12 @@ func RunEnemyTurns(w *World, r *dice.Roller) ([]EnemyTurn, []string) {
 		end := endEnemyTurn(r, e)
 		ets[0].Before = start.Changes
 		ets[len(ets)-1].After, ets[len(ets)-1].Rolls = end.Changes, end.Rolls
-		changes = append(changes, start.Changes...)
-		for _, et := range ets {
-			for _, re := range et.Reactions {
-				changes = append(changes, re.Text)
-			}
-			switch et.Kind {
-			case "attack", "move", "telegraph", "signature":
-				changes = append(changes, et.Text)
-			}
-		}
-		changes = append(changes, end.Changes...)
 		out = append(out, ets...)
 	}
 	if w.Encounter != nil && len(w.Encounter.Living()) == 0 {
-		changes = append(changes, endEncounter(w)...) // reactions finished them
+		extra = append(extra, endEncounter(w)...) // reactions finished them
 	}
-	return out, changes
+	return out, extra
 }
 
 // enemyAct is one enemy's action.
