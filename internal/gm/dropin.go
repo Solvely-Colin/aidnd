@@ -112,7 +112,7 @@ func (g *GM) narrateArrival(ctx context.Context, w *game.World, c *game.Characte
 		who += ". Backstory: " + trim(b, 400)
 	}
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "narrate_arrival", Temperature: 0.8, MaxTokens: 500, Messages: []llm.Message{
-		llm.System(narratorSystem),
+		llm.System(styled(narratorSystem, w)),
 		llm.User(fmt.Sprintf(`%s
 STATE:
 %s
@@ -131,6 +131,7 @@ Then, on its own last line, write "GOAL: " and one personal goal for %s here, un
 	if text == "" {
 		return plain, ""
 	}
+	text = g.polish(ctx, w, "narrate_arrival", text)
 	text, _ = g.guard(ctx, newCanon(w, "", nil, l.Description), "narrate_arrival", text, plain)
 	if goal != "" {
 		gc := newCanon(w, "", nil)
