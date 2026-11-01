@@ -389,7 +389,7 @@ Every so often the living world comes to a head, and everyone is called to one p
 
 A friend can join a campaign that is already under way (`game/catchup.go`, `gm/dropin.go`).
 
-- **Seat:** `POST /players` works while the campaign is active (still capped by `max_players`; refused once it has ended). Saving a character for a seated player with none goes through `joinRunning`; a living character still can't be swapped mid-story.
+- **Seat:** `POST /players` works while the campaign is active (there is no seat limit; refused once it has ended). Saving a character for a seated player with none goes through `joinRunning`; a living character still can't be swapped mid-story.
 - **Where:** the group with the most characters on their feet (main on a tie), in the zone of its first standing member. Mid-fight they go to the end of the turn order and the turn in progress carries on, the same as a group walking into a fight.
 - **Level:** the average XP of the group's living characters, levelled the normal way (`JoinMidway`), at full HP.
 - **Their story:** a first record choice ("Threw in with ... at ...") and a chronicle deed. One starting goal: the narrator's `GOAL:` line from the arrival (life-checked by the canon guard), else "Earn the trust of ...". They start caught up for the "while you were away" letter.

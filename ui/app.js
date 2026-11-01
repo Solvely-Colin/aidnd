@@ -175,10 +175,11 @@ window.addEventListener("hashchange", route);
 async function route() {
   if (!S.me) return renderSignin();
   const m = location.hash.match(/^#\/c\/([\w-]+)/);
-  const next = m ? m[1] : "";
+  const next = m ? m[1] : location.hash === "#/gm" ? "gm" : "";
   if (next !== S.route) leaveCampaign();
   S.route = next;
   if (!next) return renderHome();
+  if (next === "gm") return renderGM();
   await openCampaign(next);
 }
 
@@ -255,15 +256,15 @@ async function renderHome() {
   const lead = stories.find(c => c.your_turn) || stories.find(c => c.status === "active" || c.status === "lobby");
   const rest = stories.filter(c => c !== lead);
   const mineIds = new Set(stories.map(c => c.id));
-  // a story under way with a free seat can be joined too: the newcomer is
+  // a story under way can be joined too (there is no seat limit): the newcomer is
   // written in where the party stands
-  const open = all.campaigns.filter(c => (c.status === "lobby" || c.status === "active") && !mineIds.has(c.id) && c.players < c.max_players);
-  const top = `<div class="hero-top"><span class="brand">${mark()}aidnd</span><button class="chip-scrim" data-act="signout">${esc(S.me.name)} · Sign out</button></div>`;
+  const open = all.campaigns.filter(c => (c.status === "lobby" || c.status === "active") && !mineIds.has(c.id));
+  const top = `<div class="hero-top"><span class="brand">${mark()}aidnd</span>${S.me.gm ? `<button class="chip-scrim" data-act="gm">GM</button>` : ""}<button class="chip-scrim" data-act="signout">${esc(S.me.name)} · Sign out</button></div>`;
   $("#home").innerHTML = `
     ${lead ? `<div class="hero">
       <div class="home-art">${coverArt(lead.id)}</div>${top}
       <div class="home-lead"><div class="col">
-        <span class="eyebrow-acc">${lead.your_turn ? `Your turn${lead.deadline ? ` · autopilot in ${untilText(lead.deadline)}` : ""}` : lead.status === "lobby" ? "Gathering the party" : "In play"} · ${lead.players}/${lead.max_players} players · ${esc(ago(lead.updated_at))}</span>
+        <span class="eyebrow-acc">${lead.your_turn ? `Your turn${lead.deadline ? ` · autopilot in ${untilText(lead.deadline)}` : ""}` : lead.status === "lobby" ? "Gathering the party" : "In play"} · ${seatCount(lead.players)} · ${esc(ago(lead.updated_at))}</span>
         <h1 class="title-xl">${esc(lead.title)}</h1>
         ${lead.pitch ? `<p class="lede">${esc(clip(lead.pitch, 180))}</p>` : ""}
         <div class="hero-cta"><button class="btn primary" data-open="${esc(lead.id)}">${lead.status === "lobby" ? "Back to the table" : lead.your_turn ? "Take your turn" : "Continue the story"}</button></div>
@@ -277,10 +278,89 @@ async function renderHome() {
     </div>`;
 }
 
+function seatCount(n) { return `${n} ${n === 1 ? "player" : "players"}`; }
+
 function bookHTML(c, open) {
   const meta = { lobby: "Gathering the party", active: open ? "Under way · join in" : c.your_turn ? "Your turn" : `In play · ${ago(c.updated_at)}`, completed: "Finished", failed: "Lost" }[c.status] || "";
   const seats = c.status === "lobby" || (open && c.status === "active");
-  return `<button class="book" data-open="${esc(c.id)}"><div class="cov">${coverArt(c.id)}</div><b>${esc(c.title)}</b><span>${esc(meta)}${seats ? ` · ${c.players}/${c.max_players}` : ""}</span></button>`;
+  return `<button class="book" data-open="${esc(c.id)}"><div class="cov">${coverArt(c.id)}</div><b>${esc(c.title)}</b><span>${esc(meta)}${seats ? ` · ${seatCount(c.players)}` : ""}</span></button>`;
+}
+
+// ---- GM area: the person running the game manages every story. Only a GM
+// session sees the button; the server checks again on every call.
+
+const GM = { data: null, busy: "" };
+const STATUS_WORD = { lobby: "Gathering", active: "In play", completed: "Finished", failed: "Lost" };
+
+async function renderGM() {
+  app.innerHTML = `<div class="scrollpage" id="gm"><div class="gm-page">
+    <div class="gm-top"><button class="round" data-act="home" aria-label="Back home">${ICON.back}</button><h1 class="title-l">Game master</h1></div>
+    <div id="gm-body"><div class="center-msg"><span class="spinner" style="color:var(--ink3)"></span></div></div></div></div>`;
+  try { GM.data = await api("GET", "/gm/campaigns"); }
+  catch (e) { if (S.route === "gm") $("#gm-body").innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  if (S.route === "gm") $("#gm-body").innerHTML = gmBodyHTML();
+}
+
+function gmBodyHTML() {
+  const { campaigns, backups } = GM.data;
+  return `<section class="gm-sec"><span class="mono-k">Stories · ${campaigns.length}</span>
+      ${campaigns.length ? campaigns.map(gmCampaignHTML).join("") : `<p class="empty-line">No stories yet.</p>`}</section>
+    <section class="gm-sec"><span class="mono-k">Backups · ${backups.length}</span>
+      <p class="help">Every restart and delete keeps a copy here first. Bring one back if you change your mind.</p>
+      ${backups.map(gmBackupHTML).join("")}</section>`;
+}
+
+function gmCampaignHTML(c) {
+  const lobby = c.status === "lobby";
+  const who = c.players.length ? c.players.map(p => `<li><b>${esc(p.name)}</b>
+      <span>${p.character ? `${esc(p.character)} · ${esc(p.class || "")} ${p.level ? `level ${p.level}` : ""}${p.max_hp ? ` · ${p.dead ? "dead" : `${p.hp}/${p.max_hp} HP`}` : ""}` : "no character yet"}</span>
+      ${lobby ? `<button class="link" data-act="gm-kick" data-id="${esc(c.id)}" data-pid="${esc(p.id)}" data-name="${esc(p.name)}">Remove</button>` : ""}</li>`).join("")
+    : `<li class="none">Nobody has joined.</li>`;
+  return `<article class="gm-row">
+    <header><div><h2>${esc(c.title || c.id)}</h2>
+      <span class="mono-k">${esc(STATUS_WORD[c.status] || c.status)}${c.saga ? " · long campaign" : ""} · turn ${c.turn || 0} · ${seatCount(c.players.length)} · ${esc(ago(c.updated_at))}</span></div></header>
+    ${c.error ? `<p class="error">Could not load: ${esc(c.error)}</p>` : ""}
+    <ul class="gm-players">${who}</ul>
+    <div class="gm-acts">
+      <button class="btn" data-open="${esc(c.id)}">Open</button>
+      <button class="btn ${c.can_restart ? "" : "off"}" data-act="gm-restart" data-id="${esc(c.id)}" data-name="${esc(c.title)}" ${c.can_restart ? "" : `title="Written before restarts were kept: delete it instead"`}>Restart</button>
+      <button class="btn danger" data-act="gm-delete" data-id="${esc(c.id)}" data-name="${esc(c.title)}">Delete</button>
+    </div>
+    ${c.can_restart ? "" : `<p class="help">This story was written before restarts were kept, so it can be deleted but not restarted.</p>`}
+  </article>`;
+}
+
+function gmBackupHTML(b) {
+  const live = GM.data.campaigns.some(c => c.id === b.campaign_id);
+  return `<div class="gm-backup"><div><b>${esc(b.title || b.campaign_id)}</b>
+      <span>${b.reason === "restart" ? "Before a restart" : "Deleted"} · ${esc(ago(b.created_at))} · ${Math.max(1, Math.round(b.size / 1024))} KB</span></div>
+    <div class="gm-acts">
+      <a class="link" href="/api/gm/backups/${b.id}" download>Download</a>
+      <button class="link ${live ? "off" : ""}" data-act="gm-restore" data-bid="${b.id}" ${live ? `title="That story is still here"` : ""}>Bring back</button>
+      <button class="link" data-act="gm-forget" data-bid="${b.id}" data-name="${esc(b.title)}">Forget</button>
+    </div></div>`;
+}
+
+async function gmAct(act, t) {
+  const ds = t.dataset;
+  if (t.classList.contains("off")) return;
+  const ask = {
+    "gm-restart": `Restart “${ds.name}” from the beginning?\n\nEveryone keeps their seat and makes a new character. Everything that happened is cleared (a backup is kept).`,
+    "gm-delete": `Delete “${ds.name}” for everyone?\n\nA backup is kept on this page, so you can bring it back.`,
+    "gm-kick": `Remove ${ds.name} from this story's table?`,
+    "gm-restore": "Bring this story back as it was when it was backed up?",
+    "gm-forget": `Forget this backup of “${ds.name}” for good? This can't be undone.`,
+  }[act];
+  if (!confirm(ask)) return;
+  t.disabled = true;
+  try {
+    if (act === "gm-restart") { const r = await api("POST", `/gm/campaigns/${ds.id}/restart`); toast(`Restarted “${r.title}”.`); }
+    if (act === "gm-delete") { await api("DELETE", `/gm/campaigns/${ds.id}`); toast("Deleted. A backup is below."); }
+    if (act === "gm-kick") { await api("DELETE", `/gm/campaigns/${ds.id}/players/${encodeURIComponent(ds.pid)}`); toast(`${ds.name} was removed.`); }
+    if (act === "gm-restore") { await api("POST", `/gm/backups/${ds.bid}/restore`); toast("The story is back."); }
+    if (act === "gm-forget") { await api("DELETE", `/gm/backups/${ds.bid}`); toast("Backup forgotten."); }
+  } catch (e) { toast(e.message); }
+  if (S.route === "gm") renderGM();
 }
 
 function erasHTML() {
@@ -402,10 +482,16 @@ function restartFeed() {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done", "world_event", "vision", "catch_up"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done", "world_event", "vision", "catch_up", "player_left"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
+  // the GM restarted or deleted this story
+  es.addEventListener("campaign_gone", ev => {
+    const d = JSON.parse(ev.data).data || {};
+    toast(d.how === "restarted" ? "The GM restarted this story from the beginning." : "The GM closed this story.");
+    go(d.next ? `#/c/${d.next}` : "#/");
+  });
   es.addEventListener("progress", ev => {
     S.progress = JSON.parse(ev.data).data;
     // another group's turn is theirs to watch
@@ -423,7 +509,7 @@ function onEvent(e) {
   if (e.type === "rewound" && fresh(e)) { toast(e.data?.text || "The story was rewound."); return restartFeed(); }
   S.lastId = e.id;
   S.events.push(e);
-  if (e.type !== "character_created" && e.type !== "player_joined") S.progress = null;
+  if (e.type !== "character_created" && e.type !== "player_joined" && e.type !== "player_left") S.progress = null;
   if (fresh(e)) liveEvent(e);
   clearTimeout(feedTimer);
   feedTimer = setTimeout(renderFeed, 30);
@@ -531,12 +617,11 @@ function renderLobby(soft) {
   const ready = v.players.length > 0 && v.players.every(p => p.character_id);
   const waiting = v.players.filter(p => !p.character_id).map(p => p.name);
   const running = v.status === "active";
-  const full = !v.you?.joined && v.players.length >= v.max_players;
   const status = running
-    ? (full ? "Every seat is taken." : !v.you?.joined ? "This story is under way. Take a seat and you’ll be written in where the party stands." : "Make your character. You’ll join the party where it stands, at its level, with the story so far.")
+    ? (!v.you?.joined ? "This story is under way. Take a seat and you’ll be written in where the party stands." : "Make your character. You’ll join the party where it stands, at its level, with the story so far.")
     : !v.you?.joined ? "Take a seat to play." : !me ? "Make your character to get ready." : ready ? "Everyone is ready." : `Waiting for ${waiting.join(", ")}…`;
   const btn = v.you?.joined ? (running ? "" : `<button class="btn primary ${ready ? "" : "off"}" data-act="start">Begin the story</button>`)
-    : full ? "" : `<button class="btn primary" data-act="join">Take a seat as ${esc(S.me.name)}</button>`;
+    : `<button class="btn primary" data-act="join">Take a seat as ${esc(S.me.name)}</button>`;
   app.innerHTML = `
   <div class="lobby">
     <div class="lobby-scroll">
@@ -555,7 +640,8 @@ function renderLobby(soft) {
 
 function seatsHTML() {
   const v = S.view;
-  return Array.from({ length: v.max_players }, (_, i) => v.players[i]).map(p => {
+  // no seat limit: everyone seated, then one open chair for whoever is next
+  return [...v.players, null].map(p => {
     if (!p) return `<div class="seat open"><span class="face">+</span><b>Open seat</b><span>share the play code</span></div>`;
     const c = v.party.find(x => x.id === p.character_id), you = p.id === S.me?.player_id;
     return `<div class="seat ${c ? "ready" : ""} ${you ? "you" : ""}">${c ? face(c) : `<span class="face">${initial(p.name)}</span>`}
@@ -2582,6 +2668,8 @@ document.addEventListener("click", async e => {
       case "begin": summonsDone(); return groupMove("begin", {}, t);
       case "signout": await fetch("/auth/logout", { method: "POST" }); S.me = null; leaveCampaign(); S.route = ""; location.hash = ""; return renderSignin();
       case "home": return go("#/");
+      case "gm": return go("#/gm");
+      case "gm-restart": case "gm-delete": case "gm-kick": case "gm-restore": case "gm-forget": return gmAct(act, t);
       case "create": return createCampaign();
       case "join":
         t.disabled = true;

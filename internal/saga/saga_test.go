@@ -12,7 +12,7 @@ func buildSaga(t *testing.T, key string) *game.World {
 	if s == nil {
 		t.Fatalf("no saga %q", key)
 	}
-	w, err := Build(s, "c1", Options{MaxSetbacks: 3, MaxPlayers: 5})
+	w, err := Build(s, "c1", Options{MaxSetbacks: 3})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

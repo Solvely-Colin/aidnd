@@ -39,7 +39,6 @@ func Conflict(format string, a ...any) error {
 // Config holds tunables (from environment variables in cmd/server).
 type Config struct {
 	SceneTurnCap        int  // quiet turns before progress is forced (default 10)
-	MaxPlayers          int  // default 4
 	MaxSetbacks         int  // default 3
 	ObjectiveCheckEvery int  // run the freeform judge every N turns (default 1)
 	LoreBudget          int  // characters of lore per narrator prompt (default 1800)
@@ -61,9 +60,6 @@ func (c *Config) defaults() {
 	}
 	if c.SceneTurnCap <= 0 {
 		c.SceneTurnCap = 10
-	}
-	if c.MaxPlayers <= 0 || c.MaxPlayers > 4 {
-		c.MaxPlayers = 4
 	}
 	if c.MaxSetbacks <= 0 {
 		c.MaxSetbacks = 3
@@ -184,8 +180,8 @@ func (g *GM) logf(format string, a ...any) {
 	}
 }
 
-// Join seats a player. It is idempotent per player id. It fails with
-// ErrConflict if the table is full or the story has ended. A player who
+// Join seats a player. It is idempotent per player id. There is no seat
+// limit. It fails with ErrConflict once the story has ended. A player who
 // joins a campaign under way makes a character and is written in where
 // the party stands (see joinRunning).
 func (g *GM) Join(ctx context.Context, campaignID, playerID, name string) (*game.Player, bool, error) {
@@ -199,13 +195,6 @@ func (g *GM) Join(ctx context.Context, campaignID, playerID, name string) (*game
 	}
 	if w.Campaign.Status != game.StatusLobby && w.Campaign.Status != game.StatusActive {
 		return nil, false, Conflict("the story has ended")
-	}
-	max := w.Campaign.MaxPlayers
-	if max <= 0 {
-		max = g.Cfg.MaxPlayers
-	}
-	if len(w.Players) >= max {
-		return nil, false, Conflict("the table is full (%d players)", max)
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {

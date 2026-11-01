@@ -17,7 +17,6 @@ puts players in front of aidnd. All bodies are JSON. Errors are always
 | `API_KEY` | | Set it to turn on **service mode** (see Auth). Empty means open dev mode. |
 | `CORS_ORIGINS` | | Comma-separated allowed origins, or `*`. |
 | `DEV_UI` | on in open mode | Serves the testing table at `/dev/`. |
-| `MAX_PLAYERS` | 4 | Seats per campaign. |
 | `MAX_SETBACKS` | 3 | Party wipes survived; the next one fails the campaign. |
 | `SCENE_TURN_CAP` | 10 | Quiet turns in one place before the director forces progress. |
 | `OBJECTIVE_CHECK_EVERY` | 1 | How often (in turns) the judge checks freeform objectives. |
@@ -107,7 +106,7 @@ they/them, and drafts fill it from the concept.
 |---|---|---|
 | `GET /healthz` | anyone | `{"ok": true}` |
 | `GET /meta?setting=` | anyone | Abilities, standard array, kits with items (fantasy), `settings` (each with its own kits), item catalog, XP table, DCs, `service_mode`, and `ruleset`: every class, species, background, feat, invocation and spell named for `setting` (`rules_name` is the SRD name). |
-| `GET /campaigns` | any caller | All campaigns: `{campaigns: [{id, title, pitch, status, players, max_players, updated_at}]}` |
+| `GET /campaigns` | any caller | All campaigns: `{campaigns: [{id, title, pitch, status, players, max_players, updated_at}]}` (`max_players` is legacy: there is no seat limit) |
 | `GET /me/campaigns` | player | Campaigns this player has joined. |
 | `POST /campaigns` | any caller | `{premise, lethality?}` → 201 campaign view. `lethality` is `standard` (three failed death saves kill) or `story` (they leave you stable). `{saga: "long-dark"}` instead starts a hand-written saga's open world (listed in `GET /meta` as `sagas`); no model call, and the view carries `saga`, `dread` and `storyline` (the main quest for the region the party is in). In dread campaigns each character view has `strain: {value, max, shaken, scars: [{key, name, text}]}`. |
 | `GET /campaigns/{id}` | any caller | Campaign view, personalised by `you` when a player id is known. |
@@ -142,6 +141,25 @@ they/them, and drafts fill it from the concept.
 | `GET /campaigns/{id}/dm/history` | joined player | DM console: `{snapshots: [{seq, event_id, turn, label, created_at}]}`, newest first. The last 30 turns are kept. `/meta` carries `magic`: the item templates, wondrous items and console actions. |
 | `POST /campaigns/{id}/dm/rewind` | joined player | `{seq}` puts the whole campaign back to just before that turn → campaign view. Events since are hidden from the log and the stream replay; a `rewound` event is sent so clients reload. 400 when the turn is no longer kept. |
 | `POST /campaigns/{id}/dm` | joined player | `{kind, amount?, target?, item?, template?, value?}` → `{text, campaign}`. `kind` is `end_fight`, `heal_party`, `award_xp` (`amount` 1-3000), `give_item` (`target` character, `item` a catalog or wondrous key, optional `template` to make it magic gear) or `lethality` (`value` standard or story). Each sends a `dm_action` event. |
+
+### GM area
+
+Only callers the Worker marks with `X-GM: 1` (the player ids in its
+`GM_PLAYERS` var; with a `GM_CODE` secret, only when signed in with that
+code). The Worker strips `X-GM` from everyone else's requests.
+
+| Route | What it does |
+|---|---|
+| `GET /gm/campaigns` | Every campaign with its players and characters, plus `backups` |
+| `POST /gm/campaigns/{id}/restart` | Back up, then start the story again from how it was written: same seats, new characters, new id. `{id, title, backup_id}` |
+| `DELETE /gm/campaigns/{id}` | Back up, then delete every row of the campaign. `{backup_id}` |
+| `DELETE /gm/campaigns/{id}/players/{pid}` | Free a seat (lobby only) |
+| `GET /gm/backups/{bid}` | Download a backup as JSON |
+| `POST /gm/backups/{bid}/restore` | Put a backed-up campaign back (it must not exist) |
+| `DELETE /gm/backups/{bid}` | Forget a backup |
+
+Open tabs on a restarted or deleted campaign get an unsaved
+`campaign_gone` event (`{how, next?}`).
 
 ### Journal
 

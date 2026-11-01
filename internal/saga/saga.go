@@ -214,8 +214,8 @@ func List() []Info {
 
 // Options are the campaign settings Build doesn't take from the saga.
 type Options struct {
-	MaxSetbacks, MaxPlayers int
-	Now                     int64
+	MaxSetbacks int
+	Now         int64
 }
 
 // Build makes a new world for the saga: the start region in full, and a
@@ -228,7 +228,7 @@ func Build(s *Saga, id string, opt Options) (*game.World, error) {
 		return nil, fmt.Errorf("saga %s has no start region %q", s.Key, s.Start)
 	}
 	w := &game.World{Campaign: game.Campaign{ID: id, Title: s.Title, Premise: s.Premise, Pitch: s.Pitch,
-		Setting: s.Setting, Status: game.StatusLobby, MaxSetbacks: opt.MaxSetbacks, MaxPlayers: opt.MaxPlayers, CreatedAt: opt.Now}}
+		Setting: s.Setting, Status: game.StatusLobby, MaxSetbacks: opt.MaxSetbacks, CreatedAt: opt.Now}}
 	w.Campaign.Saga, w.Campaign.Dread, w.Campaign.Async = s.Key, true, true
 	w.Campaign.Living = &game.Living{Tide: StartTide}
 	w.Campaign.Scene = game.Scene{Day: 1, Time: 1, Tension: 2}
