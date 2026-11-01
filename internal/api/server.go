@@ -112,6 +112,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/stream-token", s.auth(s.handleStreamToken))
 	mux.HandleFunc("GET /campaigns/{id}/events", s.handleEvents)
 	mux.HandleFunc("GET /campaigns/{id}/log", s.auth(s.handleLog))
+	mux.HandleFunc("GET /gm/campaigns", s.gmOnly(s.handleGMCampaigns))
+	mux.HandleFunc("POST /gm/campaigns/{id}/restart", s.gmOnly(s.handleGMRestart))
+	mux.HandleFunc("DELETE /gm/campaigns/{id}", s.gmOnly(s.handleGMDelete))
+	mux.HandleFunc("DELETE /gm/campaigns/{id}/players/{pid}", s.gmOnly(s.handleGMRemovePlayer))
+	mux.HandleFunc("GET /gm/backups/{bid}", s.gmOnly(s.handleGMDownloadBackup))
+	mux.HandleFunc("POST /gm/backups/{bid}/restore", s.gmOnly(s.handleGMRestoreBackup))
+	mux.HandleFunc("DELETE /gm/backups/{bid}", s.gmOnly(s.handleGMDeleteBackup))
 	if s.cfg.DevUI != nil {
 		mux.Handle("GET /dev/", http.StripPrefix("/dev", s.cfg.DevUI))
 		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/dev/", http.StatusFound) })
@@ -186,7 +193,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
 			h.Set("Vary", "Origin")
-			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Player-ID, Last-Event-ID")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Player-ID, X-GM, Last-Event-ID")
 			h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
