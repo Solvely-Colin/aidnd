@@ -17,6 +17,8 @@ func TestTellsFindsMachineHabits(t *testing.T) {
 		"It isn't fear, it's hunger.",
 		"The eldritch, cyclopean stones lean over the water.",
 		"A chill runs down your spine as the door opens.",
+		"Not fear, but hunger.",
+		"It is not fear but hunger.",
 	} {
 		if len(tells(s)) == 0 {
 			t.Errorf("no tell found in %q", s)
@@ -26,6 +28,7 @@ func TestTellsFindsMachineHabits(t *testing.T) {
 		`Martha keeps her hands on the register. "Ain't nobody gone aboard her, mister. Not since Tuesday."`,
 		"Rain beads on the window. Down the hill, a lamp burns in the harbor office, though the office closed at six.",
 		"It's not much, but the room is dry.",
+		"He is not here yet, but the lamp is lit.",
 	} {
 		if got := tells(s); len(got) > 0 {
 			t.Errorf("false tell in %q: %v", s, got)
@@ -68,5 +71,22 @@ func TestVoiceFollowsCampaign(t *testing.T) {
 	w.Campaign.Dread = true
 	if !strings.Contains(voice(w), "Lovecraft") || !strings.Contains(voice(w), "em dashes") {
 		t.Fatal("dread campaign is missing its voice or the prose rules")
+	}
+}
+
+func TestPolishScoresEachDashAndKeepsWorldNames(t *testing.T) {
+	// A rewrite that trades one stock phrase for four dashes is no better.
+	if a, b := tells("The air is thick with fish — she waits."), tells("Fish — salt — rope — she waits — still."); len(b) < len(a) {
+		t.Fatalf("dash-heavy rewrite scored better: %v vs %v", b, a)
+	}
+	w := &game.World{NPCs: []*game.NPC{{Name: "Martha Sargent"}, {Name: "Ada"}}}
+	if keepsNames(w, "Martha keeps the register.", "Mabel keeps the register.") {
+		t.Fatal("sentence-start world name swapped")
+	}
+	if keepsNames(w, "The clerk nods to Ada.", "The clerk nods to Adaline.") {
+		t.Fatal("name accepted as a substring of another")
+	}
+	if !keepsNames(w, "Martha keeps the register.", "Martha Sargent keeps the ledger.") {
+		t.Fatal("kept name refused")
 	}
 }

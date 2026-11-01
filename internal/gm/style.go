@@ -49,7 +49,11 @@ var tellPhrases = regexp.MustCompile(`(?i)\b(a testament to|palpable|the air (?:
 var aphorism = regexp.MustCompile(`(?i)\b(?:a|an|the)\s+\w+\s+(?:doesn't|does not|don't|never|can't|won't)\s+\w+[^.!?]{0,40}?\b(?:a|an|the)\s+\w+\s+(?:doesn't|does not|don't|never|can't|won't)\s+\w+`)
 
 // notButCue is the "not X, but Y" / "isn't X, it's Y" turn.
-var notButCue = regexp.MustCompile(`(?i)\b(?:isn'?t|wasn'?t|is not|was not|not just|not merely|not only)\s+[\w' ]{1,30}[,;]\s*(?:but|it'?s|it is|it was)\b`)
+var notButCue = regexp.MustCompile(`(?i)\b(?:(?:isn'?t|wasn'?t|is not|was not)\s+[\w' ]{1,30}[,;]\s*(?:it'?s|it is|it was)|not (?:just|merely|only)\s+[\w' ]{1,30}[,;]?\s*but)\b`)
+
+// notButBare is the short form: "Not fear, but hunger." or "It is not
+// fear but hunger." (a noun after "not", never "not much" or "not yet").
+var notButBare = regexp.MustCompile(`(?i)(?:^|[.!?"“]\s*|\b(?:is|was|are|were)\s+)not\s+(?:a\s+|an\s+|the\s+)?(\w+),?\s+but\s+(?:a\s+|an\s+|the\s+)?\w+[.!?]`)
 
 // purple are the Lovecraft words that read as pastiche when stacked.
 var purple = regexp.MustCompile(`(?i)\b(eldritch|cyclopean|nameless|unspeakable|unnameable|indescribable|blasphemous|squamous|gibbous|ichor(?:ous)?|unholy|abyssal)\b`)
@@ -67,14 +71,19 @@ func tells(text string) []string {
 	if m := notButCue.FindString(text); m != "" {
 		out = append(out, fmt.Sprintf("\"not X but Y\" construction %q", m))
 	}
-	if n := strings.Count(text, "—") + strings.Count(text, " -- "); n > 0 {
-		out = append(out, fmt.Sprintf("%d em dash(es): use commas or full stops", n))
+	if m := notButBare.FindString(text); m != "" && !notButCue.MatchString(text) {
+		out = append(out, fmt.Sprintf("\"not X but Y\" construction %q", m))
+	}
+	for i, n := 0, dashes(text); i < n; i++ {
+		out = append(out, fmt.Sprintf("em dash %d of %d: use commas or full stops", i+1, n))
 	}
 	if ms := purple.FindAllString(text, -1); len(ms) > 1 {
 		out = append(out, fmt.Sprintf("stacked pastiche words (%s): keep at most one", strings.ToLower(strings.Join(ms, ", "))))
 	}
 	return out
 }
+
+func dashes(s string) int { return strings.Count(s, "—") + strings.Count(s, " -- ") }
 
 const polishSystem = `You are a fiction editor. Fix only the listed problems in the passage. Keep every fact, name, number, roll result and line of speech; keep the voice, tense, point of view and length. Do not add people, items, places or events. Output only the passage.`
 
@@ -95,7 +104,7 @@ func (g *GM) polish(ctx context.Context, w *game.World, tag, text string) string
 		return text
 	}
 	n, m := wordCount(text), wordCount(out)
-	if m*10 < n*6 || m*10 > n*14 || len(tells(out)) >= len(found) || !keepsNames(text, out) {
+	if m*10 < n*6 || m*10 > n*14 || len(tells(out)) >= len(found) || !keepsNames(w, text, out) {
 		return text
 	}
 	return out
@@ -103,16 +112,37 @@ func (g *GM) polish(ctx context.Context, w *game.World, tag, text string) string
 
 var nameRe = regexp.MustCompile(`\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*`)
 
-// keepsNames reports whether every name in a (a capitalised word inside a
-// sentence, or several in a row anywhere) still appears in b.
-func keepsNames(a, b string) bool {
+// keepsNames reports whether every name in a still appears whole in b: the
+// world's characters, people and places wherever they stand, and any other
+// capitalised word inside a sentence (or several in a row anywhere).
+func keepsNames(w *game.World, a, b string) bool {
+	has := func(s, name string) bool {
+		return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(s)
+	}
+	if w != nil {
+		var names []string
+		for _, c := range w.Characters {
+			names = append(names, strings.Fields(c.Name)...)
+		}
+		for _, n := range w.NPCs {
+			names = append(names, strings.Fields(n.Name)...)
+		}
+		for _, l := range w.Locations {
+			names = append(names, l.Name)
+		}
+		for _, n := range names {
+			if len(n) > 2 && n[0] >= 'A' && n[0] <= 'Z' && has(a, n) && !has(b, n) {
+				return false
+			}
+		}
+	}
 	for _, loc := range nameRe.FindAllStringIndex(a, -1) {
 		name := a[loc[0]:loc[1]]
 		before := strings.TrimRight(a[:loc[0]], " \"'“‘(")
 		if (before == "" || strings.ContainsAny(before[len(before)-1:], ".!?:\n")) && !strings.Contains(name, " ") {
 			continue // one word at a sentence start: may be any word
 		}
-		if !strings.Contains(b, name) {
+		if !has(b, name) {
 			return false
 		}
 	}

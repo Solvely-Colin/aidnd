@@ -70,6 +70,9 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 			out.Text = fallbackNarration(res)
 		} else {
 			out.Text = g.dejargon(ctx, g.polish(ctx, w, "narrate_quick", out.Text))
+			if wordCount(out.Text) > 60 {
+				out.Text = g.tighten(ctx, out.Text, 60)
+			}
 			c := newCanon(w, res.Arrived, res.Changes, happened)
 			out.Text, out.Canon = g.guard(ctx, c, "narrate_quick", out.Text, fallbackNarration(res))
 		}
