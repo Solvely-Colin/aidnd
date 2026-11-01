@@ -56,7 +56,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	happened := describeResolution(res, w)
 	if quick {
 		req := llm.Request{Tag: "narrate_quick", Temperature: 0.6, MaxTokens: 200, Messages: []llm.Message{
-			llm.System(quickSystem),
+			llm.System(styled(quickSystem, w)),
 			llm.User(fmt.Sprintf("%s%s%s\nPLAYER (%s): %s\n\nWHAT HAPPENED:\n%s", snapshot(w, actor, false), worldMemory(w, actor), unrealBlock(w), actor.Name, text, happened)),
 		}}
 		resp, err := g.LLM.Chat(ctx, req)
@@ -69,7 +69,10 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		if out.Text == "" {
 			out.Text = fallbackNarration(res)
 		} else {
-			out.Text = g.dejargon(ctx, out.Text)
+			out.Text = g.dejargon(ctx, g.polish(ctx, w, "narrate_quick", out.Text))
+			if wordCount(out.Text) > 60 {
+				out.Text = g.tighten(ctx, out.Text, 60)
+			}
 			c := newCanon(w, res.Arrived, res.Changes, happened)
 			out.Text, out.Canon = g.guard(ctx, c, "narrate_quick", out.Text, fallbackNarration(res))
 		}
@@ -94,7 +97,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true, DirResolvePromise: true, DirMarkCharacter: true, DirNPCTie: true, DirRecordChoice: true})
 	}
 	req := llm.Request{Tag: "narrate", Temperature: 0.8, MaxTokens: 600, Tools: tools,
-		Messages: []llm.Message{llm.System(narratorSystem), llm.User(b.String())}}
+		Messages: []llm.Message{llm.System(styled(narratorSystem, w)), llm.User(b.String())}}
 	if dir.ForceProgress {
 		req.Tools = filterTools(directiveTools(), progressDirectives)
 		req.RequireTool = true
@@ -189,7 +192,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 			textOut += " " + strings.Join(out.Changes, ". ") + "."
 		}
 	} else {
-		textOut = g.dejargon(ctx, textOut)
+		textOut = g.dejargon(ctx, g.polish(ctx, w, "narrate", textOut))
 		allowed := append(append(append([]string{}, res.Changes...), out.Changes...), dir.BeatChanges...)
 		if dir.Beat != nil {
 			allowed = append(allowed, dir.Beat.Title, dir.Beat.Text)
@@ -213,7 +216,7 @@ func (g *GM) dejargon(ctx context.Context, text string) string {
 		return text
 	}
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "dejargon", Temperature: 0.3, MaxTokens: 300, Messages: []llm.Message{
-		llm.System("Rewrite the passage as a storyteller would say it. Keep every fact, name and number. Replace game terms (zone, NPC, disposition, HP, engine) with natural description, e.g. \"one zone off\" becomes \"across the green\". Same length or shorter. No questions."),
+		llm.System("Rewrite the passage as a storyteller would say it. Keep every fact, name and number. Replace game terms (zone, NPC, disposition, HP, engine) with natural description, e.g. \"one zone off\" becomes \"across the green\". Keep the voice. Same length or shorter. No questions."),
 		llm.User(text)}})
 	out := strings.TrimSpace(resp.Content)
 	if err != nil || out == "" || jargonRe.MatchString(out) {
@@ -224,7 +227,7 @@ func (g *GM) dejargon(ctx context.Context, text string) string {
 
 func (g *GM) tighten(ctx context.Context, text string, words int) string {
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "tighten", Temperature: 0.3, MaxTokens: 300, Messages: []llm.Message{
-		llm.System(fmt.Sprintf("Condense the passage to at most %d words. Keep every fact, roll result and name. Plain language. No questions.", words)),
+		llm.System(fmt.Sprintf("Condense the passage to at most %d words. Keep every fact, roll result and name. Keep the voice. No questions.", words)),
 		llm.User(text)}})
 	if err != nil || strings.TrimSpace(resp.Content) == "" {
 		f := strings.Fields(text)
@@ -822,7 +825,7 @@ func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.Ene
 	}
 	prompt += "Engine-resolved enemy actions:\n" + strings.Join(lines, "\n")
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "narrate_enemies", Temperature: 0.7, MaxTokens: 300, Messages: []llm.Message{
-		llm.System(enemySystem),
+		llm.System(styled(enemySystem, w)),
 		llm.User(prompt)}})
 	text := strings.TrimSpace(resp.Content)
 	if err != nil || text == "" {
@@ -846,6 +849,7 @@ func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.Ene
 		plain = append(plain, t.Text)
 	}
 	fb := strings.Join(plain, ". ") + "."
+	text = g.polish(ctx, w, "narrate_enemies", text)
 	text, _ = g.guard(ctx, newCanon(w, "", lines, last), "narrate_enemies", text, fb)
 	return text
 }

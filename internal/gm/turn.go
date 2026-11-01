@@ -108,7 +108,7 @@ func (g *GM) Start(ctx context.Context, campaignID string) (*game.World, string,
 	dir.MainObjective, dir.SceneGoal, dir.RouteHint = g.sceneGoal(w)
 	w.Campaign.Scene.Goal = dir.SceneGoal
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "narrate_opening", Temperature: 0.8, MaxTokens: 500, Messages: []llm.Message{
-		llm.System(narratorSystem),
+		llm.System(styled(narratorSystem, w)),
 		llm.User(fmt.Sprintf("%s\nSTATE:\n%s\nThe party: %s.\nWrite the opening narration (60-120 words): where they are, why they are here (the pitch), and the hook toward: %s. End on the situation.",
 			loreBlock(selectLore(w, w.Campaign.Pitch, g.Cfg.LoreBudget)), snapshot(w, nil, true), strings.Join(party, ", "), dir.SceneGoal)),
 	}})
@@ -117,6 +117,7 @@ func (g *GM) Start(ctx context.Context, campaignID string) (*game.World, string,
 	if err != nil || opening == "" {
 		opening = plain
 	} else {
+		opening = g.polish(ctx, w, "narrate_opening", opening)
 		opening, _ = g.guard(ctx, newCanon(w, hub.ID, nil, w.Campaign.Pitch, hub.Description), "narrate_opening", opening, plain)
 	}
 	first := w.ActiveCharacter()
