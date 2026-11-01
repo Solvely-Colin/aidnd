@@ -482,7 +482,7 @@ function restartFeed() {
 function connect(id) {
   if (S.es) return;
   const es = new EventSource(`/api/campaigns/${id}/events`);
-  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done", "world_event", "vision", "catch_up"];
+  const types = ["campaign_created", "player_joined", "character_created", "player_action", "action_resolved", "narration", "enemy_turns", "quest_updated", "location_changed", "turn_started", "turn_budget", "campaign_ended", "conditions", "action_pending", "action_cancelled", "death_save", "rewound", "dm_action", "group_split", "group_joined", "world_tick", "downtime_done", "world_event", "vision", "catch_up", "player_left"];
   types.forEach(t => es.addEventListener(t, ev => onEvent(JSON.parse(ev.data))));
   // Progress events are not saved and have no id: they say the action is
   // being read, then carry its dice while the narration is written.
@@ -509,7 +509,7 @@ function onEvent(e) {
   if (e.type === "rewound" && fresh(e)) { toast(e.data?.text || "The story was rewound."); return restartFeed(); }
   S.lastId = e.id;
   S.events.push(e);
-  if (e.type !== "character_created" && e.type !== "player_joined") S.progress = null;
+  if (e.type !== "character_created" && e.type !== "player_joined" && e.type !== "player_left") S.progress = null;
   if (fresh(e)) liveEvent(e);
   clearTimeout(feedTimer);
   feedTimer = setTimeout(renderFeed, 30);

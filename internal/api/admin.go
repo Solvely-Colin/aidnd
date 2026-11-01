@@ -44,7 +44,7 @@ type GMPlayer struct {
 	Character string `json:"character,omitempty"`
 	Class     string `json:"class,omitempty"`
 	Level     int    `json:"level,omitempty"`
-	HP        int    `json:"hp,omitempty"`
+	HP        int    `json:"hp"` // 0 while dying, so always sent
 	MaxHP     int    `json:"max_hp,omitempty"`
 	Dead      bool   `json:"dead,omitempty"`
 }

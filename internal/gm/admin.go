@@ -14,6 +14,10 @@ import (
 // delete one, bring a deleted one back, and free a seat in a lobby. Every
 // restart and delete saves a backup first.
 
+// Lock holds a campaign's lock for writes made outside the GM, such as
+// player notes, so they cannot slip between a backup and a delete.
+func (g *GM) Lock(id string) func() { return g.lock(id) }
+
 // saveOrigin keeps a newly written campaign so it can be restarted later.
 // A failure only costs the restart option, so it is logged, not returned.
 func (g *GM) saveOrigin(ctx context.Context, w *game.World) {

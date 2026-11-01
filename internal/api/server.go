@@ -818,6 +818,8 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddNote(w http.ResponseWriter, r *http.Request) {
+	// a GM restart or delete must not lose a note saved mid-backup
+	defer s.gm.Lock(r.PathValue("id"))()
 	wld, pid, err := s.notePlayer(r)
 	if err != nil {
 		s.fail(w, err)
@@ -847,6 +849,8 @@ func (s *Server) handleAddNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEditNote(w http.ResponseWriter, r *http.Request) {
+	// a GM restart or delete must not lose a note saved mid-backup
+	defer s.gm.Lock(r.PathValue("id"))()
 	wld, pid, err := s.notePlayer(r)
 	if err != nil {
 		s.fail(w, err)
@@ -865,6 +869,8 @@ func (s *Server) handleEditNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
+	// a GM restart or delete must not lose a note saved mid-backup
+	defer s.gm.Lock(r.PathValue("id"))()
 	wld, pid, err := s.notePlayer(r)
 	if err != nil {
 		s.fail(w, err)
