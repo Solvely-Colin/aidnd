@@ -510,4 +510,3 @@ func (w *World) GroupInfos() []GroupInfo {
 	}
 	return out
 }
-
