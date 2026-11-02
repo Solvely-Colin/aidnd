@@ -213,8 +213,16 @@ func purposeSkill(purpose string) string {
 		return "athletics"
 	case "stabilize", "tend":
 		return "medicine"
-	case "hide":
+	case "hide", PurposeSneak:
 		return "stealth"
+	case PurposePersuade:
+		return "persuasion"
+	case PurposeDeceive:
+		return "deception"
+	case PurposeIntimidate:
+		return "intimidation"
+	case PurposeSteal:
+		return "sleight_of_hand"
 	}
 	return ""
 }

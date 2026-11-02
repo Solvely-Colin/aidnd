@@ -22,9 +22,9 @@ Rules:
 - Questions like "what do I see?" or "what's in the room?" are look. Talking to an NPC in a conversation is talk_to; a passing remark is say. Outside combat talk_to walks the actor over to the NPC, so no reposition is needed first. "I talk to X: <question>" is one talk_to with that question as text. Words addressed to a named NPC ("I tell X ...", "I promise X ...") are talk_to, not say.
 - When the character gives an NPC their word (promises, swears, makes a deal or owes a debt), put what they promised in talk_to's promise field.
 - Anything risky or uncertain (climbing, sneaking, searching, persuading, picking a lock) is ability_check with a sensible DC (5/10/15/20/25).
-- Laying hands on someone who is not an enemy in this fight (grab, pin, shove, trip, restrain, pickpocket) is ability_check (athletics or sleight_of_hand) naming that person in its text, never a bare reposition. Shoving or tripping an enemy is shove; grabbing and holding one is grapple; pinning or tying up a badly hurt enemy to end its fight is subdue.
+- Laying hands on someone who is not an enemy in this fight (grab, pin, shove, trip, restrain) is ability_check (athletics) naming that person in its text, never a bare reposition. Picking a pocket or lifting something an NPC carries is ability_check purpose steal (sleight_of_hand) with target = that NPC and item = what is taken. Shoving or tripping an enemy is shove; grabbing and holding one is grapple; pinning or tying up a badly hurt enemy to end its fight is subdue.
 - Teamwork in a fight: "I cover / defend myself / brace" = dodge; "I back away carefully" = disengage (then reposition); "I distract it so X can hit" / "I give X a hand" = help; "I duck out of sight" = hide; "I wait for it to come to me" / "I shoot whatever comes through the door" = ready.
-- Give ability_check the skill that fits (stealth to sneak, perception to notice, insight to read someone, persuasion, deception, intimidation, athletics to climb, medicine to treat or stabilize a dying ally...). Tending, bandaging or treating wounds (own or an ally's) is ability_check with purpose tend, so the engine heals real HP.
+- Give ability_check the skill that fits (stealth to sneak, perception to notice, insight to read someone, persuasion, deception, intimidation, athletics to climb, medicine to treat or stabilize a dying ally...). Tending, bandaging or treating wounds (own or an ally's) is ability_check with purpose tend, so the engine heals real HP. Convincing, lying to or threatening an NPC here is ability_check with purpose persuade, deceive or intimidate and target = that NPC (a plain question or chat stays talk_to). Sneaking outside a fight is purpose sneak; searching a place or looking for clues is purpose search.
 - Spells and powers: when the player casts, prays, invokes, or uses a power that matches one of the actor's SPELLS (by its name in this setting or what it does), call cast_spell with that spell key. Class abilities in ABILITIES (rage, second wind, action surge, cunning action, flurry of blows, lay on hands, wild shape, bardic inspiration...) are use_feature. Never cast a spell the actor doesn't list. Bonus actions don't spend the ACTION, so "I rage and attack" = use_feature rage + attack.
 - Sleeping, bedding down, getting ready for bed or spending the night anywhere = rest with length night, even somewhere dangerous; "catch my breath" or "rest a while" = rest with length short.
 - Taking up a quest someone here offered or a lead the party knows of ("I'll do it", "I accept", "I'll look into it", "let's find out what happened to the Marsh girl") = accept_quest with its id.
@@ -477,13 +477,15 @@ func validateAction(w *game.World, c *game.Character, a *game.Action) string {
 			a.Skill = ""
 		}
 		if _, ok := game.ParseAbility(a.Ability); !ok {
-			a.Ability = "WIS"
+			a.Ability = "" // the engine picks the purpose's own ability (WIS for other)
 		}
 		if a.Target != "" {
 			if x := w.FindExit(l.ID, a.Target); x != nil {
 				a.Target = x.Edge.ID
 			} else if t := w.Character(a.Target); t != nil {
 				a.Target = t.ID
+			} else if n := w.NPC(a.Target); n != nil && n.Alive && n.LocationID == l.ID {
+				a.Target = n.ID
 			}
 		}
 	case game.ActDodge, game.ActDisengage, game.ActHide:
@@ -540,6 +542,8 @@ func resolveTargetZone(w *game.World, a *game.Action) {
 			a.Target = e.ID
 		} else if t := w.Character(a.Target); t != nil {
 			a.Target = t.ID
+		} else if n := w.NPC(a.Target); n != nil && n.Alive && n.LocationID == w.Campaign.LocationID {
+			a.Target = n.ID
 		}
 	}
 	if l := w.Here(); l != nil && a.Zone != "" {

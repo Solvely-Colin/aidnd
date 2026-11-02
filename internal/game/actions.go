@@ -196,6 +196,8 @@ func SlotFor(w *World, a Action) Slot {
 func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 	w := ctx.W
 	res := &Resolution{ActorID: actor.ID, AllFree: true}
+	faded := ExpireCharms(w)
+	defer func() { res.Changes = append(faded, res.Changes...) }()
 	if len(actions) > MaxSteps {
 		for _, a := range actions[MaxSteps:] {
 			res.Skipped = append(res.Skipped, Step{Action: a, Skipped: true, Error: fmt.Sprintf("only %d steps per message", MaxSteps)})
@@ -365,6 +367,9 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 			return fmt.Errorf("say what?")
 		}
 		st.Info = append(st.Info, fmt.Sprintf("%s says: %q", c.Name, trimTo(a.Text, 300)))
+		if !w.InCombat() {
+			c.Conditions.remove(CondHidden) // speaking up gives a sneak away
+		}
 		return nil
 	case ActEndTurn:
 		st.Changes = append(st.Changes, c.Name+" ends their turn")
@@ -536,6 +541,9 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 		st.Changes = append(st.Changes, fmt.Sprintf("%s moves to %s", c.Name, ZoneName(l, n.ZoneID)))
 	}
 	n.Met(c, w.Campaign.Turn)
+	if !w.InCombat() {
+		c.Conditions.remove(CondHidden) // speaking up gives a sneak away
+	}
 	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.AttitudeTo(c)))
 	for _, t := range n.TiesTo(c.ID) {
 		st.Info = append(st.Info, TieLine(w, n, t))
@@ -561,20 +569,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	}
 	// an NPC who holds what an active quest needs hands it over when asked,
 	// unless they are hostile
-	for _, q := range w.Quests {
-		if q.Status != QuestActive || n.AttitudeTo(c) < 0 || !OnQuest(q, c) {
-			continue
-		}
-		for _, o := range q.Objectives {
-			if o.Done || o.Kind != ObjObtainItem {
-				continue
-			}
-			if it := w.FindItemOf(OwnerNPC, n.ID, o.Target); it != nil && !isReward(w, it.ID) {
-				it.Owner = Owner{Kind: OwnerCharacter, ID: c.ID}
-				st.Changes = append(st.Changes, fmt.Sprintf("%s hands %s to %s", n.Name, it.Name, c.Name))
-			}
-		}
-	}
+	handOver(w, n, c, false, st)
 	if n.Merchant {
 		for _, it := range w.ItemsOf(OwnerNPC, n.ID) {
 			if !isReward(w, it.ID) && it.Kind != ItemQuest {
@@ -798,6 +793,7 @@ func travel(ctx *Ctx, c *Character, ref string, st *Step) error {
 			return fmt.Errorf("%s is %v", ch.Name, err)
 		}
 	}
+	dropSneaking(w) // a journey is too long to stay unseen
 	prev := w.Campaign.LocationID
 	for _, hop := range path {
 		loc := w.Location(hop)
@@ -858,6 +854,10 @@ func surprise(ctx *Ctx, enc *Encounter, st *Step) {
 	w := ctx.W
 	watcher, pp := BestPassive(w)
 	if watcher == nil || len(enc.Enemies) == 0 {
+		return
+	}
+	if s := partySneaking(w); s != nil {
+		st.Changes = append(st.Changes, fmt.Sprintf("%s was moving unseen and sees them first: no surprise, and %s stays hidden", s.Name, s.Name))
 		return
 	}
 	sneak := 0
@@ -1204,8 +1204,58 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if (purpose == "" || purpose == "other") && tendWords(a.Text) {
 		purpose = "tend"
 	}
+	if purpose == "" || purpose == "other" {
+		purpose = inferPurpose(w, c, a)
+	}
 	var tended *Character
+	var swayed *NPC
+	var lifted *Item
+	fixedDC := 0
 	switch purpose {
+	case PurposePersuade, PurposeDeceive, PurposeIntimidate:
+		n, err := socialTarget(w, a)
+		if err != nil {
+			return err
+		}
+		if e := npcFoe(w, n); e != nil {
+			// mid-fight, talking a foe down is subdue
+			method := "persuade"
+			if purpose == PurposeIntimidate {
+				method = "intimidate"
+			}
+			return subdue(ctx, c, Action{Kind: ActSubdue, Target: e.ID, Method: method}, st)
+		}
+		if triedToday(w, n, c, purpose) {
+			return fmt.Errorf("%s already tried that on %s today; it won't land twice. Change their mind with deeds, or try again tomorrow", c.Name, n.Name)
+		}
+		swayed, fixedDC = n, socialDC(n, c, purpose)
+		if !ok {
+			ab = CHA
+		}
+	case PurposeSteal:
+		n, err := socialTarget(w, a)
+		if err != nil {
+			return err
+		}
+		it, err := stealTarget(w, n, a)
+		if err != nil {
+			return err
+		}
+		if triedToday(w, n, c, purpose) {
+			return fmt.Errorf("%s already tried to rob %s today; they are watching their things now", c.Name, n.Name)
+		}
+		swayed, lifted, fixedDC = n, it, stealDC(n, c)
+		if !ok {
+			ab = DEX
+		}
+	case PurposeSneak:
+		if w.InCombat() {
+			return hide(ctx, c, st)
+		}
+		fixedDC = sneakDC(w)
+		if !ok {
+			ab = DEX
+		}
 	case "tend", "heal", "treat":
 		purpose = "tend"
 		t, err := tendPatient(w, c, a.Target)
@@ -1304,6 +1354,9 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if patient != nil || tended != nil {
 		dc = 10
 	}
+	if fixedDC > 0 {
+		dc = fixedDC
+	}
 	parts := CheckParts(c, ab)
 	label := fmt.Sprintf("%s %s check", c.Name, ab)
 	if hasSkill {
@@ -1342,11 +1395,26 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if hasSkill {
 		what = sk.Name
 	}
-	if !ch.Tier.Succeeded() {
+	okRoll := ch.Tier.Succeeded()
+	if okRoll {
+		st.Changes = append(st.Changes, fmt.Sprintf("%s's %s check succeeds (%d vs DC %d)", c.Name, what, ch.Total, dc))
+	} else {
 		st.Changes = append(st.Changes, fmt.Sprintf("%s's %s check fails (%d vs DC %d)", c.Name, what, ch.Total, dc))
+	}
+	switch {
+	case lifted != nil:
+		stealResult(w, swayed, lifted, c, okRoll, st)
+		return nil
+	case swayed != nil:
+		swayResult(w, swayed, c, purpose, okRoll, ch.Tier == dice.CritSuccess, ch.Tier == dice.CritFailure, st)
+		return nil
+	case purpose == PurposeSneak:
+		sneakResult(c, okRoll, st)
 		return nil
 	}
-	st.Changes = append(st.Changes, fmt.Sprintf("%s's %s check succeeds (%d vs DC %d)", c.Name, what, ch.Total, dc))
+	if !okRoll {
+		return nil
+	}
 	if patient != nil {
 		Stabilize(patient)
 		st.Changes = append(st.Changes, fmt.Sprintf("%s stabilizes %s, who stops dying but stays unconscious", c.Name, patient.Name))
@@ -1366,12 +1434,17 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 		st.Changes = append(st.Changes, fmt.Sprintf("The way to %s is open", w.Location(lockEdge.Other(l.ID)).Name))
 	}
 	if purpose == "search" || purpose == "" || purpose == "other" {
+		found := false
 		for _, x := range w.Exits(l.ID, true) {
-			if x.Edge.State == EdgeHidden && (purpose == "search" || ch.Tier == dice.CritSuccess) {
+			if x.Edge.State == EdgeHidden && !x.Edge.LairGate && (purpose == "search" || ch.Tier == dice.CritSuccess) {
 				_ = RevealExit(w, x.Edge.ID)
 				st.Changes = append(st.Changes, fmt.Sprintf("%s discovers a hidden way: %s", c.Name, firstNonEmpty(x.Label, "to "+x.To.Name)))
+				found = true
 				break
 			}
+		}
+		if purpose == "search" && !found {
+			st.Info = append(st.Info, searchFinds(w, l))
 		}
 	}
 	return nil
