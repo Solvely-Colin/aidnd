@@ -68,6 +68,25 @@ type BossSpec struct {
 	MinionHorror int    `json:"minion_horror,omitempty"`
 }
 
+// NoBosses strips boss stat blocks from a random fight (an ambush, a
+// night visitor): bosses belong to lairs and the story, where the party
+// chose to go.
+func NoBosses(specs []EnemySpec) []EnemySpec {
+	for i := range specs {
+		specs[i].Boss = nil
+	}
+	return specs
+}
+
+// BossMoveDice is how many d6 a boss's signature move rolls: more with
+// danger, but its average never above the damage cap for the party's
+// level, so a level 1 investigator isn't erased by one failed save.
+func BossMoveDice(danger, level int) int {
+	n := 2 + danger
+	limit := max(2, CapsFor(danger, level).MaxDamage*2/7)
+	return min(n, limit)
+}
+
 // makeBoss turns e into a boss for this location and party: the stat caps
 // at their top, HP near a whole encounter's budget, and the default three
 // phases.
@@ -101,7 +120,7 @@ func makeBoss(w *World, e *Enemy, spec BossSpec) {
 	e.Boss = &Boss{
 		Attacks: 1 + min(2, size/2),
 		Resist:  resist,
-		Move:    BossMove{Name: trimTo(move, 40), Dice: fmt.Sprintf("%dd6", 2+danger), Save: DEX, DC: InflictDC(e.AttackBonus) + 1, Inflicts: inflict},
+		Move:    BossMove{Name: trimTo(move, 40), Dice: fmt.Sprintf("%dd6", BossMoveDice(danger, level)), Save: DEX, DC: InflictDC(e.AttackBonus) + 1, Inflicts: inflict},
 		Phases: []BossPhase{
 			{At: 100, Name: "Composed"},
 			{At: 50, Name: "Enraged", Line: e.Name + " is bloodied and fights harder: +1 to hit, +2 damage", Attack: 1, Damage: 2},

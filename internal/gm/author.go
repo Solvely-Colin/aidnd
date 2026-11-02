@@ -729,7 +729,8 @@ func kitFor(text string) string {
 // visitor authors what comes for a quest's night watch.
 func (g *GM) visitor(ctx context.Context, w *game.World) func(*game.Location, string) []game.EnemySpec {
 	return func(l *game.Location, why string) []game.EnemySpec {
-		return g.authorEnemies(ctx, w, l, "what comes in the night for the quest step: "+why+". Make it the thing the step promises, named for what it is")
+		specs := g.authorEnemies(ctx, w, l, "what comes in the night for the quest step: "+why+". One kind of foe, the thing the step promises, named for what it is; a fight the party can win, not a boss")
+		return game.NoBosses(specs)
 	}
 }
 
@@ -748,7 +749,9 @@ func (g *GM) arrivalHooks(ctx context.Context, w *game.World) (func(*game.Locati
 			g.defineZones(ctx, w, l)
 		}
 	}
-	ambush := func(l *game.Location) []game.EnemySpec { return g.authorEnemies(ctx, w, l, "an ambush on the road") }
+	ambush := func(l *game.Location) []game.EnemySpec {
+		return game.NoBosses(g.authorEnemies(ctx, w, l, "an ambush on the road"))
+	}
 	return onArrive, ambush
 }
 
