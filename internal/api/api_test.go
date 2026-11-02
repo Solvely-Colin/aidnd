@@ -799,3 +799,15 @@ func TestFriendJoinsAStoryUnderWay(t *testing.T) {
 		t.Fatal("the story so far is only for the newcomer")
 	}
 }
+
+func TestQuestNewsVisibleOnlyToItsPlayers(t *testing.T) {
+	mk := func(players []string) store.Event {
+		return store.NewEvent("quest_updated", "", map[string]any{"text": "x", "players": players})
+	}
+	if !visibleTo(mk(nil), "u2") {
+		t.Fatal("news for everyone is hidden")
+	}
+	if visibleTo(mk([]string{"u1"}), "u2") || !visibleTo(mk([]string{"u1"}), "u1") {
+		t.Fatal("personal quest news leaked or hidden from its player")
+	}
+}

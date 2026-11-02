@@ -81,6 +81,7 @@ func TestSideQuestLifecycle(t *testing.T) {
 func TestAcceptQuestRequiresGiverPresent(t *testing.T) {
 	f := newFixture(t)
 	q := f.sideQuest(t, ObjectiveSpec{Kind: ObjFreeform, Text: "Bring word"})
+	q.Known = nil // not heard of yet
 	f.goTo(f.wood, 0)
 	r := Resolve(f.ctx(), f.aria, []Action{{Kind: ActAcceptQuest, Target: q.ID}})
 	if !strings.Contains(stepErr(r, 0), "find them") {
@@ -97,7 +98,7 @@ func TestObtainDeliverTalkObjectives(t *testing.T) {
 		ObjectiveSpec{Kind: ObjObtainItem, Text: "Find the pelt", Target: "Silver Pelt"},
 		ObjectiveSpec{Kind: ObjDeliverItem, Text: "Give the pelt to Dunna", Target: "Silver Pelt", DeliverTo: "Dunna"},
 	)
-	_, err := AcceptQuest(w, q.ID)
+	_, _, err := AcceptQuest(w, q.ID, w.Characters[0])
 	must(t, err)
 	// talking before acceptance would not count; now it does
 	w.Campaign.Turn = 1
@@ -118,7 +119,7 @@ func TestFreeformOnlyByJudgeWithEvidence(t *testing.T) {
 	f := newFixture(t)
 	q := f.sideQuest(t, ObjectiveSpec{Kind: ObjFreeform, Text: "Bring word to the elder"},
 		ObjectiveSpec{Kind: ObjTalkToNPC, Text: "Talk to Dunna", Target: "Dunna"})
-	_, err := AcceptQuest(f.w, q.ID)
+	_, _, err := AcceptQuest(f.w, q.ID, f.w.Characters[0])
 	must(t, err)
 	EvaluateQuests(f.w)
 	if q.Objectives[0].Done {
@@ -320,7 +321,7 @@ func TestQuestItemHeldByNamedNPCHandedOverOnTalk(t *testing.T) {
 	if w.FindItemOf(OwnerNPC, f.smith.ID, "Warding Salt") == nil {
 		t.Fatal("salt should be held by the NPC the objective names")
 	}
-	_, err = AcceptQuest(w, q.ID)
+	_, _, err = AcceptQuest(w, q.ID, w.Characters[0])
 	must(t, err)
 	w.Campaign.Turns.Budget = FullBudget(false)
 	Resolve(f.ctx(), f.aria, []Action{{Kind: ActTalkTo, Target: "Dunna"}})
@@ -338,7 +339,7 @@ func TestQuestFoeWaitsAtItsPlace(t *testing.T) {
 	if q.Objectives[0].Where != f.wood.ID {
 		t.Fatalf("foe placed at %q, want Whisperwood", q.Objectives[0].Where)
 	}
-	_, err = AcceptQuest(w, q.ID)
+	_, _, err = AcceptQuest(w, q.ID, w.Characters[0])
 	must(t, err)
 	w.Campaign.Turns.Budget = FullBudget(false)
 	res := Resolve(f.ctx(), f.aria, []Action{{Kind: ActMove, Target: "Whisperwood"}})
@@ -351,7 +352,7 @@ func TestQuestFoeWaitsAtItsPlace(t *testing.T) {
 	for _, e := range w.Encounter.Enemies {
 		e.HP = 0
 	}
-	w.Defeats = append(w.Defeats, DefeatRecord{Name: "Grey Alpha", Turn: w.Campaign.Turn})
+	w.Defeats = append(w.Defeats, DefeatRecord{Name: "Grey Alpha", Turn: w.Campaign.Turn, By: []string{f.aria.ID}})
 	EvaluateQuests(w)
 	if !q.Objectives[0].Done {
 		t.Fatal("defeating the quest foe should tick the objective")
@@ -369,12 +370,17 @@ func TestOfferedQuestTakenUpOnArrival(t *testing.T) {
 		ObjectiveSpec{Kind: ObjFreeform, Text: "Last the night in the wood"},
 	)
 	// not heard of yet: arriving does nothing
+	q.Known = nil
 	f.goTo(f.wood, 0)
 	if ups, _ := EvaluateQuests(f.w); len(ups) != 0 || q.Status != QuestOffered {
 		t.Fatalf("unheard quest taken up: %s %v", q.Status, ups)
 	}
 	f.goTo(f.hub, 0)
-	f.elder.LastTalked = 3
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	Resolve(f.ctx(), f.aria, []Action{{Kind: ActTalkTo, Target: f.elder.ID}})
+	if !KnowsQuest(f.w, q, f.aria) {
+		t.Fatal("asking the giver should tell Aria of the quest")
+	}
 	if EvaluateQuests(f.w); q.Status != QuestOffered {
 		t.Fatal("taken up without going anywhere")
 	}

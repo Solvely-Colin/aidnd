@@ -113,6 +113,8 @@ type CharExtra struct {
 	// a long campaign anyone without it stays put when a friend leaves for
 	// another place (see gm leaveAlone).
 	TravelTogether bool `json:"travel_together,omitempty"`
+	// Tracked is the quest this character follows on the play screen.
+	Tracked string `json:"tracked,omitempty"`
 	// ReactedRound is the encounter round of their last reaction
 	// (opportunity attack or readied attack); one per round.
 	ReactedRound int `json:"reacted_round,omitempty"`
@@ -338,6 +340,9 @@ type NPC struct {
 // NPCExtra holds NPC state added after the first schema, stored as one
 // JSON column.
 type NPCExtra struct {
+	// MetBy is the turn each character last talked to or looked them over,
+	// so a quest's talk step counts only for whoever is on the quest.
+	MetBy map[string]int `json:"met_by,omitempty"`
 	// Protected NPCs are ones a saga's story needs: the narrator and the
 	// world may not kill, remove or turn them (players still can, in a fight).
 	Protected bool `json:"protected,omitempty"`
@@ -527,6 +532,9 @@ type Objective struct {
 	Where     string `json:"where,omitempty"` // location of a defeat_enemy foe that is not an NPC
 	Done      bool   `json:"done"`
 	Evidence  string `json:"evidence,omitempty"` // judge's quote for freeform
+	// DoneDay and DoneBy say when and by whom the step was marked off.
+	DoneDay int    `json:"done_day,omitempty"`
+	DoneBy  string `json:"done_by,omitempty"`
 }
 
 // Quest is the main storyline or a side quest.
@@ -542,6 +550,42 @@ type Quest struct {
 	RewardXP     int         `json:"reward_xp"`
 	RewardItems  []string    `json:"reward_items,omitempty"` // item ids owned by giver
 	AcceptedTurn int         `json:"accepted_turn"`
+	QuestExtra
+}
+
+// Quest sources: how the party came to know of a quest.
+const (
+	SourceOffered   = "offered"   // an NPC asked
+	SourceOverheard = "overheard" // talk not meant for them
+	SourceFound     = "found"     // a letter, a notice, a thing in hand
+	SourceRumor     = "rumor"     // word going round
+)
+
+// QuestSources lists the ways a quest can be come by.
+var QuestSources = []string{SourceOffered, SourceOverheard, SourceFound, SourceRumor}
+
+// QuestExtra holds quest fields added after the first schema, stored as
+// one JSON column. Quests from before it have no Known or Takers, which
+// means everyone knows them and everyone is on them, as it used to be.
+type QuestExtra struct {
+	// Personal quests belong to one character; party quests can be taken
+	// on by anyone who knows of them.
+	Personal bool   `json:"personal,omitempty"`
+	Source   string `json:"source,omitempty"`
+	// Lead is one line on how it was come by ("Overheard two dockhands
+	// arguing over the Marsh refinery's night shift").
+	Lead     string `json:"lead,omitempty"`
+	FoundAt  string `json:"found_at,omitempty"` // location id
+	FoundDay int    `json:"found_day,omitempty"`
+	// Known lists the characters who have heard of it; Takers the ones
+	// who took it on; SetAside the ones who said "not now".
+	// Logged is set once Known is kept (quests from before have none).
+	Logged   bool     `json:"logged,omitempty"`
+	Known    []string `json:"known,omitempty"`
+	Takers   []string `json:"takers,omitempty"`
+	SetAside []string `json:"set_aside,omitempty"`
+	// SharedBy says who passed it on to whom: character id -> sharer's name.
+	SharedBy map[string]string `json:"shared_by,omitempty"`
 }
 
 // Lore is a canon secret truth. Never exposed through the API.
@@ -655,6 +699,8 @@ type DefeatRecord struct {
 	NPCID      string `json:"npc_id,omitempty"`
 	LocationID string `json:"location_id"`
 	Turn       int    `json:"turn"`
+	// By are the characters in the group that did it.
+	By []string `json:"by,omitempty"`
 }
 
 // Campaign is the top-level record.

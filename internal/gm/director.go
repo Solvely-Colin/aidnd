@@ -50,7 +50,7 @@ func (d Direction) Note() string {
 	fmt.Fprintf(&b, "- Pacing: %s\n", d.Pacing)
 	fmt.Fprintf(&b, "- Tension: %s\n", d.Tension)
 	if d.ForceProgress {
-		b.WriteString("- The scene has stalled. You MUST call one progress tool now (reveal_exit, add_exit, spawn_encounter or offer_quest) and narrate it.\n")
+		b.WriteString("- The scene has stalled. You MUST call one progress tool now (reveal_exit, add_exit, spawn_encounter, offer_quest or discover_quest) and narrate it.\n")
 	}
 	return b.String()
 }

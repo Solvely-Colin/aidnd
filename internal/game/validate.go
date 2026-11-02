@@ -186,6 +186,11 @@ type QuestSpec struct {
 	RewardGold  int              `json:"reward_gold"`
 	RewardXP    int              `json:"reward_xp"`
 	RewardItems []RewardItemSpec `json:"reward_items,omitempty"`
+	// Source and Lead say how a quest nobody offered was come by; such a
+	// quest needs no giver and pays out when it is done.
+	Source   string `json:"source,omitempty"`
+	Lead     string `json:"lead,omitempty"`
+	Personal bool   `json:"personal,omitempty"`
 }
 
 // ObjectiveSpec is an authored objective; Target may be an id or a name.
@@ -212,11 +217,17 @@ func ValidateQuest(w *World, spec *QuestSpec, main bool) Problems {
 	if strings.TrimSpace(spec.Title) == "" {
 		p = append(p, "title is required")
 	}
+	if spec.Source != "" && !containsStr(QuestSources, spec.Source) {
+		p = append(p, fmt.Sprintf("source must be one of %s", strings.Join(QuestSources, ", ")))
+	}
 	if !main {
-		if n := w.NPC(spec.GiverID); n == nil || !n.Alive {
-			p = append(p, fmt.Sprintf("unknown giver %q", spec.GiverID))
-		} else {
+		discovered := spec.Source != "" && spec.Source != SourceOffered
+		if n := w.NPC(spec.GiverID); n != nil && n.Alive {
 			spec.GiverID = n.ID
+		} else if discovered && strings.TrimSpace(spec.GiverID) == "" {
+			spec.RewardItems = nil // nobody holds them
+		} else {
+			p = append(p, fmt.Sprintf("unknown giver %q", spec.GiverID))
 		}
 	}
 	if len(spec.Objectives) == 0 || len(spec.Objectives) > 6 {
@@ -310,6 +321,18 @@ func AddQuest(w *World, spec QuestSpec, main bool) (*Quest, error) {
 		RewardGold: spec.RewardGold, RewardXP: spec.RewardXP}
 	if main {
 		q.Status = QuestActive
+	} else {
+		q.Source = firstNonEmpty(spec.Source, SourceOffered)
+		q.Lead = trimTo(strings.TrimSpace(spec.Lead), 200)
+		q.Personal = spec.Personal
+		q.FoundAt, q.FoundDay = w.Campaign.LocationID, w.Campaign.Scene.Day
+		// whoever is here hears of it; the rest of the world does not
+		for _, c := range w.Characters {
+			if !c.Dead {
+				q.Known = append(q.Known, c.ID)
+			}
+		}
+		q.Logged = true // known to nobody else until they hear of it
 	}
 	for _, o := range spec.Objectives {
 		q.Objectives = append(q.Objectives, Objective{ID: w.NewID("obj"), Kind: o.Kind, Text: trimTo(o.Text, 200), Target: o.Target, DeliverTo: o.DeliverTo})

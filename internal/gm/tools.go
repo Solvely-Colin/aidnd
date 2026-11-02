@@ -96,7 +96,7 @@ func interpreterTools() []llm.Tool {
 			"promise": str("only if the character gives their word (a promise, oath, deal or debt): what they promised, in a few words")}, "npc")),
 		tool(game.ActBuy, "ACTION in combat, FREE otherwise. Buy an item from a merchant here.", obj(map[string]any{"npc": str("merchant NPC id"), "item": str("item id from the merchant's STOCK")}, "npc", "item")),
 		tool(game.ActSell, "ACTION in combat, FREE otherwise. Sell a carried item to a merchant here.", obj(map[string]any{"npc": str("merchant NPC id"), "item": str("item id from INVENTORY")}, "npc", "item")),
-		tool(game.ActAcceptQuest, "FREE. Accept a quest an NPC here has offered.", obj(map[string]any{"quest": str("quest id from QUESTS ON OFFER")}, "quest")),
+		tool(game.ActAcceptQuest, "FREE. Take on a quest: one an NPC here offered, or a lead the party already knows of.", obj(map[string]any{"quest": str("quest id from QUESTS ON OFFER or LEADS")}, "quest")),
 		tool(game.ActTurnInQuest, "FREE. Turn in a completed quest to its giver (must be at the giver's location).", obj(map[string]any{"quest": str("quest id")}, "quest")),
 		tool(game.ActPickUp, "ACTION. Pick up an item from the ground.", obj(map[string]any{"item": str("item id from GROUND")}, "item")),
 		tool(game.ActGiveItem, "ACTION. Hand a carried item to a party member or an NPC here.", obj(map[string]any{
@@ -186,6 +186,7 @@ func firstOf(ss ...string) string {
 const (
 	DirSpawnEncounter = "spawn_encounter"
 	DirOfferQuest     = "offer_quest"
+	DirDiscoverQuest  = "discover_quest"
 	DirRevealExit     = "reveal_exit"
 	DirAddExit        = "add_exit"
 	DirPlaceItem      = "place_item"
@@ -205,7 +206,7 @@ const (
 )
 
 // progressDirectives are the only tools offered when pacing forces progress.
-var progressDirectives = map[string]bool{DirRevealExit: true, DirAddExit: true, DirSpawnEncounter: true, DirOfferQuest: true}
+var progressDirectives = map[string]bool{DirRevealExit: true, DirAddExit: true, DirSpawnEncounter: true, DirOfferQuest: true, DirDiscoverQuest: true}
 
 var enemySchema = obj(map[string]any{
 	"name":         str("enemy name, e.g. Ghoul"),
@@ -237,11 +238,27 @@ var questSchema = map[string]any{
 	"reward_items": arr(obj(map[string]any{"key": str("catalog key, or empty"), "name": str("name for a custom item"), "kind": str("item kind"), "value": num("value in gold", 0, 500)}), "0-2 items held by the giver until turn-in"),
 }
 
+var discoverSchema = func() map[string]any {
+	props := map[string]any{
+		"source":   enum("how they came by it", game.SourceOverheard, game.SourceFound, game.SourceRumor),
+		"lead":     str("one line on how they came across it, as the casebook will say it, e.g. \"Overheard two dockhands arguing about the Marsh refinery's night shift\""),
+		"personal": map[string]any{"type": "boolean", "description": "true if only the acting character could have learned it (a vision, a letter addressed to them)"},
+		"giver_id": str("optional: id of an NPC who would pay for it; leave empty if nobody"),
+	}
+	for k, v := range questSchema {
+		if k != "giver_id" && k != "reward_items" {
+			props[k] = v
+		}
+	}
+	return props
+}()
+
 func directiveTools() []llm.Tool {
 	return []llm.Tool{
 		tool(DirSpawnEncounter, "Start a fight here (not if one is under way). Enemies are capped by the engine. Give at most one enemy a boss block, only for a named, dangerous leader where danger is 3+: it gets phases and a signature move announced a turn ahead.", obj(map[string]any{
 			"enemies": arr(enemySchema, "1-3 enemy types")}, "enemies")),
-		tool(DirOfferQuest, "An NPC present offers a side quest.", obj(questSchema, "title", "giver_id", "objectives")),
+		tool(DirOfferQuest, "An NPC present asks the party for help: a side quest they can take on.", obj(questSchema, "title", "giver_id", "objectives")),
+		tool(DirDiscoverQuest, "The party comes across a side quest nobody asked them to do: talk overheard, a letter or notice found, a rumor going round. It goes in their casebook as a lead they can take on. Use it when the scene naturally reveals trouble; name a giver only if someone would pay for it.", obj(discoverSchema, "title", "source", "lead", "objectives")),
 		tool(DirRevealExit, "Reveal a hidden exit listed in SECRETS.", obj(map[string]any{"exit_id": str("hidden exit id")}, "exit_id")),
 		tool(DirAddExit, "Add a new path from here to a new place (or an existing place by exact name).", obj(map[string]any{
 			"name": str("destination name"), "label": str("how the way looks from here"), "hint": str("one-line hint about the destination"),

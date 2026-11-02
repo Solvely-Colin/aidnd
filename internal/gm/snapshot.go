@@ -356,34 +356,13 @@ func snapshot(w *game.World, actor *game.Character, secrets bool) string {
 	if other := w.Elsewhere(); len(other) > 0 {
 		line("OTHER PLAYER CHARACTERS IN THE WORLD (separate groups; they act on their own turns, so never narrate them acting): %s", strings.Join(other, "; "))
 	}
-	var offered, active []string
-	for _, q := range w.Quests {
-		switch q.Status {
-		case game.QuestOffered:
-			if g := w.NPC(q.GiverID); g != nil && g.LocationID == l.ID {
-				offered = append(offered, fmt.Sprintf("[%s] %s (from %s): %s", q.ID, q.Title, g.Name, q.Summary))
-			}
-		case game.QuestActive, game.QuestCompleted:
-			var objs []string
-			for _, o := range q.Objectives {
-				mark := " "
-				if o.Done {
-					mark = "x"
-				}
-				objs = append(objs, fmt.Sprintf("[%s] %s", mark, o.Text))
-			}
-			st := ""
-			if q.Status == game.QuestCompleted {
-				st = " READY TO TURN IN"
-				if g := w.NPC(q.GiverID); g != nil {
-					st += " to " + g.Name
-				}
-			}
-			active = append(active, fmt.Sprintf("[%s] %s%s: %s", q.ID, q.Title, st, strings.Join(objs, "; ")))
-		}
+	offered, leads, active, others := questLines(w, l)
+	line("QUESTS ON OFFER HERE (asking the giver tells them of it; taking it on is accept_quest): %s", orNone(offered))
+	line("LEADS (known, not taken on yet): %s", orNone(leads))
+	line("ACTIVE QUESTS (only these move forward from what this group does): %s", orNone(active))
+	if len(others) > 0 {
+		line("QUESTS OTHER PLAYERS ARE ON (not this group's business; never tick or narrate them): %s", strings.Join(others, "; "))
 	}
-	line("QUESTS ON OFFER HERE: %s", orNone(offered))
-	line("ACTIVE QUESTS: %s", orNone(active))
 	var known []string
 	for _, loc := range w.Locations {
 		if loc.Visited && loc.ID != l.ID {
@@ -540,4 +519,68 @@ func eventLine(w *game.World, ev *game.WorldEvent) string {
 		return fmt.Sprintf("WORLD EVENT CALLED: %q is about to break here at %s. Why: %s Build the dread of it gathering; it begins when the players start it or the others arrive, not before.", ev.Title, site, strings.Join(why, " "))
 	}
 	return fmt.Sprintf("WORLD EVENT CALLED: %q at %s; everyone is needed there within two days. Why: %s The players choose whether to go (they answer the call themselves); never move them there or play it out here.", ev.Title, site, strings.Join(why, " "))
+}
+
+// questLines sorts the quests for the narrator: on offer from someone
+// here, leads the group knows of, the ones it is on, and ones only other
+// players are on.
+func questLines(w *game.World, l *game.Location) (offered, leads, active, others []string) {
+	knows := func(q *game.Quest) bool {
+		for _, c := range w.Characters {
+			if game.KnowsQuest(w, q, c) {
+				return true
+			}
+		}
+		return false
+	}
+	steps := func(q *game.Quest) string {
+		var objs []string
+		for _, o := range q.Objectives {
+			mark := " "
+			if o.Done {
+				mark = "x"
+			}
+			objs = append(objs, fmt.Sprintf("[%s] %s", mark, o.Text))
+			if q.IsMain && !o.Done {
+				break
+			}
+		}
+		return strings.Join(objs, "; ")
+	}
+	for _, q := range w.Quests {
+		switch q.Status {
+		case game.QuestOffered:
+			g := w.NPC(q.GiverID)
+			switch {
+			case knows(q):
+				how := q.Source
+				if g != nil {
+					how += ", from " + g.Name
+				}
+				leads = append(leads, fmt.Sprintf("[%s] %s (%s): %s", q.ID, q.Title, how, q.Summary))
+			case g != nil && g.LocationID == l.ID:
+				offered = append(offered, fmt.Sprintf("[%s] %s (from %s): %s", q.ID, q.Title, g.Name, q.Summary))
+			}
+		case game.QuestActive, game.QuestCompleted:
+			st := ""
+			if q.Status == game.QuestCompleted {
+				st = " READY TO TURN IN"
+				if g := w.NPC(q.GiverID); g != nil {
+					st += " to " + g.Name
+				}
+			}
+			if !game.QuestHere(w, q) {
+				if knows(q) {
+					others = append(others, q.Title)
+				}
+				continue
+			}
+			who := ""
+			if q.Personal {
+				who = " (personal)"
+			}
+			active = append(active, fmt.Sprintf("[%s] %s%s%s: %s", q.ID, q.Title, who, st, steps(q)))
+		}
+	}
+	return
 }

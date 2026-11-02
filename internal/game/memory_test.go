@@ -52,7 +52,7 @@ func TestQuestPromiseIsKeptByTheQuestOnly(t *testing.T) {
 	w := f.w
 	q, err := AddQuest(w, QuestSpec{Title: "Find the cat", GiverID: f.elder.ID, Objectives: []ObjectiveSpec{{Kind: ObjFreeform, Text: "Find it"}}}, false)
 	must(t, err)
-	if _, err := AcceptQuest(w, q.ID); err != nil {
+	if _, _, err := AcceptQuest(w, q.ID, w.Characters[0]); err != nil {
 		t.Fatal(err)
 	}
 	p := w.OpenPromises()

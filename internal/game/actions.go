@@ -351,7 +351,7 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 		st.Info = append(st.Info, facts...)
 		// examining someone counts as meeting them (talk_to_npc objectives)
 		if n := w.NPC(a.Target); n != nil && n.Alive && n.LocationID == w.Campaign.LocationID {
-			n.LastTalked = w.Campaign.Turn
+			n.Met(c, w.Campaign.Turn)
 		}
 		return nil
 	case ActSay:
@@ -376,12 +376,12 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 	case ActSell:
 		return one(st, func() (string, error) { return Sell(w, c, a.Target, a.Item) })
 	case ActAcceptQuest:
-		q, err := AcceptQuest(w, a.Target)
+		q, ups, err := AcceptQuest(w, a.Target, c)
 		if err != nil {
 			return err
 		}
 		st.Changes = append(st.Changes, fmt.Sprintf("Quest accepted: %s", q.Title))
-		st.Quests = append(st.Quests, QuestUpdate{QuestID: q.ID, Title: q.Title, Text: "Quest accepted: " + q.Title, Status: q.Status})
+		st.Quests = append(st.Quests, ups...)
 		return nil
 	case ActTurnInQuest:
 		ups, ch, err := TurnInQuest(w, a.Target, c)
@@ -529,7 +529,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 		c.ZoneID = n.ZoneID
 		st.Changes = append(st.Changes, fmt.Sprintf("%s moves to %s", c.Name, ZoneName(l, n.ZoneID)))
 	}
-	n.LastTalked = w.Campaign.Turn
+	n.Met(c, w.Campaign.Turn)
 	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.AttitudeTo(c)))
 	for _, t := range n.TiesTo(c.ID) {
 		st.Info = append(st.Info, TieLine(w, n, t))
@@ -540,6 +540,14 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	for _, q := range w.Quests {
 		if q.GiverID == n.ID && q.Status == QuestOffered {
 			st.Info = append(st.Info, fmt.Sprintf("%s offers quest %s [%s]", n.Name, q.Title, q.ID))
+			// asking the giver is how a character hears of it
+			if heard := HearOf(w, q, c); len(heard) > 0 {
+				q.Source = firstNonEmpty(q.Source, SourceOffered)
+				if q.Lead == "" {
+					q.Lead = fmt.Sprintf("%s asked for help", n.Name)
+				}
+				st.Quests = append(st.Quests, leadUpdate(q, heard))
+			}
 		}
 		if q.GiverID == n.ID && q.Status == QuestCompleted {
 			st.Info = append(st.Info, fmt.Sprintf("%s awaits the turn-in of %s [%s]", n.Name, q.Title, q.ID))
@@ -548,7 +556,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	// an NPC who holds what an active quest needs hands it over when asked,
 	// unless they are hostile
 	for _, q := range w.Quests {
-		if q.Status != QuestActive || n.AttitudeTo(c) < 0 {
+		if q.Status != QuestActive || n.AttitudeTo(c) < 0 || !OnQuest(q, c) {
 			continue
 		}
 		for _, o := range q.Objectives {
@@ -720,7 +728,7 @@ func questFoes(ctx *Ctx, loc *Location, st *Step) bool {
 		return false
 	}
 	for _, q := range w.Quests {
-		if q.Status != QuestActive {
+		if q.Status != QuestActive || !QuestHere(w, q) {
 			continue
 		}
 		for _, o := range q.Objectives {
@@ -1086,7 +1094,11 @@ func defeat(w *World, e *Enemy, subdued bool) []string {
 		verb = "is subdued"
 	}
 	changes := []string{fmt.Sprintf("%s %s", e.Display(), verb)}
-	w.Defeats = append(w.Defeats, DefeatRecord{Name: e.Name, NPCID: e.NPCID, LocationID: w.Campaign.LocationID, Turn: w.Campaign.Turn})
+	var by []string
+	for _, c := range w.Characters {
+		by = append(by, c.ID)
+	}
+	w.Defeats = append(w.Defeats, DefeatRecord{Name: e.Name, NPCID: e.NPCID, LocationID: w.Campaign.LocationID, Turn: w.Campaign.Turn, By: by})
 	if n := w.NPC(e.NPCID); n != nil && e.NPCID != "" {
 		here := w.Location(w.Campaign.LocationID)
 		where := w.Campaign.LocationID
