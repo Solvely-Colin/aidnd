@@ -184,3 +184,37 @@ func TestOldQuestsStayShared(t *testing.T) {
 		t.Fatal("old quests tick for anyone, as before")
 	}
 }
+
+// Sharing reaches a friend anywhere in the world, even one off on their
+// own, as a lead from the sharer; a lead they set aside comes back.
+func TestShareQuestAnywhere(t *testing.T) {
+	f := newFixture(t)
+	f.splitBram(t)
+	q := f.sideQuest(t, ObjectiveSpec{Kind: ObjFreeform, Text: "Find the den"})
+	if KnowsQuest(f.w, q, f.bram) {
+		t.Fatal("Bram was away")
+	}
+	if c := ShareCandidates(f.w, q, f.aria); len(c) != 1 || c[0] != f.bram {
+		t.Fatalf("candidates %v", c)
+	}
+	_, shared, err := ShareQuest(f.w, q.ID, f.aria, []string{f.bram.ID})
+	must(t, err)
+	if len(shared) != 1 || !KnowsQuest(f.w, q, f.bram) || q.SharedBy[f.bram.ID] != "Aria" {
+		t.Fatalf("shared %v known %v by %v", shared, q.Known, q.SharedBy)
+	}
+	_, _, err = TakeOn(f.w, q.ID, f.bram)
+	must(t, err)
+	if _, _, err := ShareQuest(f.w, q.ID, f.aria, nil); err == nil {
+		t.Fatal("everyone is on it: nobody to share with")
+	}
+	_, err = DropQuest(f.w, q.ID, f.bram)
+	must(t, err)
+	must(t, SetQuestAside(f.w, q.ID, f.bram))
+	if _, _, err := ShareQuest(f.w, q.ID, f.aria, []string{f.bram.ID}); err != nil || containsStr(q.SetAside, f.bram.ID) {
+		t.Fatalf("re-share should bring it back: %v aside %v", err, q.SetAside)
+	}
+	q.Personal = true
+	if _, _, err := ShareQuest(f.w, q.ID, f.aria, nil); err == nil {
+		t.Fatal("personal quests cannot be shared")
+	}
+}

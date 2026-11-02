@@ -17,6 +17,9 @@ type QuestUpdate struct {
 	Lead string `json:"lead,omitempty"`
 	// Characters are the ones the news is for; empty means everyone.
 	Characters []string `json:"characters,omitempty"`
+	// By is the character who shared it (kind shared).
+	By     string `json:"by,omitempty"`
+	ByName string `json:"by_name,omitempty"`
 }
 
 // AcceptQuest puts the actor (and the friends with them who know of it)

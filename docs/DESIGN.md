@@ -401,7 +401,7 @@ A friend can join a campaign that is already under way (`game/catchup.go`, `gm/d
 Quests are still world rows (the DB is the truth), but each character keeps their own log. `QuestExtra` (the quest's `extra` column) holds:
 
 - `source` (offered, overheard, found, rumor) and a one-line `lead` saying how it was come by, plus where and on which day.
-- `known`: who has heard of it. Everyone in the group present when it comes up hears of it; talking to a giver who has a quest on offer tells that character; picking up the thing an unheard quest is after tells the group standing there (`discoverByFinding`). Friends can pass a party quest on to whoever stands with them (`tell`).
+- `known`: who has heard of it. Everyone in the group present when it comes up hears of it; talking to a giver who has a quest on offer tells that character; picking up the thing an unheard quest is after tells the group standing there (`discoverByFinding`). Friends can share a party quest with any friend anywhere (`share`, recorded in `shared_by`): it arrives in their story as a "Passed on" lead with Take it on / Join them, and it brings back a lead they had set aside. `tell` shares with whoever stands with you.
 - `takers`: who took it on. Taking on (button, or `accept_quest` in the story) puts the character and the group members with them who know of it on the quest. Joining an active quest adds you. Dropping takes you off; when the last one drops it the quest is a lead again and the promise to its giver is broken.
 - `set_aside`: "not now". Nobody who set a lead aside is put on it by PR #44's take-up-on-arrival rule.
 - `personal`: one character's alone (a letter addressed to them). It cannot be told or joined.

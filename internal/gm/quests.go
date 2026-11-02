@@ -17,12 +17,13 @@ const (
 	QuestOpAside = "aside"
 	QuestOpTell  = "tell"
 	QuestOpTrack = "track"
+	QuestOpShare = "share"
 )
 
 // QuestAct applies a casebook move for the player's character. None of
 // these spend a turn; taking on, dropping and telling are news for the
 // story feed.
-func (g *GM) QuestAct(ctx context.Context, campaignID, playerID, questID, op string) (*game.World, error) {
+func (g *GM) QuestAct(ctx context.Context, campaignID, playerID, questID, op string, to ...string) (*game.World, error) {
 	defer g.lock(campaignID)()
 	w, err := g.Store.Load(ctx, campaignID)
 	if err != nil {
@@ -73,6 +74,17 @@ func (g *GM) QuestAct(ctx context.Context, campaignID, playerID, questID, op str
 		}
 		ups = append(ups, game.QuestUpdate{QuestID: q.ID, Title: q.Title, Kind: game.QuestLead, Status: q.Status, Lead: q.Lead,
 			Text: c.Name + " told " + joinList(names) + " about " + q.Title, Characters: append(ids, c.ID)})
+	case QuestOpShare:
+		q, shared, err := game.ShareQuest(w, questID, c, to)
+		if err != nil {
+			return nil, Conflict("%s", err.Error())
+		}
+		var ids, names []string
+		for _, h := range shared {
+			ids, names = append(ids, h.ID), append(names, h.Name)
+		}
+		ups = append(ups, game.QuestUpdate{QuestID: q.ID, Title: q.Title, Kind: game.QuestShared, Status: q.Status, Lead: q.Lead,
+			By: c.ID, ByName: c.Name, Text: c.Name + " shared " + q.Title + " with " + joinList(names), Characters: append(ids, c.ID)})
 	case QuestOpTrack:
 		if err := game.Track(w, questID, c); err != nil {
 			return nil, Conflict("%s", err.Error())

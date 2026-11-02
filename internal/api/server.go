@@ -917,7 +917,16 @@ func (s *Server) handleQuestAct(w http.ResponseWriter, r *http.Request) {
 	if qid == "-" {
 		qid = "" // track nothing: follow the storyline
 	}
-	wld, err := s.gm.QuestAct(r.Context(), r.PathValue("id"), p, qid, r.PathValue("op"))
+	var body struct {
+		To []string `json:"to"` // share: character ids (empty: every friend)
+	}
+	if r.ContentLength > 0 {
+		if err := decode(r, &body); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	wld, err := s.gm.QuestAct(r.Context(), r.PathValue("id"), p, qid, r.PathValue("op"), body.To...)
 	if err != nil {
 		s.fail(w, err)
 		return

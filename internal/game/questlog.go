@@ -21,6 +21,7 @@ const (
 	QuestDone     = "done"      // every step done
 	QuestReturned = "turned_in" // rewards handed over
 	QuestDropped  = "dropped"   // someone gave it up
+	QuestShared   = "shared"    // a friend passed it on
 )
 
 // Everyone lists every character in the world, whichever group is focused.
@@ -307,6 +308,60 @@ func TellOfQuest(w *World, questID string, c *Character) ([]*Character, error) {
 		return nil, fmt.Errorf("nobody here who hasn't heard of it")
 	}
 	return heard, nil
+}
+
+// ShareQuest passes a party quest on to friends anywhere in the world (to
+// lists character ids; empty means every friend not on it yet). It reaches
+// them as a lead from the sharer: news for one who never heard of it, an
+// invitation for one who did (even one who set it aside).
+func ShareQuest(w *World, questID string, from *Character, to []string) (*Quest, []*Character, error) {
+	q := w.Quest(questID)
+	if q == nil || from == nil || !KnowsQuest(w, q, from) {
+		return nil, nil, fmt.Errorf("unknown quest %q", questID)
+	}
+	if q.IsMain {
+		return nil, nil, fmt.Errorf("everyone knows the storyline")
+	}
+	if q.Personal {
+		return nil, nil, fmt.Errorf("that one is yours alone")
+	}
+	if q.Status != QuestOffered && q.Status != QuestActive {
+		return nil, nil, fmt.Errorf("%s is already settled", q.Title)
+	}
+	logEveryone(w, q)
+	var shared []*Character
+	for _, m := range w.Everyone() {
+		if m == from || m.Dead || OnQuest(q, m) || (len(to) > 0 && !containsStr(to, m.ID)) {
+			continue
+		}
+		if !containsStr(q.Known, m.ID) {
+			q.Known = append(q.Known, m.ID)
+		}
+		q.SetAside = removeStr(q.SetAside, m.ID)
+		if q.SharedBy == nil {
+			q.SharedBy = map[string]string{}
+		}
+		q.SharedBy[m.ID] = from.Name
+		shared = append(shared, m)
+	}
+	if len(shared) == 0 {
+		return nil, nil, fmt.Errorf("everyone you could share it with is already on it")
+	}
+	return q, shared, nil
+}
+
+// ShareCandidates are the friends a character could pass a quest on to.
+func ShareCandidates(w *World, q *Quest, from *Character) []*Character {
+	if q.IsMain || q.Personal || from == nil || (q.Status != QuestOffered && q.Status != QuestActive) || !KnowsQuest(w, q, from) {
+		return nil
+	}
+	var out []*Character
+	for _, m := range w.Everyone() {
+		if m != from && !m.Dead && !OnQuest(q, m) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // Track sets the quest a character follows on the play screen ("" for

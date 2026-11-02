@@ -370,6 +370,17 @@ type QuestView struct {
 	CanTell   bool     `json:"can_tell,omitempty"`
 	Steps     int      `json:"steps"`
 	StepsDone int      `json:"steps_done"`
+	// SharedBy names the friend who passed it to the viewer; ShareTo the
+	// friends the viewer could pass it to.
+	SharedBy string      `json:"shared_by,omitempty"`
+	ShareTo  []ShareView `json:"share_to,omitempty"`
+}
+
+type ShareView struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Knows bool   `json:"knows,omitempty"` // has heard of it
+	Aside bool   `json:"aside,omitempty"` // and set it aside
 }
 
 type PlayerView struct {
@@ -866,6 +877,10 @@ func questView(w *game.World, q *game.Quest, me *game.Character) QuestView {
 		live := q.Status == game.QuestOffered || q.Status == game.QuestActive
 		v.CanTake = !q.IsMain && live && !v.Mine && !(q.Personal && len(q.Takers) > 0) && !(q.Status == game.QuestActive && len(q.Takers) == 0)
 		v.CanTell = !q.IsMain && !q.Personal && q.Logged && live
+		v.SharedBy = q.SharedBy[me.ID]
+		for _, m := range game.ShareCandidates(w, q, me) {
+			v.ShareTo = append(v.ShareTo, ShareView{ID: m.ID, Name: m.Name, Knows: game.KnowsQuest(w, q, m), Aside: containsStr(q.SetAside, m.ID)})
+		}
 	}
 	return v
 }

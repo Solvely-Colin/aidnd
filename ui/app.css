@@ -1130,3 +1130,15 @@ details.feat p { margin: 0 0 12px; font: italic 16px/1.5 var(--sans); color: var
 .qscope.party { color: var(--ink2); box-shadow: inset 0 0 0 1px var(--line2); }
 .qscope.solo { color: var(--accInk); background: var(--acc); }
 .lead-k { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.ev-lead.shared { box-shadow: inset 0 0 0 1px var(--line2), inset 3px 0 0 var(--sea); }
+.ev-lead.shared > .stamp { color: var(--sea); box-shadow: inset 0 0 0 2px #3d5754; }
+.lead-b .from, .qcard .q-from { font: 12px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--sea); margin: 0; }
+.share-pick { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 12px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line2); }
+.share-pick > .ty-k { flex-basis: 100%; }
+.share-to { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; box-shadow: inset 0 0 0 1px var(--line2); text-align: left; }
+.share-to:hover { box-shadow: inset 0 0 0 1px var(--acc); }
+.share-to .cameo { width: 34px; height: 42px; }
+.share-to span { display: flex; flex-direction: column; }
+.share-to b { font: 400 17px/1.2 var(--display); font-weight: 400; color: var(--ink); }
+.share-to small { font: italic 13px/1.3 var(--sans); color: var(--ink3); }

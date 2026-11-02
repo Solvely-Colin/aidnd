@@ -581,6 +581,8 @@ type QuestExtra struct {
 	Known    []string `json:"known,omitempty"`
 	Takers   []string `json:"takers,omitempty"`
 	SetAside []string `json:"set_aside,omitempty"`
+	// SharedBy says who passed it on to whom: character id -> sharer's name.
+	SharedBy map[string]string `json:"shared_by,omitempty"`
 }
 
 // Lore is a canon secret truth. Never exposed through the API.

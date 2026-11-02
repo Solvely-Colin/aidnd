@@ -1365,7 +1365,7 @@ function feedItems(evs) {
         const me = S.view?.you?.character_id;
         if (d.characters?.length && me && !d.characters.includes(me)) break;
         const kind = d.kind || (d.status === "completed" ? "done" : d.objective_id ? "step" : d.status === "active" ? "taken" : "");
-        if (kind === "lead") { out.push({ k: "lead", q: d.quest_id, title: d.title, lead: d.lead, text: d.text }); break; }
+        if (kind === "lead" || kind === "shared" && d.by !== me) { out.push({ k: "lead", q: d.quest_id, title: d.title, lead: d.lead, text: d.text, from: kind === "shared" ? d.by_name : "" }); break; }
         out.push({ k: "quest", kind, q: d.quest_id, label: QKIND[kind] || "Quest", title: d.title, text: d.text || d.title });
         break;
       }
@@ -2452,7 +2452,7 @@ async function dmAct(ds, t) {
 // journal. Quests, people, places and clues come from the world record on
 // the server; notes are the player's own and private.
 
-const J = { tab: "quests", q: "", notes: null, notesFor: "", draft: "", editing: "", stale: false };
+const J = { tab: "quests", q: "", notes: null, notesFor: "", draft: "", editing: "", stale: false, sharing: "" };
 const JTABS = [["quests", "Quests"], ["people", "People"], ["places", "Places"], ["clues", "Clues"], ["notes", "Notes"]];
 
 function loadJournal() {
@@ -2523,7 +2523,7 @@ function gazetteHTML(g, date) {
 // play, and new leads arrive in the story as cards you answer there.
 
 const QSRC = { offered: "Asked of you", overheard: "Overheard", found: "Found", rumor: "Rumor" };
-const QKIND = { taken: "Taken on", step: "Step ✓", done: "All done", turned_in: "Settled", dropped: "Dropped" };
+const QKIND = { shared: "Shared", taken: "Taken on", step: "Step ✓", done: "All done", turned_in: "Settled", dropped: "Dropped" };
 const questOf = id => (S.view?.quests || []).find(q => q.id === id);
 const qStamp = q => q.is_main ? "The storyline" : QSRC[q.source] || "Side matter";
 // scopeTag marks a side quest as the party's (anyone who knows can join)
@@ -2587,14 +2587,16 @@ function questNewsHTML(it) {
 
 function leadNewsHTML(it) {
   const q = questOf(it.q);
-  const open = q && q.status === "offered" && q.can_take && !q.aside;
-  const state = !q ? "" : q.mine ? "You took it on" : q.aside ? "Set aside for now" : q.status !== "offered" ? "Others are on it" : "";
-  return `<article class="ev-lead"><span class="stamp">New lead</span>
+  const open = q && q.can_take && (!q.aside || it.from) && (q.status === "offered" || q.status === "active");
+  const state = !q ? "" : q.mine ? "You took it on" : q.aside ? "Set aside for now" : q.status !== "offered" && q.status !== "active" ? "Settled" : "";
+  const from = it.from || q?.shared_by;
+  return `<article class="ev-lead ${from ? "shared" : ""}"><span class="stamp">${from ? "Passed on" : "New lead"}</span>
     <div class="lead-b"><span class="lead-k"><span class="ty-k">${esc(q ? qStamp(q) : "A lead")}${q?.giver_name ? ` · ${esc(q.giver_name)}` : ""}</span>${q ? scopeTag(q) : ""}</span>
       <b>${esc(it.title)}</b>
+      ${from ? `<span class="from">From ${esc(from)}${q?.takers?.length ? ` · on it: ${esc(list(q.takers))}` : ""}</span>` : ""}
       ${it.lead || q?.lead ? `<p>${esc(it.lead || q.lead)}</p>` : ""}
       ${q?.objectives?.length ? `<span class="lead-first"><i></i>${esc(q.objectives[0].text)}${q.steps > 1 ? ` <em>+${q.steps - 1} more</em>` : ""}</span>` : ""}
-      ${open ? `<div class="lead-acts"><button class="btn primary" data-act="quest" data-op="take" data-q="${esc(q.id)}">Take it on</button><button class="btn" data-act="quest" data-op="aside" data-q="${esc(q.id)}">Not now</button><button class="q-look" data-act="quest-open" data-q="${esc(q.id)}">Read it</button></div>`
+      ${open ? `<div class="lead-acts"><button class="btn primary" data-act="quest" data-op="take" data-q="${esc(q.id)}">${q.status === "active" ? "Join them" : "Take it on"}</button><button class="btn" data-act="quest" data-op="aside" data-q="${esc(q.id)}">Not now</button><button class="q-look" data-act="quest-open" data-q="${esc(q.id)}">Read it</button></div>`
         : state ? `<span class="ty-k lead-state">${esc(state)}</span>` : ""}
     </div></article>`;
 }
@@ -2631,29 +2633,42 @@ function questCardHTML(q, mode) {
   if (mode === "leads" && q.can_take) acts.push(`<button class="btn" data-act="quest" data-op="aside" data-q="${esc(q.id)}">Not now</button>`);
   if (q.mine && !q.tracked && !qClosed(q)) acts.push(`<button class="q-act" data-act="quest" data-op="track" data-q="${esc(q.id)}">Follow</button>`);
   if (q.tracked && !q.is_main) acts.push(`<span class="q-act on">Following</span>`);
-  if (q.can_tell && S.view.party?.length > 1) acts.push(`<button class="q-act" data-act="quest" data-op="tell" data-q="${esc(q.id)}">Tell the others</button>`);
+  if (q.share_to?.length) acts.push(`<button class="q-act ${J.sharing === q.id ? "on" : ""}" data-act="quest-share" data-q="${esc(q.id)}">Share</button>`);
   if (q.mine && !q.is_main && q.status === "active") acts.push(`<button class="q-act quiet" data-act="quest" data-op="drop" data-q="${esc(q.id)}">Give it up</button>`);
   return `<article class="qcard ${mode} ${q.tracked ? "tracked" : ""} ${q.status === "completed" ? "ready" : ""}" id="q-${esc(q.id)}">
     <header><span class="stamp src-${esc(q.is_main ? "main" : q.source || "offered")}">${esc(qStamp(q))}</span>${scopeTag(q)}${found ? `<span class="ty-k">${esc(found)}</span>` : ""}${q.steps ? pipsHTML(q) : ""}</header>
     <h3 class="q-title">${esc(q.title)}</h3>
     ${q.lead ? `<p class="q-lead">${esc(q.lead)}</p>` : ""}
+    ${q.shared_by ? `<p class="q-from">Passed on by ${esc(q.shared_by)}</p>` : ""}
     ${q.summary ? `<p class="q-sum">${esc(q.summary)}</p>` : ""}
     ${mode === "closed" ? "" : `<ol class="steps">${steps}${hidden}</ol>`}
     <footer class="q-foot">
       ${[pays, who, reward && `Reward ${reward}`].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join("")}
       ${acts.length ? `<div class="q-acts">${acts.join("")}</div>` : ""}
+      ${J.sharing === q.id && q.share_to?.length ? shareHTML(q) : ""}
     </footer>
   </article>`;
 }
 
+// shareHTML picks who to pass a quest on to: any friend in the story,
+// wherever they are, or all of them at once.
+function shareHTML(q) {
+  return `<div class="share-pick"><span class="ty-k">Pass it on to</span>
+    ${q.share_to.map(f => `<button class="share-to" data-act="quest" data-op="share" data-q="${esc(q.id)}" data-to="${esc(f.id)}">${face(f, "cameo")}<span><b>${esc(f.name)}</b><small>${f.aside ? "set it aside" : f.knows ? "knows of it, not on it" : "hasn't heard"}</small></span></button>`).join("")}
+    ${q.share_to.length > 1 ? `<button class="q-act" data-act="quest" data-op="share" data-q="${esc(q.id)}" data-to="">Everyone</button>` : ""}
+  </div>`;
+}
+
 async function questMove(qid, op, t) {
   if (t) t.disabled = true;
+  const to = op === "share" && t?.dataset.to ? [t.dataset.to] : undefined;
   try {
-    const r = await api("POST", `/campaigns/${S.route}/quests/${encodeURIComponent(qid || "-")}/${op}`, {});
+    const r = await api("POST", `/campaigns/${S.route}/quests/${encodeURIComponent(qid || "-")}/${op}`, to ? { to } : {});
+    if (op === "share") J.sharing = "";
     S.view = r.campaign;
     S.journal = null;
     if (op === "take") toast(`Taken on. Its steps count for you now.`);
-    if (op === "tell") toast("Told.");
+    if (op === "tell" || op === "share") toast("Passed on. It shows up in their story.");
     renderChrome(); renderFeed();
   } catch (e) { toast(e.message); if (t) t.disabled = false; }
 }
@@ -2995,6 +3010,7 @@ document.addEventListener("click", async e => {
       case "jtab": J.tab = ds.k; J.q = ""; J.editing = ""; return refreshJournal();
       case "quest": return questMove(ds.q, ds.op, t);
       case "quest-open": return openQuest(ds.q);
+      case "quest-share": J.sharing = J.sharing === ds.q ? "" : ds.q; return refreshJournal();
       case "quest-leads": { const l = leadsOf()[0]; return openQuest(l?.id); }
       case "note-edit": J.editing = ds.id; refreshJournal(); return $("#n-edit")?.focus();
       case "note-cancel": J.editing = ""; return refreshJournal();
