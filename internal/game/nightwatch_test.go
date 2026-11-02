@@ -77,3 +77,20 @@ func TestNightWatchClassifyAndPlace(t *testing.T) {
 		t.Fatalf("watch should be kept at Whisperwood, got %q", got)
 	}
 }
+
+func TestRandomFightsBringNoBoss(t *testing.T) {
+	specs := NoBosses([]EnemySpec{{Name: "Nightgaunt", Boss: &BossSpec{Move: "Faceless Grasp"}}})
+	if specs[0].Boss != nil {
+		t.Fatal("an ambush or night visitor must not be a boss")
+	}
+}
+
+func TestBossMoveScalesWithLevel(t *testing.T) {
+	// level 1 at danger 3 used to roll 5d6 (17 on average) against 9 HP
+	if n := BossMoveDice(3, 1); n != 3 {
+		t.Fatalf("level 1, danger 3: want 3d6, got %dd6", n)
+	}
+	if n := BossMoveDice(5, MaxLevel); n < 6 {
+		t.Fatalf("top level, danger 5: want at least 6d6 at the top, got %dd6", n)
+	}
+}
