@@ -1125,3 +1125,8 @@ details.feat p { margin: 0 0 12px; font: italic 16px/1.5 var(--sans); color: var
 .q-act.on { color: var(--ink3); }
 .q-act.quiet { color: var(--ink3); margin-left: auto; }
 .q-act.quiet:hover { color: var(--bad); }
+
+.qscope { font: 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; padding: 4px 6px 3px; }
+.qscope.party { color: var(--ink2); box-shadow: inset 0 0 0 1px var(--line2); }
+.qscope.solo { color: var(--accInk); background: var(--acc); }
+.lead-k { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

@@ -2526,6 +2526,9 @@ const QSRC = { offered: "Asked of you", overheard: "Overheard", found: "Found", 
 const QKIND = { taken: "Taken on", step: "Step ✓", done: "All done", turned_in: "Settled", dropped: "Dropped" };
 const questOf = id => (S.view?.quests || []).find(q => q.id === id);
 const qStamp = q => q.is_main ? "The storyline" : QSRC[q.source] || "Side matter";
+// scopeTag marks a side quest as the party's (anyone who knows can join)
+// or one character's alone.
+const scopeTag = q => q.is_main ? "" : `<span class="qscope ${q.personal ? "solo" : "party"}">${q.personal ? "Yours alone" : "Party"}</span>`;
 const qClosed = q => q.status === "turned_in" || q.status === "failed";
 const leadsOf = () => (S.view?.quests || []).filter(q => q.status === "offered" && q.can_take && !q.aside);
 
@@ -2554,7 +2557,7 @@ function trackerHTML() {
   const n = q && nextLine(q);
   return `<section class="tracker"><p class="sh">The matter at hand</p>
     ${q ? `<button class="trk" data-act="quest-open" data-q="${esc(q.id)}">
-      <span class="trk-k"><span class="ty-k">${esc(qStamp(q))}</span>${pipsHTML(q)}</span>
+      <span class="trk-k"><span class="lead-k"><span class="ty-k">${esc(qStamp(q))}</span>${scopeTag(q)}</span>${pipsHTML(q)}</span>
       <b class="trk-t">${esc(q.title)}</b>
       ${n.text ? `<span class="trk-next"><i></i><span>${esc(n.text)}${n.where ? `<em>${esc(n.where)}</em>` : ""}</span></span>` : ""}
     </button>` : ""}
@@ -2587,7 +2590,7 @@ function leadNewsHTML(it) {
   const open = q && q.status === "offered" && q.can_take && !q.aside;
   const state = !q ? "" : q.mine ? "You took it on" : q.aside ? "Set aside for now" : q.status !== "offered" ? "Others are on it" : "";
   return `<article class="ev-lead"><span class="stamp">New lead</span>
-    <div class="lead-b"><span class="ty-k">${esc(q ? qStamp(q) : "A lead")}${q?.giver_name ? ` · ${esc(q.giver_name)}` : ""}</span>
+    <div class="lead-b"><span class="lead-k"><span class="ty-k">${esc(q ? qStamp(q) : "A lead")}${q?.giver_name ? ` · ${esc(q.giver_name)}` : ""}</span>${q ? scopeTag(q) : ""}</span>
       <b>${esc(it.title)}</b>
       ${it.lead || q?.lead ? `<p>${esc(it.lead || q.lead)}</p>` : ""}
       ${q?.objectives?.length ? `<span class="lead-first"><i></i>${esc(q.objectives[0].text)}${q.steps > 1 ? ` <em>+${q.steps - 1} more</em>` : ""}</span>` : ""}
@@ -2631,7 +2634,7 @@ function questCardHTML(q, mode) {
   if (q.can_tell && S.view.party?.length > 1) acts.push(`<button class="q-act" data-act="quest" data-op="tell" data-q="${esc(q.id)}">Tell the others</button>`);
   if (q.mine && !q.is_main && q.status === "active") acts.push(`<button class="q-act quiet" data-act="quest" data-op="drop" data-q="${esc(q.id)}">Give it up</button>`);
   return `<article class="qcard ${mode} ${q.tracked ? "tracked" : ""} ${q.status === "completed" ? "ready" : ""}" id="q-${esc(q.id)}">
-    <header><span class="stamp src-${esc(q.is_main ? "main" : q.source || "offered")}">${esc(qStamp(q))}</span>${q.personal ? `<span class="ty-k">Yours alone</span>` : ""}${found ? `<span class="ty-k">${esc(found)}</span>` : ""}${q.steps ? pipsHTML(q) : ""}</header>
+    <header><span class="stamp src-${esc(q.is_main ? "main" : q.source || "offered")}">${esc(qStamp(q))}</span>${scopeTag(q)}${found ? `<span class="ty-k">${esc(found)}</span>` : ""}${q.steps ? pipsHTML(q) : ""}</header>
     <h3 class="q-title">${esc(q.title)}</h3>
     ${q.lead ? `<p class="q-lead">${esc(q.lead)}</p>` : ""}
     ${q.summary ? `<p class="q-sum">${esc(q.summary)}</p>` : ""}
