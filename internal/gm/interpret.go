@@ -204,7 +204,9 @@ func describeHints(w *game.World, h Hints) string {
 // action itself, so the roll is exactly the one the player chose. It
 // returns nil when the hint is absent or is left to the interpreter.
 func directCheck(w *game.World, actor *game.Character, h Hints) ([]game.Action, error) {
-	if h.ExitID != "" {
+	// out of a fight only: fleeing may need a step to the exit first, which
+	// the interpreter plans
+	if h.ExitID != "" && !w.InCombat() {
 		x := w.FindExit(w.Campaign.LocationID, h.ExitID)
 		if x == nil {
 			return nil, fmt.Errorf("%w: there is no way %q here", ErrBadRequest, h.ExitID)
