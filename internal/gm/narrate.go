@@ -905,8 +905,8 @@ func (g *GM) judge(ctx context.Context, w *game.World, logText string) ([]game.Q
 		if q.Status != game.QuestActive || !game.QuestHere(w, q) {
 			continue
 		}
-		for _, o := range q.Objectives {
-			if o.Kind == game.ObjFreeform && !o.Done && !game.IsNightWatch(&o) { // the engine ticks night watches when their fight is won
+		for i, o := range q.Objectives {
+			if o.Kind == game.ObjFreeform && !o.Done && !game.EngineWatch(w, q, &q.Objectives[i]) { // the engine ticks night watches when their fight is won
 				open = append(open, fmt.Sprintf("quest_id=%s objective_id=%s: %s (%s)", q.ID, o.ID, o.Text, q.Title))
 			}
 			if q.IsMain && !o.Done {

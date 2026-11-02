@@ -10,14 +10,15 @@ import (
 // always brings the visitor (no random roll), and the step is marked off
 // only when that fight is won, never by the judge reading "they slept".
 
+// nightWatchPhrases need the night itself in them: staying somewhere
+// until morning, not any mention of watching or sleeping.
 var nightWatchPhrases = []string{
-	"the night in", "the night at", "the night there", "night in the", "a night in",
 	"last the night", "survive the night", "spend the night", "stay the night", "pass the night",
-	"through the night", "until dawn", "till dawn", "sleep in", "sleep at", "sleep there",
-	"what visits", "what comes in the night", "keep watch", "keep vigil",
+	"sleep the night", "the night in ", "the night at ", "a night in ", "a night at ",
+	"night there", "until dawn", "till dawn", "until morning", "till morning",
 }
 
-// IsNightWatch reports whether a step is a night watch.
+// IsNightWatch reports whether a step is about getting through a night.
 func IsNightWatch(o *Objective) bool {
 	if o == nil || o.Kind != ObjFreeform {
 		return false
@@ -31,9 +32,47 @@ func IsNightWatch(o *Objective) bool {
 	return false
 }
 
-// NightWatch finds an open night-watch step for a quest someone here is on
-// and that belongs to this place: the step names it, or the quest sends
-// the party here (not merely where the quest was heard of).
+// WatchPlace is where a night-watch step is kept: its own Where, a place
+// its text names, or the reach step just before it. "" when the engine
+// can't place it, and then the judge keeps the step as plain freeform.
+func WatchPlace(w *World, q *Quest, o *Objective) string {
+	if !IsNightWatch(o) {
+		return ""
+	}
+	if o.Where != "" {
+		return o.Where
+	}
+	t := strings.ToLower(o.Text)
+	best, where := "", ""
+	for _, l := range w.Locations {
+		if n := placeWords(l.Name); n != "" && strings.Contains(t, n) && len(n) > len(best) {
+			best, where = n, l.ID
+		}
+	}
+	if where != "" {
+		return where
+	}
+	prev := ""
+	for i := range q.Objectives {
+		x := &q.Objectives[i]
+		if x == o {
+			return prev
+		}
+		if x.Kind == ObjReachLocation {
+			prev = x.Target
+		}
+	}
+	return ""
+}
+
+// EngineWatch reports whether the engine runs this step: a night watch it
+// can place. Those come only by sleeping there and winning the fight.
+func EngineWatch(w *World, q *Quest, o *Objective) bool {
+	return WatchPlace(w, q, o) != ""
+}
+
+// NightWatch finds an open night-watch step kept here, on a quest someone
+// here is on. A main quest is only looked at up to its first open step.
 func NightWatch(w *World, l *Location) (*Quest, *Objective) {
 	if l == nil {
 		return nil, nil
@@ -44,33 +83,18 @@ func NightWatch(w *World, l *Location) (*Quest, *Objective) {
 		}
 		for i := range q.Objectives {
 			o := &q.Objectives[i]
-			if o.Done || !IsNightWatch(o) {
-				if q.IsMain && !o.Done {
-					break // main steps go in order
-				}
+			if o.Done {
 				continue
 			}
-			if nightWatchPlace(q, o, l) {
+			if o.Evidence == "" && WatchPlace(w, q, o) == l.ID {
 				return q, o
+			}
+			if q.IsMain {
+				break // main steps go in order
 			}
 		}
 	}
 	return nil, nil
-}
-
-func nightWatchPlace(q *Quest, o *Objective, l *Location) bool {
-	if o.Where == l.ID {
-		return true
-	}
-	if name := placeWords(l.Name); name != "" && strings.Contains(strings.ToLower(o.Text), name) {
-		return true
-	}
-	for _, x := range q.Objectives {
-		if x.Kind == ObjReachLocation && x.Target == l.ID {
-			return true
-		}
-	}
-	return false
 }
 
 // placeWords is a place's name without a leading article, lowercased.

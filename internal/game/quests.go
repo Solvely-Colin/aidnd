@@ -93,7 +93,7 @@ func objectiveMet(w *World, q *Quest, o *Objective) bool {
 		}
 		return n.LastTalked >= q.AcceptedTurn
 	case ObjFreeform:
-		return IsNightWatch(o) && o.Evidence != "" // set when the night's fight is won
+		return EngineWatch(w, q, o) && o.Evidence != "" // set when the night's fight is won
 	}
 	return false
 }
@@ -175,7 +175,7 @@ func EvaluateQuests(w *World) ([]QuestUpdate, []string) {
 			if o.Done {
 				continue
 			}
-			if (o.Kind != ObjFreeform || IsNightWatch(o)) && objectiveMet(w, q, o) {
+			if (o.Kind != ObjFreeform || EngineWatch(w, q, o)) && objectiveMet(w, q, o) {
 				u, ch := completeObjective(w, q, o)
 				ups = append(ups, u...)
 				changes = append(changes, ch...)
@@ -284,7 +284,7 @@ func CompleteFreeform(w *World, questID, objID, evidence string) ([]QuestUpdate,
 		if o.Kind != ObjFreeform {
 			return nil, nil, fmt.Errorf("objective %s is not freeform", objID)
 		}
-		if IsNightWatch(o) {
+		if EngineWatch(w, q, o) {
 			return nil, nil, fmt.Errorf("objective %s is a night watch: it is done only when the party sleeps there and beats what comes", objID)
 		}
 		if o.Done {

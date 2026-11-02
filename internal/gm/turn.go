@@ -400,6 +400,7 @@ func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []stor
 			turns, extra := game.RunEnemyTurns(w, g.Dice)
 			// nerve saves and a fight won by a reaction aren't in the turns
 			evs = append(evs, conditionEvents(out, game.ConditionTick{Changes: extra})...)
+			evs = append(evs, questTicks(w)...) // a night watch won by a reaction
 			if len(turns) > 0 {
 				out.EnemyTurns = append(out.EnemyTurns, turns...)
 				nar := g.narrateEnemies(ctx, w, turns, out.Narration)
@@ -444,6 +445,7 @@ func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []stor
 		evs = append(evs, conditionEvents(out, tick)...)
 		if w.Encounter != nil && len(w.Encounter.Living()) == 0 {
 			evs = append(evs, conditionEvents(out, game.ConditionTick{Changes: game.EndFight(w)})...) // an aura finished them
+			evs = append(evs, questTicks(w)...)
 		}
 		if !tick.LostTurn || passes >= len(w.Campaign.Turns.Order) {
 			out.NextActor = actorOf(next)
@@ -453,6 +455,16 @@ func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []stor
 		// the stunned character's turn passes; their stun runs down now
 		evs = append(evs, conditionEvents(out, game.EndCharacterTurn(g.Dice, next))...)
 	}
+}
+
+// questTicks ticks quests after a fight ends outside the action loop.
+func questTicks(w *game.World) []store.Event {
+	ups, _ := game.EvaluateQuests(w)
+	var evs []store.Event
+	for _, u := range ups {
+		evs = append(evs, questEvent(w, "", u))
+	}
+	return evs
 }
 
 // conditionEvents records condition changes on the result and as an event.

@@ -55,3 +55,25 @@ func TestNightWatchOnlyAtItsPlace(t *testing.T) {
 		t.Fatal("not every mention of night is a watch")
 	}
 }
+
+func TestNightWatchClassifyAndPlace(t *testing.T) {
+	f := newFixture(t)
+	for _, txt := range []string{"Keep watch over the merchant during lunch", "Put the guards to sleep in the barracks", "Find the night-gaunt's lair"} {
+		if IsNightWatch(&Objective{Kind: ObjFreeform, Text: txt}) {
+			t.Errorf("%q is not a night watch", txt)
+		}
+	}
+	// a watch with no place stays the judge's
+	q := f.sideQuest(t, ObjectiveSpec{Kind: ObjFreeform, Text: "Keep the lamp burning through the night until dawn"})
+	if EngineWatch(f.w, q, &q.Objectives[0]) {
+		t.Fatal("an unplaceable watch must stay with the judge")
+	}
+	// each watch belongs to the reach step just before it
+	q2 := f.sideQuest(t,
+		ObjectiveSpec{Kind: ObjReachLocation, Text: "Go to Whisperwood", Target: "Whisperwood"},
+		ObjectiveSpec{Kind: ObjFreeform, Text: "Last the night there and see what comes"},
+	)
+	if got := WatchPlace(f.w, q2, &q2.Objectives[1]); got != f.wood.ID {
+		t.Fatalf("watch should be kept at Whisperwood, got %q", got)
+	}
+}
