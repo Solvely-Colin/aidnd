@@ -750,6 +750,7 @@ func LongRest(c *Character) {
 // shape. Wizards (and land druids) recover slots once a day.
 func ShortRest(c *Character) []string {
 	var lines []string
+	delete(c.Used, tendedKey)
 	for _, r := range Resources(c) {
 		if r.Used == 0 {
 			continue

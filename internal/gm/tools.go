@@ -80,12 +80,12 @@ func interpreterTools() []llm.Tool {
 		tool(game.ActSubdue, "ACTION. Non-lethal takedown: grapple, tie up, intimidate, calm or persuade an enemy to stop fighting.", obj(map[string]any{
 			"target": str("enemy id"),
 			"method": enum("how", "grapple", "tie_up", "intimidate", "calm", "persuade")}, "target", "method")),
-		tool(game.ActCheck, "ACTION. A skill or ability check for anything risky or uncertain: searching (finds hidden exits), picking or forcing a lock, climbing, sneaking, persuading, recalling lore under pressure, stabilizing a dying ally.", obj(map[string]any{
+		tool(game.ActCheck, "ACTION. A skill or ability check for anything risky or uncertain: searching (finds hidden exits), picking or forcing a lock, climbing, sneaking, persuading, recalling lore under pressure, stabilizing a dying ally, tending wounds.", obj(map[string]any{
 			"skill":   skillEnum,
 			"ability": abilityEnum,
 			"dc":      intEnum("difficulty: 5 trivial, 10 easy, 15 medium, 20 hard, 25 very hard", 5, 10, 15, 20, 25),
-			"purpose": enum("search reveals hidden exits; unlock/force targets a locked exit; escape breaks free when the character is restrained or grappled; stabilize stops a dying ally's death saves (Medicine, DC 10). The engine sets those DCs", "search", "unlock", "force", "escape", "stabilize", "other"),
-			"target":  str("optional exit id for unlock/force, or the dying party member's id for stabilize"),
+			"purpose": enum("search reveals hidden exits; unlock/force targets a locked exit; escape breaks free when the character is restrained or grappled; stabilize stops a dying ally's death saves (Medicine, DC 10); tend treats and binds wounds outside a fight, the character's own or an ally's, and heals real HP on a success (Medicine or Survival, DC 10, once per patient between rests). The engine sets those DCs", "search", "unlock", "force", "escape", "stabilize", "tend", "other"),
+			"target":  str("optional exit id for unlock/force, the dying party member's id for stabilize, or the hurt party member's id for tend (empty = self)"),
 			"text":    str("what the check is for, in a few words")}, "dc", "purpose", "text")),
 		tool(game.ActUseItem, "ACTION. Use an item: drink a potion, apply a healer's kit (can revive a downed ally), use a key or tools on a locked exit.", obj(map[string]any{
 			"item":   str("item id from INVENTORY"),

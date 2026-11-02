@@ -211,7 +211,7 @@ func purposeSkill(purpose string) string {
 		return "sleight_of_hand"
 	case "force":
 		return "athletics"
-	case "stabilize":
+	case "stabilize", "tend":
 		return "medicine"
 	case "hide":
 		return "stealth"

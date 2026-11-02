@@ -37,13 +37,14 @@ type ActHint struct {
 }
 
 // CheckHint is a check the player called for from the dock. Search,
-// unlock and force are rolled as asked, without the interpreter; any other
+// unlock, force and tend are rolled as asked, without the interpreter; any other
 // purpose only fixes the ability and lets the interpreter set the DC.
 type CheckHint struct {
 	Ability string `json:"ability,omitempty"`
 	Skill   string `json:"skill,omitempty"`
-	Purpose string `json:"purpose,omitempty"` // search | unlock | force | other
+	Purpose string `json:"purpose,omitempty"` // search | unlock | force | tend | other
 	Exit    string `json:"exit,omitempty"`    // locked exit for unlock/force
+	Target  string `json:"target,omitempty"`  // party member to tend
 }
 
 func itemLine(it *game.Item, c *game.Character) string {

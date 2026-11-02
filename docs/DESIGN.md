@@ -415,3 +415,15 @@ The narrator has `discover_quest` (overheard, found, rumor; no giver needed, pay
 ### Night watches (2026-11-02)
 
 A freeform quest step about getting through a night somewhere ("Last the night in the attic room and end what visits it") is a night watch (`game.IsNightWatch`). Sleeping at its place (the step names it, or the quest's reach step sends the party there) always brings the visitor, authored from the step text, with no random roll. The fight is tagged with the step (`encounters.quest`); winning it marks the step off. The judge never ticks a night watch from narration, so "they slept and woke fine" no longer completes it.
+
+## Tending wounds (2026-11-02)
+
+An `ability_check` with purpose `tend` (or `other` whose text is about wounds,
+bandaging, first aid) treats a party member outside a fight: DC 10, Medicine
+by default (Survival works too). Success heals the patient one roll of their
+class hit die + CON (two dice on a critical success), once per patient until
+their next short or long rest (`Used["tended"]`). A failure heals nothing and
+can be retried. Refused in combat; a dying patient is stabilized instead. The
+dock's Roll group offers "Tend your wounds" / "Tend <name>'s wounds" when
+someone nearby is hurt. Fixes a live bug where a successful Survival check to
+bind wounds was narrated as healing but changed no HP.
