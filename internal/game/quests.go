@@ -134,6 +134,7 @@ func baseName(n string) string {
 func EvaluateQuests(w *World) ([]QuestUpdate, []string) {
 	var ups []QuestUpdate
 	var changes []string
+	ups, changes = TakeUpQuests(w)
 	for _, q := range w.Quests {
 		if q.Status != QuestActive {
 			continue
@@ -155,6 +156,53 @@ func EvaluateQuests(w *World) ([]QuestUpdate, []string) {
 	}
 	changes = append(changes, UpdateLairGate(w)...)
 	return ups, changes
+}
+
+// TakeUpQuests activates every offered side quest the party has started
+// on (see takenUp). Arrival calls it before looking for quest foes, so a
+// named foe waiting at the place is there on the first visit.
+func TakeUpQuests(w *World) ([]QuestUpdate, []string) {
+	var ups []QuestUpdate
+	var changes []string
+	for _, q := range w.Quests {
+		if q.Status == QuestOffered && takenUp(w, q) {
+			q.Status = QuestActive
+			q.AcceptedTurn = w.Campaign.Turn
+			questPromise(w, q)
+			ups = append(ups, QuestUpdate{QuestID: q.ID, Title: q.Title, Text: "Quest taken up: " + q.Title, Status: q.Status})
+			changes = append(changes, fmt.Sprintf("Quest %q taken up", q.Title))
+		}
+	}
+	return ups, changes
+}
+
+// takenUp reports whether the party has started on a side quest it heard
+// about but never formally accepted: it is standing at a place the quest
+// sends it to, or carries what the quest asks it to get. Hearing about it
+// means having met the giver (talked to or looked them over); a quest
+// nobody gave counts as heard.
+func takenUp(w *World, q *Quest) bool {
+	if q.IsMain {
+		return false
+	}
+	if g := w.NPC(q.GiverID); g != nil && g.LastTalked < 0 {
+		return false
+	}
+	for _, o := range q.Objectives {
+		switch o.Kind {
+		case ObjReachLocation:
+			if o.Target != "" && w.Campaign.LocationID == o.Target {
+				return true
+			}
+		case ObjObtainItem:
+			for _, c := range w.Characters {
+				if w.FindItemOf(OwnerCharacter, c.ID, o.Target) != nil {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // CompleteFreeform ticks a freeform objective (judge only) with evidence.

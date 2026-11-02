@@ -51,7 +51,7 @@ type Action struct {
 	Skill   string `json:"skill,omitempty"`   // for checks; sets the ability
 	DC      int    `json:"dc,omitempty"`
 	Purpose string `json:"purpose,omitempty"` // ability_check: search | unlock | force | escape | stabilize | other
-	Method  string `json:"method,omitempty"`  // subdue method; shove: prone | push
+	Method  string `json:"method,omitempty"`  // subdue method; shove: prone | push; rest: short | night
 	Text    string `json:"text,omitempty"`    // speech, or what the check is for
 	Promise string `json:"promise,omitempty"` // talk_to: what the character gave their word to do
 	Spell   string `json:"spell,omitempty"`   // cast_spell
@@ -411,7 +411,7 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 	case ActUseItem:
 		return useItem(ctx, c, a, st)
 	case ActRest:
-		return rest(ctx, c, st)
+		return rest(ctx, c, a, st)
 	case ActDodge:
 		return dodge(w, c, st)
 	case ActDisengage:
@@ -706,6 +706,9 @@ func arrive(ctx *Ctx, loc *Location, via *Edge, st *Step) {
 		}
 		st.Changes = append(st.Changes, fmt.Sprintf("%s at %s (%s)", who, loc.Name, ZoneName(loc, zone)))
 	}
+	ups, ch := TakeUpQuests(w)
+	st.Quests = append(st.Quests, ups...)
+	st.Changes = append(st.Changes, ch...)
 	questFoes(ctx, loc, st)
 }
 
@@ -1405,12 +1408,22 @@ func removeItem(w *World, id string) {
 	}
 }
 
-func rest(ctx *Ctx, c *Character, st *Step) error {
+// Rest lengths. A safe place always gives the full night.
+const (
+	RestShort = "short"
+	RestNight = "night"
+)
+
+func rest(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	if w.InCombat() {
 		return fmt.Errorf("you can't rest during a fight")
 	}
 	l := w.Here()
+	if l.Danger > 0 && a.Method == RestNight {
+		sleepRough(ctx, l, st)
+		return nil
+	}
 	if l.Danger == 0 {
 		ClearAllConditions(w)
 		for _, ch := range w.Characters {
@@ -1449,6 +1462,33 @@ func rest(ctx *Ctx, c *Character, st *Step) error {
 		ambush(ctx, l, st)
 	}
 	return nil
+}
+
+// sleepRough is a night's sleep somewhere unsafe: a long rest if nothing
+// comes, but no strain eases, and the odds of being woken are higher than
+// for a short rest. Woken, the party loses the night and fights in the dark.
+func sleepRough(ctx *Ctx, l *Location, st *Step) {
+	w := ctx.W
+	s := &w.Campaign.Scene
+	roll := ctx.R.Die(100)
+	if roll <= l.Danger*10 {
+		s.Time = len(TimesOfDay) - 1
+		st.Changes = append(st.Changes, fmt.Sprintf("The party beds down at %s, but something comes in the night", l.Name))
+		st.Rolls = append(st.Rolls, Roll{Label: "Something comes in the night", Kind: "encounter", Total: roll, Target: l.Danger * 10})
+		ambush(ctx, l, st)
+		return
+	}
+	ClearAllConditions(w)
+	for _, ch := range w.Characters {
+		if ch.Dead {
+			continue
+		}
+		LongRest(ch)
+		SetHP(ch, ch.MaxHP)
+	}
+	s.Day++
+	s.Time = 0
+	st.Changes = append(st.Changes, fmt.Sprintf("The party sleeps the night at %s and wakes at dawn, rested but uneasy", l.Name))
 }
 
 // NPCJoinsFight turns an NPC present into an enemy (starting a fight if

@@ -26,6 +26,8 @@ Rules:
 - Teamwork in a fight: "I cover / defend myself / brace" = dodge; "I back away carefully" = disengage (then reposition); "I distract it so X can hit" / "I give X a hand" = help; "I duck out of sight" = hide; "I wait for it to come to me" / "I shoot whatever comes through the door" = ready.
 - Give ability_check the skill that fits (stealth to sneak, perception to notice, insight to read someone, persuasion, deception, intimidation, athletics to climb, medicine to treat or stabilize a dying ally...).
 - Spells and powers: when the player casts, prays, invokes, or uses a power that matches one of the actor's SPELLS (by its name in this setting or what it does), call cast_spell with that spell key. Class abilities in ABILITIES (rage, second wind, action surge, cunning action, flurry of blows, lay on hands, wild shape, bardic inspiration...) are use_feature. Never cast a spell the actor doesn't list. Bonus actions don't spend the ACTION, so "I rage and attack" = use_feature rage + attack.
+- Sleeping, bedding down, getting ready for bed or spending the night anywhere = rest with length night, even somewhere dangerous; "catch my breath" or "rest a while" = rest with length short.
+- Taking up a quest someone here offered ("I'll do it", "I accept", "I'll look into it") = accept_quest with its id.
 - "skip", "pass", "wait", "end my turn" = end_turn.
 - A MAP SELECTION is only a hint. The player's words win. A selected NPC means the person spoken to, traded with or examined; attack them only if the words clearly say so.`
 

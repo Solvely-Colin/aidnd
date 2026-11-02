@@ -357,3 +357,62 @@ func TestQuestFoeWaitsAtItsPlace(t *testing.T) {
 		t.Fatal("defeating the quest foe should tick the objective")
 	}
 }
+
+// A side quest the party heard about but never formally accepted is taken
+// up when the party goes where it sends them (the Witch House bug: Wick
+// reached the house and the step stayed open because the quest was only
+// "offered").
+func TestOfferedQuestTakenUpOnArrival(t *testing.T) {
+	f := newFixture(t)
+	q := f.sideQuest(t,
+		ObjectiveSpec{Kind: ObjReachLocation, Text: "Go to Whisperwood", Target: "Whisperwood"},
+		ObjectiveSpec{Kind: ObjFreeform, Text: "Last the night in the wood"},
+	)
+	// not heard of yet: arriving does nothing
+	f.goTo(f.wood, 0)
+	if ups, _ := EvaluateQuests(f.w); len(ups) != 0 || q.Status != QuestOffered {
+		t.Fatalf("unheard quest taken up: %s %v", q.Status, ups)
+	}
+	f.goTo(f.hub, 0)
+	f.elder.LastTalked = 3
+	if EvaluateQuests(f.w); q.Status != QuestOffered {
+		t.Fatal("taken up without going anywhere")
+	}
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	r := Resolve(f.ctx(), f.aria, []Action{{Kind: ActMove, Target: "Whisperwood"}})
+	if q.Status != QuestActive || !q.Objectives[0].Done || q.Objectives[1].Done {
+		t.Fatalf("arrival: status %s objs %+v changes %v %s", q.Status, q.Objectives, r.Changes, stepErr(r, 0))
+	}
+	if !hasChange(r, "taken up") {
+		t.Errorf("no taken-up line: %v", r.Changes)
+	}
+}
+
+func TestMainQuestNotTakenUpByArrival(t *testing.T) {
+	f := newFixture(t)
+	q := f.sideQuest(t, ObjectiveSpec{Kind: ObjReachLocation, Text: "Go to Whisperwood", Target: "Whisperwood"})
+	q.IsMain = true
+	f.elder.LastTalked = 3
+	f.goTo(f.wood, 0)
+	if EvaluateQuests(f.w); q.Status != QuestOffered {
+		t.Fatal("main quest auto-accepted")
+	}
+}
+
+// Taken up on arrival, a quest's named foe is already waiting there.
+func TestTakenUpQuestFoeWaitsOnFirstArrival(t *testing.T) {
+	f := newFixture(t)
+	q := f.sideQuest(t,
+		ObjectiveSpec{Kind: ObjReachLocation, Text: "Go to Whisperwood", Target: "Whisperwood"},
+		ObjectiveSpec{Kind: ObjDefeatEnemy, Text: "Kill the wolf", Target: "wolf"},
+	)
+	f.elder.LastTalked = 0 // met on the first turn still counts
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	r := Resolve(f.ctx(), f.aria, []Action{{Kind: ActMove, Target: "Whisperwood"}})
+	if q.Status != QuestActive || !q.Objectives[0].Done {
+		t.Fatalf("not taken up: %s %v", q.Status, r.Changes)
+	}
+	if enc := f.w.Encounter; enc == nil || len(enc.Enemies) != 1 || !NameContains(enc.Enemies[0].Name, "wolf") {
+		t.Fatalf("quest foe not waiting on first arrival: %+v %v", f.w.Encounter, r.Changes)
+	}
+}
