@@ -63,6 +63,9 @@ func (g *GM) JoinGroup(ctx context.Context, campaignID, playerID, target string)
 	if err := game.JoinGroups(w, from, target); err != nil {
 		return nil, Conflict("%s", err.Error())
 	}
+	// joining up is the choice to go where the group goes; the others in
+	// the joining group keep their own choice
+	c.TravelTogether = true
 	ev := store.NewEvent("group_joined", playerID, map[string]any{
 		"character_id": c.ID, "group": game.GroupOf(c), "from": from, "into": target,
 		"joining": strings.Join(joining, ", "), "with": strings.Join(with, ", ")})
@@ -73,14 +76,15 @@ func (g *GM) JoinGroup(ctx context.Context, campaignID, playerID, target string)
 }
 
 // leaveAlone keeps one player's move from carrying their friends along.
-// In a long campaign (async play) when the actor's actions would take them
-// to another place, only they and the group members who chose to travel
-// together go; the rest stay where they are, in their own group. A
-// one-shot played at one sitting keeps moving as a party. It returns the
-// group_split event to save with the turn (nil when nothing changed) and
-// leaves the world focused on the actor's group.
-func (g *GM) leaveAlone(w *game.World, actor *game.Character, playerID string, actions []game.Action) ([]store.Event, error) {
-	if !w.Campaign.LongForm() || w.InCombat() || !game.Leaves(w, actions) {
+// The engine calls it (Ctx.Leaving) outside a fight once the actor's move
+// to another place has been checked. In a long campaign (async play) only
+// the actor and the group members who chose to travel together go; the
+// rest stay where they are, in their own group. A one-shot played at one
+// sitting keeps moving as a party. It returns the group_split event to
+// save with the turn (nil when nothing changed) and leaves the world
+// focused on the actor's group.
+func (g *GM) leaveAlone(w *game.World, actor *game.Character, playerID string) (*store.Event, error) {
+	if !w.Campaign.LongForm() || w.InCombat() {
 		return nil, nil
 	}
 	movers := []string{actor.ID}
@@ -89,7 +93,7 @@ func (g *GM) leaveAlone(w *game.World, actor *game.Character, playerID string, a
 		if c.ID == actor.ID || c.Dead {
 			continue
 		}
-		if c.TravelTogether && game.CanMove(c.Conditions) == nil {
+		if c.TravelTogether && !c.Down() && game.CanMove(c.Conditions) == nil {
 			movers = append(movers, c.ID)
 			going = append(going, c.Name)
 		} else {
@@ -100,6 +104,11 @@ func (g *GM) leaveAlone(w *game.World, actor *game.Character, playerID string, a
 		return nil, nil
 	}
 	from := game.GroupOf(actor)
+	// where they set out from, read before the group swap moves it
+	locID, where := w.Campaign.LocationID, ""
+	if l := w.Location(locID); l != nil {
+		where = l.Name
+	}
 	w.Settle()
 	grp, err := game.SplitOff(w, movers, g.Now().Unix())
 	if err != nil {
@@ -110,14 +119,11 @@ func (g *GM) leaveAlone(w *game.World, actor *game.Character, playerID string, a
 	if err := w.Focus(grp.ID); err != nil {
 		return nil, err
 	}
-	where := ""
-	if l := w.Location(grp.LocationID); l != nil {
-		where = l.Name
-	}
-	return []store.Event{store.NewEvent("group_split", playerID, map[string]any{
-		"character_id": actor.ID, "character": actor.Name, "group": grp.ID, "from": from,
-		"location_id": grp.LocationID, "location": where, "leaving": true,
-		"with": strings.Join(going, ", "), "staying": strings.Join(staying, ", ")})}, nil
+	ev := store.NewEvent("group_split", playerID, map[string]any{
+		"character_id": actor.ID, "character": actor.Name, "character_ids": movers, "group": grp.ID, "from": from,
+		"location_id": locID, "location": where, "leaving": true,
+		"with": strings.Join(going, ", "), "staying": strings.Join(staying, ", ")})
+	return &ev, nil
 }
 
 // SetTravelTogether records whether the player's character goes along when

@@ -152,6 +152,10 @@ type Ctx struct {
 	OnArrive func(loc *Location)
 	// Ambush supplies enemies for a random encounter at loc.
 	Ambush func(loc *Location) []EnemySpec
+	// Leaving is called outside a fight once c's move to another place has
+	// been checked and is about to happen. It may refocus the world on a
+	// new group so that only some of the party goes (see gm leaveAlone).
+	Leaving func(c *Character) error
 }
 
 // SlotFor says what an action costs given the current situation. For
@@ -622,6 +626,11 @@ func moveThrough(ctx *Ctx, c *Character, ref string, st *Step) error {
 			return fmt.Errorf("the way to %s is locked; use a key or try an ability_check to open it", x.To.Name)
 		}
 	}
+	if !w.InCombat() && ctx.Leaving != nil {
+		if err := ctx.Leaving(c); err != nil {
+			return err
+		}
+	}
 	if w.InCombat() {
 		if c.ZoneID != x.Zone && x.Zone != "" {
 			return fmt.Errorf("to flee through %s you must stand in %s; reposition first", x.Label, ZoneName(here, x.Zone))
@@ -748,14 +757,22 @@ func travel(ctx *Ctx, c *Character, ref string, st *Step) error {
 	if dest == nil {
 		return fmt.Errorf("unknown destination %q", ref)
 	}
-	for _, ch := range w.Party() {
-		if err := CanMove(ch.Conditions); err != nil {
-			return fmt.Errorf("%s is %v", ch.Name, err)
-		}
+	if err := CanMove(c.Conditions); err != nil {
+		return fmt.Errorf("%s is %v", c.Name, err)
 	}
 	path, err := w.TravelPath(w.Campaign.LocationID, dest.ID)
 	if err != nil {
 		return err
+	}
+	if len(path) > 0 && ctx.Leaving != nil {
+		if err := ctx.Leaving(c); err != nil {
+			return err
+		}
+	}
+	for _, ch := range w.Party() {
+		if err := CanMove(ch.Conditions); err != nil {
+			return fmt.Errorf("%s is %v", ch.Name, err)
+		}
 	}
 	prev := w.Campaign.LocationID
 	for _, hop := range path {

@@ -129,10 +129,22 @@ func TestAsyncMoveLeavesFriendsBehind(t *testing.T) {
 	r := newRig(t, 2, 1)
 	w := r.start(t)
 	w.Campaign.Async = true
+	x := w.FindExit(w.Here().ID, "Reedmarsh")
+	x.Edge.State = game.EdgeLocked
 	_, err := r.g.Store.Save(bg, w)
 	must(t, err)
 	hub := w.Here().ID
 	r.f.Default("narrate", llm.Text("The road bends."))
+
+	// a move that fails splits nobody off
+	r.act(t, "u2", "I head to the marsh", llm.Call("move", map[string]any{"exit": "Reedmarsh"}))
+	w = r.world(t)
+	if len(w.Campaign.Groups) != 0 || len(r.events(t, "group_split")) != 0 {
+		t.Fatal("a locked way must not split the group")
+	}
+	w.FindExit(hub, "Reedmarsh").Edge.State = game.EdgeOpen
+	_, err = r.g.Store.Save(bg, w)
+	must(t, err)
 
 	r.act(t, "u2", "I head to the marsh", llm.Call("move", map[string]any{"exit": "Reedmarsh"}))
 	w = r.world(t)

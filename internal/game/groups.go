@@ -349,10 +349,6 @@ func JoinGroups(w *World, a, b string) error {
 	// it, and the turn in progress carries on
 	for _, c := range w.Characters {
 		if g := GroupOf(c); g == a || g == b {
-			// whoever joins up chose to go along with the group
-			if g == a {
-				c.TravelTogether = true
-			}
 			c.Group = keep
 			if keep == MainGroup {
 				c.Group = ""
@@ -515,24 +511,3 @@ func (w *World) GroupInfos() []GroupInfo {
 	return out
 }
 
-// Leaves reports whether the actions would take the actor to another place:
-// out through an exit, or travelling somewhere else.
-func Leaves(w *World, actions []Action) bool {
-	here := w.Campaign.LocationID
-	for _, a := range actions {
-		switch a.Kind {
-		case ActMove:
-			if a.Target == "" {
-				continue
-			}
-			if x := w.FindExit(here, a.Target); x != nil && x.To.ID != here {
-				return true
-			}
-		case ActTravel:
-			if d := findDestination(w, a.Target); d != nil && d.ID != here {
-				return true
-			}
-		}
-	}
-	return false
-}

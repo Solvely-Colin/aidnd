@@ -424,7 +424,7 @@ function myEvents(evs) {
   const out = [];
   for (const e of evs) {
     const d = e.data || {};
-    if (e.type === "group_split") { if (d.character_id === me) cur = d.group; out.push(e); continue; }
+    if (e.type === "group_split") { if (d.character_id === me || (d.character_ids || []).includes(me)) cur = d.group; out.push(e); continue; }
     if (e.type === "group_joined") { if (d.from === cur || d.into === cur) cur = d.group; out.push(e); continue; }
     if (e.type === "character_created" && d.player_id === S.me?.player_id) cur = S.view?.group || cur;
     if (!d.party || d.party === cur) out.push(e);
@@ -2193,7 +2193,7 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-saga],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto],[data-joingrp],[data-downtime]");
+  const t = e.target.closest("[data-act],[data-open],[data-premise],[data-saga],[data-era],[data-lethal],[data-class],[data-species],[data-bg],[data-boost],[data-cskill],[data-dpick],[data-dspell],[data-spick],[data-sspell],[data-swap],[data-step],[data-sheet],[data-dock],[data-pick],[data-check],[data-skill],[data-sg],[data-roll],[data-attack],[data-talk],[data-topic],[data-zone],[data-exit],[data-send],[data-dmto],[data-joingrp],[data-together],[data-downtime]");
   if (!t || t.disabled) return;
   const ds = t.dataset, act = ds.act;
   if (ds.open) return go(`#/c/${ds.open}`);

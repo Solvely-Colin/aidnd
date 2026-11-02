@@ -219,16 +219,19 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	if err := g.Store.SaveSnapshot(ctx, w, actor.Name+": "+trim(text, 120)); err != nil {
 		g.logf("snapshot: %v", err)
 	}
-	// leaving for another place takes only the actor, unless their group
-	// chose to travel together
-	split, err := g.leaveAlone(w, actor, playerID, actions)
-	if err != nil {
-		return nil, err
+	// 2. resolve; leaving for another place takes only the actor and
+	// whoever chose to travel with them
+	var split []store.Event
+	leaving := func(c *game.Character) error {
+		ev, err := g.leaveAlone(w, c, playerID)
+		if ev != nil {
+			split = append(split, *ev)
+		}
+		return err
 	}
-	// 2. resolve
 	onArrive, ambush := g.arrivalHooks(ctx, w)
 	prevLoc := w.Campaign.LocationID
-	res := game.Resolve(&game.Ctx{W: w, R: g.Dice, Now: g.Now(), OnArrive: onArrive, Ambush: ambush}, actor, actions)
+	res := game.Resolve(&game.Ctx{W: w, R: g.Dice, Now: g.Now(), OnArrive: onArrive, Ambush: ambush, Leaving: leaving}, actor, actions)
 	noteSceneTurn(w, res)
 	if !hints.Autopilot {
 		game.NoteActed(w, g.Now().Unix())
