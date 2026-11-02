@@ -10,7 +10,7 @@ const DEFAULT_DAILY_LIMIT = 40;
 // How long a started generation blocks a second one, and how long to wait
 // after a failure before trying again.
 const PENDING_MS = 3 * 60_000;
-const FAILED_MS = 60 * 60_000;
+const FAILED_MS = 15 * 60_000;
 
 export type ArtEnv = {
 	AI: Ai;
@@ -37,6 +37,7 @@ export type PlaceInfo = {
 
 export type CharacterInfo = {
 	id: string;
+	player_id?: string;
 	name?: string;
 	concept?: string;
 	class?: string;
@@ -129,6 +130,19 @@ export function portraitPrompt(ch: CharacterInfo, setting?: string): string {
 		.join(" ");
 }
 
+// plainPortraitPrompt is the fallback when the full portrait prompt fails:
+// the model can refuse a prompt over one word in a backstory (a flask, a
+// debt, a body), so the second try leaves out everything the player wrote.
+export function plainPortraitPrompt(ch: CharacterInfo, setting?: string): string {
+	return [
+		`Head and shoulders portrait of one character from a ${era(setting).genre}, ${who(ch.pronouns)}, looking toward the viewer, plain dark background.`,
+		ch.class ? `Their calling: ${clip(ch.class, 60)}.` : "",
+		style(setting),
+	]
+		.filter(Boolean)
+		.join(" ");
+}
+
 // imageType sniffs the bytes, since the model doesn't say what it returns.
 export function imageType(b: Uint8Array): string {
 	if (b[0] === 0x89 && b[1] === 0x50) return "image/png";
@@ -199,7 +213,7 @@ export async function serveArt(
 
 	const c = await loadCampaign();
 	if (!c) return new Response(null, { status: 404 });
-	let prompt: string, w: number, h: number;
+	let prompt: string, w: number, h: number, fallback = "";
 	if (t.kind === "cover") {
 		if (!c.title && !c.pitch && !c.premise) return new Response(null, { status: 404 });
 		[prompt, w, h] = [coverPrompt(c), 1024, 576];
@@ -207,6 +221,7 @@ export async function serveArt(
 		const ch = c.party?.find((p) => p.id === t.id);
 		if (!ch) return new Response(null, { status: 404 });
 		[prompt, w, h] = [portraitPrompt(ch, c.setting), 640, 640];
+		fallback = plainPortraitPrompt(ch, c.setting);
 	} else {
 		// Only the place the party stands in is in the view, so a place is
 		// painted the first time someone looks while the party is there.
@@ -218,16 +233,41 @@ export async function serveArt(
 	await env.ART.put(`pending/${key}`, "", { customMetadata: { t: String(now) } });
 	ctx.waitUntil(
 		(async () => {
+			const errs: string[] = [];
 			try {
-				const img = await runModel(env, prompt, w, h);
-				await env.ART.put(key, img, { httpMetadata: { contentType: imageType(img) }, customMetadata: { prompt: prompt.slice(0, 1000) } });
-			} catch (e) {
-				console.error("art generation failed", key, e);
-				await env.ART.put(`failed/${key}`, "", { customMetadata: { t: String(Date.now()) } });
+				for (const p of [prompt, fallback].filter(Boolean)) {
+					try {
+						const img = await runModel(env, p, w, h);
+						await env.ART.put(key, img, { httpMetadata: { contentType: imageType(img) }, customMetadata: { prompt: p.slice(0, 1000) } });
+						return;
+					} catch (e) {
+						console.error("art generation failed", key, e);
+						errs.push(String((e as Error)?.message ?? e).slice(0, 200));
+					}
+				}
+				await env.ART.put(`failed/${key}`, "", { customMetadata: { t: String(Date.now()), err: errs.join(" | ").slice(0, 500) } });
 			} finally {
 				await env.ART.delete(`pending/${key}`);
 			}
 		})(),
 	);
 	return later("started");
+}
+
+// repaintArt throws away an image (or a recorded failure) and paints it
+// again, for a player who wants a new portrait or whose portrait failed.
+export async function repaintArt(
+	t: ArtTarget,
+	env: ArtEnv,
+	ctx: { waitUntil(p: Promise<unknown>): void },
+	loadCampaign: () => Promise<CampaignInfo | null>,
+	now = Date.now(),
+): Promise<Response> {
+	const key = artKey(t);
+	const pending = await markerAge(env, `pending/${key}`, now);
+	if (pending !== null && pending < PENDING_MS) return new Response(null, { status: 202, headers: { "X-Art": "pending" } });
+	await env.ART.delete([key, `failed/${key}`]);
+	const r = await serveArt(t, env, ctx, loadCampaign, now);
+	// A fresh image is never served here, so say why nothing started.
+	return new Response(null, { status: r.status, headers: { "X-Art": r.headers.get("X-Art") ?? "" } });
 }

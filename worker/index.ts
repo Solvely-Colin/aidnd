@@ -5,7 +5,7 @@
 // bridges below, which run here in the Workers runtime and hold the keys.
 
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
-import { parseArtPath, serveArt, type CampaignInfo } from "./art";
+import { parseArtPath, serveArt, repaintArt, type CampaignInfo } from "./art";
 
 export { ContainerProxy };
 
@@ -305,7 +305,17 @@ export default {
 			if (!s) return new Response(null, { status: 401 });
 			const t = parseArtPath(pathname);
 			if (!t) return new Response(null, { status: 404 });
-			return serveArt(t, env, ctx, () => loadCampaign(req, env, s, t.campaign));
+			let view: Promise<CampaignInfo | null> | undefined;
+			const load = () => (view ??= loadCampaign(req, env, s, t.campaign));
+			if (req.method === "POST") {
+				// Only a character's own player (or the GM) repaints a portrait.
+				if (t.kind !== "char") return new Response(null, { status: 405 });
+				const ch = (await load())?.party?.find((p) => p.id === t.id);
+				if (!ch) return new Response(null, { status: 404 });
+				if (ch.player_id !== s.p && !isGM(env, s)) return new Response(null, { status: 403 });
+				return repaintArt(t, env, ctx, load);
+			}
+			return serveArt(t, env, ctx, load);
 		}
 		if (pathname.startsWith("/auth/")) return Response.json({ error: "not found" }, { status: 404 });
 		return env.ASSETS.fetch(req);
