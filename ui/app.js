@@ -954,7 +954,19 @@ function groupsHTML() {
       ${g.here && !v.encounter ? `<button class="btn grp-join" data-joingrp="${esc(g.id)}">${g.fighting ? "Join the fight" : "Join up"}</button>` : ""}
     </div>`).join("") || `<span class="empty-line">Everyone is together.</span>`}
     ${canSolo ? `<button class="link grp-solo" data-act="solo">Go off on your own</button><span class="hint-line">You keep your own scene and turns in the same world. Meet your friends somewhere to join up again.</span>` : ""}
+    ${v.you?.travel_choice ? travelChoiceHTML(v.you.travel_together) : ""}
   </section>`;
+}
+
+// travelChoiceHTML: in a long campaign each player goes where they choose.
+// Leaving for another place takes only you, and a friend's move leaves you
+// where you are, unless you chose to go wherever your group goes.
+function travelChoiceHTML(on) {
+  return `<button class="row-line ${on ? "on" : ""}" data-together="${on ? "" : "1"}">
+    <span class="nm">${on ? "Going where the group goes" : "Staying put when friends leave"}<small>${on
+      ? "When someone in your group heads to another place, you go with them."
+      : "When someone in your group heads to another place, they go alone and you stay here."}</small></span>
+    <span class="verb">${on ? "Stay put instead" : "Travel together"}</span></button>`;
 }
 
 // downtimeHTML: at a safe place in a long campaign, one thing to do before
@@ -973,6 +985,15 @@ async function setDowntime(kind, t) {
   if (t) t.disabled = true;
   try {
     const r = await api("POST", `/campaigns/${S.route}/me/downtime`, { kind });
+    S.view = r.campaign;
+    renderChrome();
+  } catch (e) { toast(e.message); if (t) t.disabled = false; }
+}
+
+async function setTogether(on, t) {
+  if (t) t.disabled = true;
+  try {
+    const r = await api("POST", `/campaigns/${S.route}/me/together`, { on });
     S.view = r.campaign;
     renderChrome();
   } catch (e) { toast(e.message); if (t) t.disabled = false; }
@@ -1065,7 +1086,13 @@ function feedItems(evs) {
         if (out.length && out[out.length - 1].k === "gazette") out[out.length - 1] = it; else out.push(it);
         break;
       }
-      case "group_split": out.push({ k: "sys", text: `${isMe(d.character_id) ? "You go" : `${d.character} goes`} off alone${d.location ? ` from ${d.location}` : ""}.` }); break;
+      case "group_split":
+        if (d.leaving) {
+          const stay = (d.staying || "").split(", ").filter(Boolean);
+          out.push({ k: "sys", text: `${isMe(d.character_id) ? "You set" : `${d.character} sets`} out${d.location ? ` from ${d.location}` : ""}${d.with ? ` with ${d.with}` : ""}. ${list(stay.map(firstName))} ${stay.length > 1 ? "stay" : "stays"} behind.` });
+          break;
+        }
+        out.push({ k: "sys", text: `${isMe(d.character_id) ? "You go" : `${d.character} goes`} off alone${d.location ? ` from ${d.location}` : ""}.` }); break;
       case "group_joined": out.push({ k: "sys", text: `${d.joining} ${d.joining?.includes(",") ? "join" : "joins"} up with ${d.with}.` }); break;
       case "turn_started": {
         // Mark the turn only when it passes to someone else.
@@ -2236,6 +2263,7 @@ document.addEventListener("click", async e => {
   }
   if (ds.send) return send(ds.send);
   if (ds.joingrp) return groupMove("join", { group: ds.joingrp }, t);
+  if (ds.together !== undefined) return setTogether(ds.together === "1", t);
   if (ds.downtime !== undefined) return setDowntime(ds.downtime, t);
   try {
     switch (act) {

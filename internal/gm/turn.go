@@ -219,6 +219,12 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	if err := g.Store.SaveSnapshot(ctx, w, actor.Name+": "+trim(text, 120)); err != nil {
 		g.logf("snapshot: %v", err)
 	}
+	// leaving for another place takes only the actor, unless their group
+	// chose to travel together
+	split, err := g.leaveAlone(w, actor, playerID, actions)
+	if err != nil {
+		return nil, err
+	}
 	// 2. resolve
 	onArrive, ambush := g.arrivalHooks(ctx, w)
 	prevLoc := w.Campaign.LocationID
@@ -245,11 +251,12 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	for i, ch := range res.Changes {
 		res.Changes[i] = game.Reskin(ch, w.Setting())
 	}
-	evs := []store.Event{
+	evs := split
+	evs = append(evs,
 		store.NewEvent("player_action", playerID, map[string]any{"character_id": actor.ID, "character": actor.Name, "text": text, "hints": hints}),
 		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": append(res.Rolls(), nar.Rolls...), "world_changes": out.WorldChanges}),
 		store.NewEvent("narration", "", map[string]any{"text": nar.Text, "quick": quick, "skipped": res.Skipped, "character_id": actor.ID}),
-	}
+	)
 	quests := append([]game.QuestUpdate{}, res.Quests...)
 	// 5. judge freeform objectives
 	if !quick && w.Campaign.Status == game.StatusActive && (w.Campaign.Turn+1)%g.Cfg.ObjectiveCheckEvery == 0 {
