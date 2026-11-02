@@ -351,7 +351,7 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 		st.Info = append(st.Info, facts...)
 		// examining someone counts as meeting them (talk_to_npc objectives)
 		if n := w.NPC(a.Target); n != nil && n.Alive && n.LocationID == w.Campaign.LocationID {
-			n.LastTalked = w.Campaign.Turn
+			n.Met(c, w.Campaign.Turn)
 		}
 		return nil
 	case ActSay:
@@ -529,7 +529,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 		c.ZoneID = n.ZoneID
 		st.Changes = append(st.Changes, fmt.Sprintf("%s moves to %s", c.Name, ZoneName(l, n.ZoneID)))
 	}
-	n.LastTalked = w.Campaign.Turn
+	n.Met(c, w.Campaign.Turn)
 	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.AttitudeTo(c)))
 	for _, t := range n.TiesTo(c.ID) {
 		st.Info = append(st.Info, TieLine(w, n, t))
@@ -1094,7 +1094,11 @@ func defeat(w *World, e *Enemy, subdued bool) []string {
 		verb = "is subdued"
 	}
 	changes := []string{fmt.Sprintf("%s %s", e.Display(), verb)}
-	w.Defeats = append(w.Defeats, DefeatRecord{Name: e.Name, NPCID: e.NPCID, LocationID: w.Campaign.LocationID, Turn: w.Campaign.Turn})
+	var by []string
+	for _, c := range w.Characters {
+		by = append(by, c.ID)
+	}
+	w.Defeats = append(w.Defeats, DefeatRecord{Name: e.Name, NPCID: e.NPCID, LocationID: w.Campaign.LocationID, Turn: w.Campaign.Turn, By: by})
 	if n := w.NPC(e.NPCID); n != nil && e.NPCID != "" {
 		here := w.Location(w.Campaign.LocationID)
 		where := w.Campaign.LocationID

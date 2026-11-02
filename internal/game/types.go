@@ -340,6 +340,9 @@ type NPC struct {
 // NPCExtra holds NPC state added after the first schema, stored as one
 // JSON column.
 type NPCExtra struct {
+	// MetBy is the turn each character last talked to or looked them over,
+	// so a quest's talk step counts only for whoever is on the quest.
+	MetBy map[string]int `json:"met_by,omitempty"`
 	// Protected NPCs are ones a saga's story needs: the narrator and the
 	// world may not kill, remove or turn them (players still can, in a fight).
 	Protected bool `json:"protected,omitempty"`
@@ -696,6 +699,8 @@ type DefeatRecord struct {
 	NPCID      string `json:"npc_id,omitempty"`
 	LocationID string `json:"location_id"`
 	Turn       int    `json:"turn"`
+	// By are the characters in the group that did it.
+	By []string `json:"by,omitempty"`
 }
 
 // Campaign is the top-level record.

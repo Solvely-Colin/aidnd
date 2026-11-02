@@ -589,6 +589,7 @@ async function refreshView() {
   if (before !== S.view.status) return render();
   if (S.view.status === "lobby" || joining()) return renderLobby(true);
   renderChrome();
+  renderFeed(); // lead cards read the refreshed quest log
 }
 
 function render() {

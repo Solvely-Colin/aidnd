@@ -352,7 +352,7 @@ func TestQuestFoeWaitsAtItsPlace(t *testing.T) {
 	for _, e := range w.Encounter.Enemies {
 		e.HP = 0
 	}
-	w.Defeats = append(w.Defeats, DefeatRecord{Name: "Grey Alpha", Turn: w.Campaign.Turn})
+	w.Defeats = append(w.Defeats, DefeatRecord{Name: "Grey Alpha", Turn: w.Campaign.Turn, By: []string{f.aria.ID}})
 	EvaluateQuests(w)
 	if !q.Objectives[0].Done {
 		t.Fatal("defeating the quest foe should tick the objective")

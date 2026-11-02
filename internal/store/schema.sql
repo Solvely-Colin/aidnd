@@ -259,6 +259,7 @@ CREATE TABLE IF NOT EXISTS defeats (
     npc_id      TEXT NOT NULL DEFAULT '',
     location_id TEXT NOT NULL DEFAULT '',
     turn        INTEGER NOT NULL DEFAULT 0,
+    by_chars    TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (campaign_id, ord)
 );
 

@@ -195,6 +195,16 @@ func TakeOn(w *World, questID string, c *Character) (*Quest, []QuestUpdate, erro
 		// an old quest everyone was on; joining makes no difference
 		return nil, nil, fmt.Errorf("%s is already on %s", c.Name, q.Title)
 	}
+	if !q.Logged {
+		// an old quest everyone shared: taking it up keeps it everyone's
+		q.Status = QuestActive
+		q.AcceptedTurn = w.Campaign.Turn
+		questPromise(w, q)
+		if c.Tracked == "" || trackedDone(w, c) {
+			c.Tracked = q.ID
+		}
+		return q, []QuestUpdate{{QuestID: q.ID, Title: q.Title, Kind: QuestTaken, Status: q.Status, Text: fmt.Sprintf("%s took on %s", c.Name, q.Title)}}, nil
+	}
 	joining := []*Character{c}
 	if !q.Personal {
 		for _, m := range w.Characters {
@@ -468,4 +478,30 @@ func NewLead(w *World, q *Quest, actor *Character) (QuestUpdate, bool) {
 		}
 	}
 	return leadUpdate(q, cs), true
+}
+
+// Met records that a character talked to or looked over an NPC.
+func (n *NPC) Met(c *Character, turn int) {
+	n.LastTalked = turn
+	if c == nil {
+		return
+	}
+	if n.MetBy == nil {
+		n.MetBy = map[string]int{}
+	}
+	n.MetBy[c.ID] = turn
+}
+
+// ownSteps reports whether a quest's talk and defeat steps count only
+// when one of its takers did them (logged side quests with takers).
+func ownSteps(q *Quest) bool { return !q.IsMain && q.Logged && len(q.Takers) > 0 }
+
+// takerDid reports whether any of the quest's takers is among ids.
+func takerDid(q *Quest, ids []string) bool {
+	for _, id := range ids {
+		if containsStr(q.Takers, id) {
+			return true
+		}
+	}
+	return false
 }

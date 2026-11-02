@@ -72,6 +72,21 @@ func (h *Hub) Subscribers(campaignID string) int {
 // newcomer's story-so-far are private: only the player they were for
 // sees them.
 func visibleTo(e store.Event, player string) bool {
+	if e.Type == "quest_updated" {
+		// side-quest news is for the players of the characters on it
+		var q struct {
+			Players []string `json:"players"`
+		}
+		if json.Unmarshal(e.Data, &q) != nil || len(q.Players) == 0 {
+			return true
+		}
+		for _, p := range q.Players {
+			if p == player {
+				return true
+			}
+		}
+		return false
+	}
 	if e.Type != gm.EventVision && e.Type != gm.EventCatchUp {
 		return true
 	}

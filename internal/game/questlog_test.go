@@ -218,3 +218,33 @@ func TestShareQuestAnywhere(t *testing.T) {
 		t.Fatal("personal quests cannot be shared")
 	}
 }
+
+// A talk step counts only when someone on the quest did the talking, not
+// a friend in another group.
+func TestTalkStepNeedsATaker(t *testing.T) {
+	f := newFixture(t)
+	q := f.sideQuest(t, ObjectiveSpec{Kind: ObjTalkToNPC, Text: "Ask Dunna", Target: "Dunna"})
+	q.Known = []string{f.aria.ID}
+	_, _, err := TakeOn(f.w, q.ID, f.aria)
+	must(t, err)
+	f.smith.Met(f.bram, f.w.Campaign.Turn+1)
+	if EvaluateQuests(f.w); q.Objectives[0].Done {
+		t.Fatal("Bram's talk ticked Aria's step")
+	}
+	f.smith.Met(f.aria, f.w.Campaign.Turn+1)
+	if EvaluateQuests(f.w); !q.Objectives[0].Done {
+		t.Fatal("Aria's own talk should tick it")
+	}
+}
+
+// Taking up a quest from before the log keeps it everyone's.
+func TestTakingAnOldQuestKeepsItShared(t *testing.T) {
+	f := newFixture(t)
+	q := f.sideQuest(t, ObjectiveSpec{Kind: ObjFreeform, Text: "x"})
+	q.QuestExtra = QuestExtra{}
+	_, _, err := TakeOn(f.w, q.ID, f.aria)
+	must(t, err)
+	if q.Status != QuestActive || len(q.Takers) != 0 || !OnQuest(q, f.bram) {
+		t.Fatalf("status %s takers %v", q.Status, q.Takers)
+	}
+}

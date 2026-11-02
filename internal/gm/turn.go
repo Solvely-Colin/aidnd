@@ -2,6 +2,7 @@ package gm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -53,11 +54,48 @@ func (g *GM) recent(ctx context.Context, w *game.World) []string {
 	if err != nil {
 		return nil
 	}
-	lines := eventLines(evs, w)
+	lines := eventLines(groupEvents(evs, w), w)
 	if len(lines) > g.Cfg.RecentEvents {
 		lines = lines[len(lines)-g.Cfg.RecentEvents:]
 	}
 	return lines
+}
+
+// groupEvents keeps the events that belong to the focused group: ones
+// tagged with another group, and quest news for characters none of whom
+// are here, happened elsewhere and must not steer this group's story (or
+// serve the judge as evidence).
+func groupEvents(evs []store.Event, w *game.World) []store.Event {
+	party := w.Focused()
+	if party == "" {
+		return evs
+	}
+	here := map[string]bool{}
+	for _, c := range w.Characters {
+		here[c.ID] = true
+	}
+	out := evs[:0:0]
+	for _, e := range evs {
+		var d struct {
+			Party      string   `json:"party"`
+			Characters []string `json:"characters"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		if d.Party != "" && d.Party != party {
+			continue
+		}
+		if e.Type == "quest_updated" && len(d.Characters) > 0 {
+			ok := false
+			for _, id := range d.Characters {
+				ok = ok || here[id]
+			}
+			if !ok {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // Start places the party at the hub, lays out zones, narrates the opening
@@ -289,7 +327,7 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 		out.WorldChanges = append(out.WorldChanges, ch...)
 	}
 	for _, q := range quests {
-		evs = append(evs, store.NewEvent("quest_updated", "", q))
+		evs = append(evs, questEvent(w, "", q))
 	}
 	if w.Campaign.LocationID != prevLoc {
 		l := w.Here()

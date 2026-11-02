@@ -17,6 +17,9 @@ type QuestUpdate struct {
 	Lead string `json:"lead,omitempty"`
 	// Characters are the ones the news is for; empty means everyone.
 	Characters []string `json:"characters,omitempty"`
+	// Players are the players of Characters, so the server can keep the
+	// news from everyone else (filled when the event is written).
+	Players []string `json:"players,omitempty"`
 	// By is the character who shared it (kind shared).
 	By     string `json:"by,omitempty"`
 	ByName string `json:"by_name,omitempty"`
@@ -57,7 +60,7 @@ func objectiveMet(w *World, q *Quest, o *Objective) bool {
 		return (q.IsMain || len(q.Takers) == 0) && l != nil && l.Visited
 	case ObjDefeatEnemy:
 		for _, d := range w.Defeats {
-			if d.Turn < q.AcceptedTurn {
+			if d.Turn < q.AcceptedTurn || ownSteps(q) && !takerDid(q, d.By) {
 				continue
 			}
 			if d.NPCID != "" && d.NPCID == o.Target {
@@ -77,7 +80,18 @@ func objectiveMet(w *World, q *Quest, o *Objective) bool {
 		return w.FindItemOf(OwnerNPC, o.DeliverTo, o.Target) != nil
 	case ObjTalkToNPC:
 		n := w.NPC(o.Target)
-		return n != nil && n.LastTalked >= q.AcceptedTurn
+		if n == nil {
+			return false
+		}
+		if ownSteps(q) {
+			for _, id := range q.Takers {
+				if t, ok := n.MetBy[id]; ok && t >= q.AcceptedTurn {
+					return true
+				}
+			}
+			return false
+		}
+		return n.LastTalked >= q.AcceptedTurn
 	}
 	return false
 }

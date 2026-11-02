@@ -331,7 +331,7 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, d := range w.Defeats {
-		if err := insert(ctx, tx, "defeats", []string{"campaign_id", "ord", "name", "npc_id", "location_id", "turn"}, id, i, d.Name, d.NPCID, d.LocationID, d.Turn); err != nil {
+		if err := insert(ctx, tx, "defeats", []string{"campaign_id", "ord", "name", "npc_id", "location_id", "turn", "by_chars"}, id, i, d.Name, d.NPCID, d.LocationID, d.Turn, js(nonNil(d.By))); err != nil {
 			return err
 		}
 	}
@@ -500,13 +500,14 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Chronicle = append(w.Chronicle, ce)
 			return err
 		}),
-		q(`SELECT name, npc_id, location_id, turn FROM defeats WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
+		q(`SELECT name, npc_id, location_id, turn, by_chars FROM defeats WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			var d game.DefeatRecord
-			if err := r.Scan(&d.Name, &d.NPCID, &d.LocationID, &d.Turn); err != nil {
+			var by string
+			if err := r.Scan(&d.Name, &d.NPCID, &d.LocationID, &d.Turn, &by); err != nil {
 				return err
 			}
 			w.Defeats = append(w.Defeats, d)
-			return nil
+			return unjs(by, &w.Defeats[len(w.Defeats)-1].By)
 		}),
 	}
 	if err := errors.Join(steps...); err != nil {

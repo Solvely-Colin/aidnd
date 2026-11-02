@@ -332,7 +332,7 @@ func AddQuest(w *World, spec QuestSpec, main bool) (*Quest, error) {
 				q.Known = append(q.Known, c.ID)
 			}
 		}
-		q.Logged = len(q.Known) > 0
+		q.Logged = true // known to nobody else until they hear of it
 	}
 	for _, o := range spec.Objectives {
 		q.Objectives = append(q.Objectives, Objective{ID: w.NewID("obj"), Kind: o.Kind, Text: trimTo(o.Text, 200), Target: o.Target, DeliverTo: o.DeliverTo})

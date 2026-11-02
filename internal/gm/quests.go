@@ -94,7 +94,7 @@ func (g *GM) QuestAct(ctx context.Context, campaignID, playerID, questID, op str
 	}
 	var evs []store.Event
 	for _, u := range ups {
-		evs = append(evs, store.NewEvent("quest_updated", playerID, u))
+		evs = append(evs, questEvent(w, playerID, u))
 	}
 	if _, err := g.commit(ctx, w, evs...); err != nil {
 		return nil, err
@@ -121,4 +121,20 @@ func joinList(ns []string) string {
 		}
 	}
 	return out
+}
+
+// questEvent writes quest news, addressed to the players of the
+// characters it is for (none means everyone).
+func questEvent(w *game.World, playerID string, u game.QuestUpdate) store.Event {
+	for _, id := range u.Characters {
+		for _, c := range w.Everyone() {
+			if c.ID == id && c.PlayerID != "" {
+				u.Players = append(u.Players, c.PlayerID)
+			}
+		}
+	}
+	if len(u.Characters) > 0 && len(u.Players) == 0 {
+		u.Players = []string{"-"} // for nobody seated
+	}
+	return store.NewEvent("quest_updated", playerID, u)
 }
