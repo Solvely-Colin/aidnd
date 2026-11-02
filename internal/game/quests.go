@@ -23,7 +23,7 @@ func AcceptQuest(w *World, questID string) (*Quest, error) {
 	if q.Status != QuestOffered {
 		return nil, fmt.Errorf("quest %q is %s, not on offer", q.Title, q.Status)
 	}
-	if g := w.NPC(q.GiverID); g != nil && g.LocationID != w.Campaign.LocationID {
+	if g := w.NPC(q.GiverID); g != nil && g.Alive && g.LocationID != w.Campaign.LocationID {
 		return nil, fmt.Errorf("%s offered that quest; find them at their location to accept", g.Name)
 	}
 	q.Status = QuestActive
@@ -48,7 +48,7 @@ func objectiveMet(w *World, q *Quest, o *Objective) bool {
 			if d.NPCID != "" && d.NPCID == o.Target {
 				return true
 			}
-			if NameContains(d.Name, o.Target) || NameContains(o.Target, baseName(d.Name)) {
+			if defeatMatches(d.Name, o.Target) {
 				return true
 			}
 		}
@@ -65,6 +65,55 @@ func objectiveMet(w *World, q *Quest, o *Objective) bool {
 		return n != nil && n.LastTalked >= q.AcceptedTurn
 	}
 	return false
+}
+
+// defeatMatches reports whether defeating an enemy called name meets a
+// defeat objective aimed at target. Whole words only, so a "Rat" never
+// counts for "the pirate captain" and a plain "Bandit 2" never counts for
+// "the bandit captain"; a plural target ("the wolves") counts any one of
+// that kind.
+func defeatMatches(name, target string) bool {
+	t := normName(target)
+	if t == "" {
+		return false
+	}
+	if hasWords(normName(name), t) {
+		return true
+	}
+	base := normName(baseName(name))
+	if base == "" {
+		return false
+	}
+	if t == base {
+		return true
+	}
+	for _, pl := range plurals(base) {
+		if hasWords(t, pl) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasWords reports whether needle appears in hay as whole words.
+func hasWords(hay, needle string) bool {
+	return needle != "" && strings.Contains(" "+hay+" ", " "+needle+" ")
+}
+
+// plurals are the likely plural forms of a (normalized) name.
+func plurals(n string) []string {
+	out := []string{n + "s", n + "es"}
+	switch {
+	case strings.HasSuffix(n, "y"):
+		out = append(out, n[:len(n)-1]+"ies")
+	case strings.HasSuffix(n, "f"):
+		out = append(out, n[:len(n)-1]+"ves")
+	case strings.HasSuffix(n, "fe"):
+		out = append(out, n[:len(n)-2]+"ves")
+	case strings.HasSuffix(n, "man"):
+		out = append(out, n[:len(n)-3]+"men")
+	}
+	return out
 }
 
 // baseName strips a trailing enemy number: "Bandit 2" -> "Bandit".
@@ -170,7 +219,7 @@ func completeObjective(w *World, q *Quest, o *Objective) ([]QuestUpdate, []strin
 		}
 		ups = append(ups, QuestUpdate{QuestID: q.ID, Title: q.Title, Text: text, Status: q.Status})
 		changes = append(changes, text)
-		if q.GiverID == "" {
+		if q.GiverID == "" || giverDead(w, q) {
 			changes = append(changes, grantRewards(w, q, nil)...)
 			q.Status = QuestTurnedIn
 			keepQuestPromise(w, q)
@@ -206,6 +255,11 @@ func TurnInQuest(w *World, questID string, c *Character) ([]QuestUpdate, []strin
 	q.Status = QuestTurnedIn
 	keepQuestPromise(w, q)
 	g.Keep(fmt.Sprintf("day %d: %s completed %q for me", w.Campaign.Scene.Day, c.Name, q.Title))
+	if c != nil {
+		g.Settle(c.ID, TieOwed)
+		g.Bind(w, c, TieDebt, "finished "+q.Title+" for them", SourceEngine)
+		Note(w, c, RecordEntry{Kind: RecOutcome, Source: SourceEngine, NPCID: g.ID, Text: fmt.Sprintf("Finished %s for %s", q.Title, g.Name)})
+	}
 	if g.Disposition < 3 {
 		g.Disposition++
 	}
@@ -226,7 +280,9 @@ func grantRewards(w *World, q *Quest, c *Character) []string {
 		if it == nil || c == nil {
 			continue
 		}
-		if q.GiverID != "" && (it.Owner.Kind != OwnerNPC || it.Owner.ID != q.GiverID) {
+		held := it.Owner.Kind == OwnerNPC && it.Owner.ID == q.GiverID
+		fell := giverDead(w, q) && it.Owner.Kind == OwnerLocation // dropped where the giver died
+		if q.GiverID != "" && !held && !fell {
 			continue // the giver no longer has it
 		}
 		it.Owner = Owner{Kind: OwnerCharacter, ID: c.ID}

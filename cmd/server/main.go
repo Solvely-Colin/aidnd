@@ -82,7 +82,6 @@ func main() {
 	// table has no roll button, so open mode rolls at once.
 	g := gm.New(client, st, gm.Config{
 		SceneTurnCap:        envInt("SCENE_TURN_CAP", 10),
-		MaxPlayers:          envInt("MAX_PLAYERS", 4),
 		MaxSetbacks:         envInt("MAX_SETBACKS", 3),
 		ObjectiveCheckEvery: envInt("OBJECTIVE_CHECK_EVERY", 1),
 		LoreBudget:          envInt("LORE_BUDGET", 1800),

@@ -47,7 +47,10 @@
 	"vars": {
 		"LLM_MODEL": "deepseek-v4.1-flash",
 		"LLM_BASE_URL": "https://ollama.com/v1",
-		"LLM_REASONING_EFFORT": "none"
+		"LLM_REASONING_EFFORT": "none",
+		// Who may use the GM area (player ids, comma separated).
+		"GM_PLAYERS": "colin"
 	}
-	// Secrets (wrangler secret put): APP_SECRET, PLAY_CODE, LLM_API_KEY.
+	// Secrets (wrangler secret put): APP_SECRET, PLAY_CODE, LLM_API_KEY, and
+	// optionally GM_CODE (then the GM's name signs in with it, not PLAY_CODE).
 }

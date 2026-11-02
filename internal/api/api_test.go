@@ -467,6 +467,12 @@ func checkSheets(t *testing.T, v map[string]any) {
 		if weapons == 0 {
 			t.Errorf("%s: no weapons carried", c["name"])
 		}
+		if _, ok := c["marks"].([]any); !ok {
+			t.Errorf("%s: marks %v", c["name"], c["marks"])
+		}
+		if _, ok := c["standing"].([]any); !ok {
+			t.Errorf("%s: standing %v", c["name"], c["standing"])
+		}
 	}
 }
 
@@ -686,5 +692,110 @@ func TestStartSagaCampaign(t *testing.T) {
 	}
 	if r := e.do("POST", "/campaigns", map[string]string{"saga": "nope"}, "", ""); r.code < 400 {
 		t.Fatalf("unknown saga should fail, got %d", r.code)
+	}
+}
+
+func TestVisionsReachOnlyTheirPlayer(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ben"}, "k", "u2")
+	w, _ := e.g.Store.Load(t.Context(), id)
+	if _, err := e.g.Store.Save(t.Context(), w,
+		store.NewEvent(gm.EventVision, "", map[string]any{"for": "u1", "text": "SECRETVISION"}),
+		store.NewEvent("narration", "", map[string]any{"text": "after"})); err != nil {
+		t.Fatal(err)
+	}
+	log := func(p string) string { return string(e.do("GET", "/campaigns/"+id+"/log", nil, "k", p).body) }
+	if !strings.Contains(log("u1"), "SECRETVISION") {
+		t.Fatal("the player who had the vision can't see it")
+	}
+	for _, p := range []string{"u2", ""} {
+		if l := log(p); strings.Contains(l, "SECRETVISION") || !strings.Contains(l, "after") {
+			t.Fatalf("%q sees %s", p, l)
+		}
+	}
+	// the stream filters it too, for replay and live events
+	tok := e.do("POST", "/campaigns/"+id+"/stream-token", nil, "k", "u2").json(t)["token"].(string)
+	req, _ := http.NewRequest("GET", e.srv.URL+"/campaigns/"+id+"/events?stream_token="+tok, nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	sr := newSSEReader(res.Body)
+	for _, ev := range sr.next(3, 2*time.Second) {
+		if ev["type"] == gm.EventVision {
+			t.Fatalf("u2's replay has a vision: %v", ev)
+		}
+	}
+	for i := 0; i < 50 && e.api.Hub().Subscribers(id) == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	evs, _ := e.g.Store.Save(t.Context(), w, store.NewEvent(gm.EventVision, "", map[string]any{"for": "u1", "text": "LIVEVISION"}), store.NewEvent("narration", "", map[string]any{"text": "live"}))
+	e.api.Hub().Publish(id, evs)
+	got := sr.next(1, 2*time.Second)
+	if len(got) != 1 || got[0]["type"] != "narration" {
+		t.Fatalf("u2 live %v", got)
+	}
+}
+
+func TestPlayersWriteTheirOwnGoals(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet}, "k", "u1")
+	base := "/campaigns/" + id + "/me/goals"
+	if r := e.do("POST", base, map[string]string{"text": "x"}, "k", "u9"); r.code != 403 {
+		t.Fatalf("outsider set a goal: %d", r.code)
+	}
+	if r := e.do("POST", base, map[string]string{"text": " "}, "k", "u1"); r.code != 400 {
+		t.Fatalf("empty goal %d", r.code)
+	}
+	r := e.do("POST", base, map[string]string{"text": "Find my sister"}, "k", "u1")
+	if r.code != 200 {
+		t.Fatalf("add %d %s", r.code, r.body)
+	}
+	c := r.json(t)["campaign"].(map[string]any)["party"].([]any)[0].(map[string]any)
+	goals := c["goals"].([]any)
+	if len(goals) != 1 || goals[0].(map[string]any)["source"] != "player" {
+		t.Fatalf("goals %v", goals)
+	}
+	gid := goals[0].(map[string]any)["id"].(string)
+	r = e.do("POST", base, map[string]string{"drop": gid}, "k", "u1")
+	c = r.json(t)["campaign"].(map[string]any)["party"].([]any)[0].(map[string]any)
+	if g := c["goals"].([]any)[0].(map[string]any); g["status"] != "dropped" || len(c["record"].([]any)) != 1 {
+		t.Fatalf("after drop %v %v", g, c["record"])
+	}
+}
+
+func TestFriendJoinsAStoryUnderWay(t *testing.T) {
+	e := newEnv(t, "k")
+	id := e.do("POST", "/campaigns", map[string]string{"premise": "x"}, "k", "").json(t)["id"].(string)
+	e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ann"}, "k", "u1")
+	e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet}, "k", "u1")
+	if r := e.do("POST", "/campaigns/"+id+"/start", nil, "k", ""); r.code != 200 {
+		t.Fatalf("start %d %s", r.code, r.body)
+	}
+	if r := e.do("POST", "/campaigns/"+id+"/players", map[string]string{"name": "Ben"}, "k", "u2"); r.code != 201 {
+		t.Fatalf("late join %d %s", r.code, r.body)
+	}
+	v := e.do("GET", "/campaigns/"+id, nil, "k", "u2").json(t)
+	if you := v["you"].(map[string]any); you["joined"] != true || you["character_id"] != nil {
+		t.Fatalf("seated without a character yet: %v", you)
+	}
+	if r := e.do("POST", "/campaigns/"+id+"/characters", map[string]any{"character": sheet2}, "k", "u2"); r.code != 201 {
+		t.Fatalf("late character %d %s", r.code, r.body)
+	}
+	v = e.do("GET", "/campaigns/"+id, nil, "k", "u2").json(t)
+	if len(v["party"].([]any)) != 2 {
+		t.Fatalf("Bram should be in the party: %v", v["party"])
+	}
+	log := func(p string) string { return string(e.do("GET", "/campaigns/"+id+"/log", nil, "k", p).body) }
+	if !strings.Contains(log("u2"), `"catch_up"`) {
+		t.Fatal("the newcomer gets the story so far")
+	}
+	if strings.Contains(log("u1"), `"catch_up"`) {
+		t.Fatal("the story so far is only for the newcomer")
 	}
 }

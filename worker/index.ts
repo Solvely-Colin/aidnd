@@ -5,7 +5,7 @@
 // bridges below, which run here in the Workers runtime and hold the keys.
 
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
-import { parseArtPath, serveArt, type CampaignInfo } from "./art";
+import { parseArtPath, serveArt, repaintArt, type CampaignInfo } from "./art";
 
 export { ContainerProxy };
 
@@ -19,10 +19,15 @@ export interface Env {
 	LLM_MODEL: string;
 	LLM_BASE_URL: string;
 	LLM_REASONING_EFFORT: string;
+	// Player ids that may use the GM area, comma separated ("colin").
+	GM_PLAYERS?: string;
 	// Secrets.
 	APP_SECRET: string;
 	PLAY_CODE: string;
 	LLM_API_KEY: string;
+	// Optional. When set, a GM name signs in with this code instead of the
+	// play code, so nobody else can sign in under the GM's name.
+	GM_CODE?: string;
 }
 
 // --- bridges for the container
@@ -148,7 +153,8 @@ const COOKIE = "aidnd_session";
 const SESSION_DAYS = 60;
 const enc = new TextEncoder();
 
-type Session = { p: string; n: string; e: number };
+// g marks a session signed in with the GM code.
+type Session = { p: string; n: string; e: number; g?: 1 };
 
 function b64url(buf: ArrayBuffer | Uint8Array): string {
 	const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -196,6 +202,22 @@ export async function readSession(secret: string, cookieHeader: string | null, n
 	}
 }
 
+function gmIds(env: Env): string[] {
+	return (env.GM_PLAYERS ?? "colin").split(",").map((x) => playerId(x)).filter(Boolean);
+}
+
+// isGM: a GM name, and when a GM code is set, signed in with it.
+export function isGM(env: Env, s: Session | null): boolean {
+	if (!s || !gmIds(env).includes(s.p)) return false;
+	return !env.GM_CODE || s.g === 1;
+}
+
+async function codeIs(env: Env, given: string, want: string | undefined): Promise<boolean> {
+	if (!want) return false;
+	// Compare HMACs so the comparison takes the same time for any guess.
+	return sameBytes(await hmac(env.APP_SECRET, "code:" + given.trim()), await hmac(env.APP_SECRET, "code:" + want));
+}
+
 // playerId turns a display name into a stable id: "Colin" -> "colin".
 export function playerId(name: string): string {
 	return name
@@ -220,12 +242,19 @@ async function login(req: Request, env: Env): Promise<Response> {
 	const name = (body.name ?? "").trim().slice(0, 40);
 	const id = playerId(name);
 	if (!id) return Response.json({ error: "Enter your name." }, { status: 400 });
-	// Compare HMACs so the comparison takes the same time for any guess.
-	const ok = sameBytes(await hmac(env.APP_SECRET, "code:" + (body.code ?? "").trim()), await hmac(env.APP_SECRET, "code:" + env.PLAY_CODE));
-	if (!env.PLAY_CODE || !ok) return Response.json({ error: "That play code is not right." }, { status: 401 });
+	const code = body.code ?? "";
 	const s: Session = { p: id, n: name, e: Date.now() + SESSION_DAYS * 86400_000 };
+	if (env.GM_CODE && gmIds(env).includes(id)) {
+		// the GM's name is held by the GM code
+		if (!(await codeIs(env, code, env.GM_CODE))) {
+			return Response.json({ error: "That name belongs to the GM. Sign in with the GM code, or pick another name." }, { status: 401 });
+		}
+		s.g = 1;
+	} else if (!(await codeIs(env, code, env.PLAY_CODE))) {
+		return Response.json({ error: "That play code is not right." }, { status: 401 });
+	}
 	return Response.json(
-		{ player_id: id, name },
+		{ player_id: id, name, gm: isGM(env, s) },
 		{ headers: { "Set-Cookie": cookie(await signSession(env.APP_SECRET, s), SESSION_DAYS * 86400) } },
 	);
 }
@@ -239,6 +268,9 @@ export async function proxyToGame(req: Request, env: Env, s: Session): Promise<R
 	headers.delete("Cookie");
 	headers.set("Authorization", `Bearer ${env.APP_SECRET}`);
 	headers.set("X-Player-ID", s.p);
+	// only the Worker says who the GM is
+	headers.delete("X-GM");
+	if (isGM(env, s)) headers.set("X-GM", "1");
 	const fwd = new Request(u.toString(), { method: req.method, headers, body: req.body, redirect: "manual" });
 	return getContainer(env.GAME, "main").fetch(fwd);
 }
@@ -263,7 +295,7 @@ export default {
 		}
 		const s = await readSession(env.APP_SECRET, req.headers.get("Cookie"));
 		if (pathname === "/auth/me") {
-			return s ? Response.json({ player_id: s.p, name: s.n }) : Response.json({ error: "signed out" }, { status: 401 });
+			return s ? Response.json({ player_id: s.p, name: s.n, gm: isGM(env, s) }) : Response.json({ error: "signed out" }, { status: 401 });
 		}
 		if (pathname.startsWith("/api/")) {
 			if (!s) return Response.json({ error: "Sign in first." }, { status: 401 });
@@ -273,7 +305,17 @@ export default {
 			if (!s) return new Response(null, { status: 401 });
 			const t = parseArtPath(pathname);
 			if (!t) return new Response(null, { status: 404 });
-			return serveArt(t, env, ctx, () => loadCampaign(req, env, s, t.campaign));
+			let view: Promise<CampaignInfo | null> | undefined;
+			const load = () => (view ??= loadCampaign(req, env, s, t.campaign));
+			if (req.method === "POST") {
+				// Only a character's own player (or the GM) repaints a portrait.
+				if (t.kind !== "char") return new Response(null, { status: 405 });
+				const ch = (await load())?.party?.find((p) => p.id === t.id);
+				if (!ch) return new Response(null, { status: 404 });
+				if (ch.player_id !== s.p && !isGM(env, s)) return new Response(null, { status: 403 });
+				return repaintArt(t, env, ctx, load);
+			}
+			return serveArt(t, env, ctx, load);
 		}
 		if (pathname.startsWith("/auth/")) return Response.json({ error: "not found" }, { status: 404 });
 		return env.ASSETS.fetch(req);

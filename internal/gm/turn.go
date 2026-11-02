@@ -108,13 +108,17 @@ func (g *GM) Start(ctx context.Context, campaignID string) (*game.World, string,
 	dir.MainObjective, dir.SceneGoal, dir.RouteHint = g.sceneGoal(w)
 	w.Campaign.Scene.Goal = dir.SceneGoal
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "narrate_opening", Temperature: 0.8, MaxTokens: 500, Messages: []llm.Message{
-		llm.System(narratorSystem),
+		llm.System(styled(narratorSystem, w)),
 		llm.User(fmt.Sprintf("%s\nSTATE:\n%s\nThe party: %s.\nWrite the opening narration (60-120 words): where they are, why they are here (the pitch), and the hook toward: %s. End on the situation.",
 			loreBlock(selectLore(w, w.Campaign.Pitch, g.Cfg.LoreBudget)), snapshot(w, nil, true), strings.Join(party, ", "), dir.SceneGoal)),
 	}})
 	opening := strings.TrimSpace(resp.Content)
+	plain := fmt.Sprintf("%s %s", w.Campaign.Pitch, hub.Description)
 	if err != nil || opening == "" {
-		opening = fmt.Sprintf("%s %s", w.Campaign.Pitch, hub.Description)
+		opening = plain
+	} else {
+		opening = g.polish(ctx, w, "narrate_opening", opening)
+		opening, _ = g.guard(ctx, newCanon(w, hub.ID, nil, w.Campaign.Pitch, hub.Description), "narrate_opening", opening, plain)
 	}
 	first := w.ActiveCharacter()
 	_, err = g.commit(ctx, w,
@@ -140,6 +144,7 @@ func (g *GM) TakeAction(ctx context.Context, campaignID, playerID, text string, 
 	if w.Campaign.Status != game.StatusActive {
 		return nil, Conflict("the campaign is %s", w.Campaign.Status)
 	}
+	game.DropStaleDeathSaves(w)
 	actor, err := g.actorFor(w, playerID)
 	if err != nil {
 		return nil, err
@@ -257,9 +262,13 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	evs := split
 	evs = append(evs,
 		store.NewEvent("player_action", playerID, map[string]any{"character_id": actor.ID, "character": actor.Name, "text": text, "hints": hints}),
-		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": append(res.Rolls(), nar.Rolls...), "world_changes": out.WorldChanges}),
+		store.NewEvent("action_resolved", playerID, map[string]any{"character_id": actor.ID, "steps": res.Steps, "skipped": res.Skipped, "changes": res.Changes, "rolls": append(res.Rolls(), nar.Rolls...), "world_changes": out.WorldChanges, "canon_fixes": issueTexts(nar.Canon)}),
 		store.NewEvent("narration", "", map[string]any{"text": nar.Text, "quick": quick, "skipped": res.Skipped, "character_id": actor.ID}),
 	)
+	if !quick {
+		// strain may show one character something the others don't see
+		evs = append(evs, g.vision(ctx, w)...)
+	}
 	quests := append([]game.QuestUpdate{}, res.Quests...)
 	// 5. judge freeform objectives
 	if !quick && w.Campaign.Status == game.StatusActive && (w.Campaign.Turn+1)%g.Cfg.ObjectiveCheckEvery == 0 {
@@ -302,6 +311,10 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	if !quick && w.Campaign.Turn-w.Campaign.SummaryTurn >= g.Cfg.SummaryEvery {
 		g.summarize(ctx, w, append(recent, actor.Name+": "+text, "GM: "+nar.Text))
 	}
+	// a player who takes a turn is caught up with the world
+	if !hints.Autopilot {
+		game.NoteSeen(w, playerID)
+	}
 	// 7. save + broadcast
 	if _, err := g.commit(ctx, w, evs...); err != nil {
 		return nil, err
@@ -339,7 +352,9 @@ func (g *GM) endTurn(ctx context.Context, w *game.World, out *TurnResult) []stor
 	}
 	for passes := 0; ; passes++ {
 		if w.InCombat() {
-			turns, _ := game.RunEnemyTurns(w, g.Dice)
+			turns, extra := game.RunEnemyTurns(w, g.Dice)
+			// nerve saves and a fight won by a reaction aren't in the turns
+			evs = append(evs, conditionEvents(out, game.ConditionTick{Changes: extra})...)
 			if len(turns) > 0 {
 				out.EnemyTurns = append(out.EnemyTurns, turns...)
 				nar := g.narrateEnemies(ctx, w, turns, out.Narration)
@@ -449,7 +464,7 @@ func (g *GM) Skip(ctx context.Context, campaignID, playerID string, mode SkipMod
 	}
 	out := &TurnResult{TurnEnded: true}
 	var evs []store.Event
-	if p := w.Campaign.TakePending(actor.ID); p != nil && p.Kind == game.PendingDeathSave {
+	if p := w.Campaign.TakePending(actor.ID); p != nil && p.Kind == game.PendingDeathSave && actor.Dying() {
 		// nobody rolled for them, so the engine does
 		ds := game.DeathSave(w, g.Dice, actor)
 		evs = append(evs, deathSaveEvent(out, ds))

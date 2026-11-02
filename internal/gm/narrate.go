@@ -24,7 +24,7 @@ Rules:
 - 40-100 words, plain language, lead with what happened. Second person plural or character names; present tense.
 - You may change the world only through the provided directive tools; code validates them. You cannot change player HP, gold or conditions. Conditions (poisoned, prone, restrained, frightened, blinded, stunned) come only from the engine: name a threat with the hazard tool and narrate the save result it returns; describe conditions already in STATE.
 - Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.
-- WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
+- WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. Grudges and debts belong to the one character they name, and a character's MARKS show on them; when one character's deed will follow them personally, record it (npc_tie, and for a true turning point mark_character). YOUR STORY is the acting character's own goals, choices and how things turned out: let it color what they notice and who reacts to them, record new choices that matter (record_choice) and settle their goals when the story clearly does (personal_goal). When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
 
 const quickSystem = `You are the narrator of a tabletop game. The player took only free actions (looking, a remark, readying gear).
 Answer briefly in at most 60 words using only the facts given, as a storyteller: no game words (zone, exit, NPC, attitude, HP, budget, action, engine) and no lists of who is where; answer the question asked, not everything in the state. If what they look for is not there, say so plainly. Do not invent new threats or events. Nobody arrives anywhere, leaves, fights or gets anything unless WHAT HAPPENED says so. Use each character's listed pronouns. No questions, no menus, do not mention turns.`
@@ -32,8 +32,9 @@ Answer briefly in at most 60 words using only the facts given, as a storyteller:
 // narration is the narrator's output for one turn.
 type narration struct {
 	Text    string
-	Changes []string    // world changes from directives (and the pacing backstop)
-	Rolls   []game.Roll // saves the engine rolled for a hazard directive
+	Changes []string     // world changes from directives (and the pacing backstop)
+	Rolls   []game.Roll  // saves the engine rolled for a hazard directive
+	Canon   []canonIssue // contradictions the canon guard found (and fixed)
 }
 
 func wordCount(s string) int { return len(strings.Fields(s)) }
@@ -55,8 +56,8 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	happened := describeResolution(res, w)
 	if quick {
 		req := llm.Request{Tag: "narrate_quick", Temperature: 0.6, MaxTokens: 200, Messages: []llm.Message{
-			llm.System(quickSystem),
-			llm.User(fmt.Sprintf("%s%s\nPLAYER (%s): %s\n\nWHAT HAPPENED:\n%s", snapshot(w, actor, false), worldMemory(w, actor), actor.Name, text, happened)),
+			llm.System(styled(quickSystem, w)),
+			llm.User(fmt.Sprintf("%s%s%s\nPLAYER (%s): %s\n\nWHAT HAPPENED:\n%s", snapshot(w, actor, false), worldMemory(w, actor), unrealBlock(w), actor.Name, text, happened)),
 		}}
 		resp, err := g.LLM.Chat(ctx, req)
 		if err == nil {
@@ -68,7 +69,12 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 		if out.Text == "" {
 			out.Text = fallbackNarration(res)
 		} else {
-			out.Text = g.dejargon(ctx, out.Text)
+			out.Text = g.dejargon(ctx, g.polish(ctx, w, "narrate_quick", out.Text))
+			if wordCount(out.Text) > 60 {
+				out.Text = g.tighten(ctx, out.Text, 60)
+			}
+			c := newCanon(w, res.Arrived, res.Changes, happened)
+			out.Text, out.Canon = g.guard(ctx, c, "narrate_quick", out.Text, fallbackNarration(res))
 		}
 		return out
 	}
@@ -80,6 +86,7 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	b.WriteString("\nSTATE:\n")
 	b.WriteString(snapshot(w, actor, true))
 	b.WriteString(worldMemory(w, actor))
+	b.WriteString(unrealBlock(w))
 	if len(recent) > 0 {
 		fmt.Fprintf(&b, "\nRECENT LOG:\n%s\n", strings.Join(recent, "\n"))
 	}
@@ -87,10 +94,10 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 	b.WriteString(dir.Note())
 	tools := directiveTools()
 	if w.InCombat() || res.CombatStarted {
-		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true, DirResolvePromise: true})
+		tools = filterTools(tools, map[string]bool{DirEndEncounter: true, DirNPCNote: true, DirRecordLore: true, DirAdjustTension: true, DirAdjustDisp: true, DirResolvePromise: true, DirMarkCharacter: true, DirNPCTie: true, DirRecordChoice: true})
 	}
 	req := llm.Request{Tag: "narrate", Temperature: 0.8, MaxTokens: 600, Tools: tools,
-		Messages: []llm.Message{llm.System(narratorSystem), llm.User(b.String())}}
+		Messages: []llm.Message{llm.System(styled(narratorSystem, w)), llm.User(b.String())}}
 	if dir.ForceProgress {
 		req.Tools = filterTools(directiveTools(), progressDirectives)
 		req.RequireTool = true
@@ -185,7 +192,16 @@ func (g *GM) narrate(ctx context.Context, w *game.World, actor *game.Character, 
 			textOut += " " + strings.Join(out.Changes, ". ") + "."
 		}
 	} else {
-		textOut = g.dejargon(ctx, textOut)
+		textOut = g.dejargon(ctx, g.polish(ctx, w, "narrate", textOut))
+		allowed := append(append(append([]string{}, res.Changes...), out.Changes...), dir.BeatChanges...)
+		if dir.Beat != nil {
+			allowed = append(allowed, dir.Beat.Title, dir.Beat.Text)
+		}
+		fb := fallbackNarration(res)
+		if len(out.Changes) > 0 {
+			fb += " " + strings.Join(out.Changes, ". ") + "."
+		}
+		textOut, out.Canon = g.guard(ctx, newCanon(w, res.Arrived, allowed, happened), "narrate", textOut, fb)
 	}
 	out.Text = textOut
 	return out
@@ -200,7 +216,7 @@ func (g *GM) dejargon(ctx context.Context, text string) string {
 		return text
 	}
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "dejargon", Temperature: 0.3, MaxTokens: 300, Messages: []llm.Message{
-		llm.System("Rewrite the passage as a storyteller would say it. Keep every fact, name and number. Replace game terms (zone, NPC, disposition, HP, engine) with natural description, e.g. \"one zone off\" becomes \"across the green\". Same length or shorter. No questions."),
+		llm.System("Rewrite the passage as a storyteller would say it. Keep every fact, name and number. Replace game terms (zone, NPC, disposition, HP, engine) with natural description, e.g. \"one zone off\" becomes \"across the green\". Keep the voice. Same length or shorter. No questions."),
 		llm.User(text)}})
 	out := strings.TrimSpace(resp.Content)
 	if err != nil || out == "" || jargonRe.MatchString(out) {
@@ -211,7 +227,7 @@ func (g *GM) dejargon(ctx context.Context, text string) string {
 
 func (g *GM) tighten(ctx context.Context, text string, words int) string {
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "tighten", Temperature: 0.3, MaxTokens: 300, Messages: []llm.Message{
-		llm.System(fmt.Sprintf("Condense the passage to at most %d words. Keep every fact, roll result and name. Plain language. No questions.", words)),
+		llm.System(fmt.Sprintf("Condense the passage to at most %d words. Keep every fact, roll result and name. Keep the voice. No questions.", words)),
 		llm.User(text)}})
 	if err != nil || strings.TrimSpace(resp.Content) == "" {
 		f := strings.Fields(text)
@@ -342,6 +358,9 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			a.Enemies = a.Enemies[:3]
 		}
 		for i := range a.Enemies {
+			if p := phantomOf(w, a.Enemies[i].Name); p != "" {
+				return "", fmt.Errorf("there is no %s; a character under strain only imagined it", p)
+			}
 			// the narrator can't turn the antagonist or a saga's protected
 			// people into foes; players can still pick that fight
 			if n := w.NPC(a.Enemies[i].NPCID); n == nil || n.LocationID != l.ID || n.Antagonist || n.Protected {
@@ -493,6 +512,11 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		if n == nil {
 			return "", fmt.Errorf("unknown npc %q", a.NPCID)
 		}
+		nc := newCanon(w, "", nil)
+		nc.lifeOnly = true
+		if is := nc.check(a.Note); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
 		if a.Important {
 			n.Keep(fmt.Sprintf("day %d: %s", w.Campaign.Scene.Day, trim(a.Note, 140)))
 		} else {
@@ -522,6 +546,148 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			n.Remember(fmt.Sprintf("%s: %s", feel, trim(r, 100)))
 		}
 		return "", nil
+	case DirNPCTie:
+		var a struct {
+			NPCID  string `json:"npc_id"`
+			CharID string `json:"character_id"`
+			Kind   string `json:"kind"`
+			Reason string `json:"reason"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		n := w.NPC(a.NPCID)
+		if n == nil || !n.Alive || n.LocationID != l.ID {
+			return "", fmt.Errorf("no npc %q here", a.NPCID)
+		}
+		ch := w.Character(a.CharID)
+		if ch == nil || ch.Dead {
+			return "", fmt.Errorf("unknown character %q", a.CharID)
+		}
+		if a.Kind == "settle" {
+			if !n.Settle(ch.ID, "") {
+				return "", fmt.Errorf("%s holds nothing toward %s", n.Name, ch.Name)
+			}
+			return fmt.Sprintf("%s and %s are square", n.Name, ch.Name), nil
+		}
+		if a.Kind != game.TieGrudge && a.Kind != game.TieDebt && a.Kind != game.TieOwed {
+			return "", fmt.Errorf("kind must be grudge, debt, owed or settle")
+		}
+		reason := trim(a.Reason, 100)
+		if strings.TrimSpace(reason) == "" {
+			return "", fmt.Errorf("reason is required")
+		}
+		tc := newCanon(w, "", nil)
+		tc.lifeOnly = true
+		if is := tc.check(reason); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
+		n.Bind(w, ch, a.Kind, reason, game.SourceGM)
+		ties := n.TiesTo(ch.ID)
+		return game.TieLine(w, n, ties[len(ties)-1]), nil
+	case DirRecordChoice:
+		var a struct {
+			CharID string `json:"character_id"`
+			Kind   string `json:"kind"`
+			Text   string `json:"text"`
+			NPCID  string `json:"npc_id"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		ch := w.Character(a.CharID)
+		if ch == nil || ch.Dead {
+			return "", fmt.Errorf("unknown character %q", a.CharID)
+		}
+		text := trim(a.Text, 200)
+		rc := newCanon(w, "", nil)
+		rc.lifeOnly = true
+		if is := rc.check(text); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
+		npc := ""
+		if n := w.NPC(a.NPCID); n != nil {
+			npc = n.ID
+		}
+		if game.Note(w, ch, game.RecordEntry{Kind: a.Kind, Text: text, NPCID: npc, Source: game.SourceGM}) == nil {
+			return "", fmt.Errorf("already recorded, or empty")
+		}
+		return "", nil
+	case DirPersonalGoal:
+		var a struct {
+			CharID string `json:"character_id"`
+			Action string `json:"action"`
+			GoalID string `json:"goal_id"`
+			Text   string `json:"text"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		ch := w.Character(a.CharID)
+		if ch == nil || ch.Dead {
+			return "", fmt.Errorf("unknown character %q", a.CharID)
+		}
+		text := trim(a.Text, 160)
+		gc := newCanon(w, "", nil)
+		gc.lifeOnly = true
+		if is := gc.check(text); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
+		switch a.Action {
+		case "add":
+			g, err := game.AddGoal(w, ch, text, game.SourceGM)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s takes up a goal: %s", ch.Name, g.Text), nil
+		case game.GoalDone, game.GoalFailed:
+			if ch.GoalsSettledToday(w) > 0 {
+				return "", fmt.Errorf("%s already settled a goal today", ch.Name)
+			}
+			changes, err := game.SettleGoal(w, ch, a.GoalID, a.Action, text)
+			if err != nil {
+				return "", err
+			}
+			return strings.Join(changes, "; "), nil
+		}
+		return "", fmt.Errorf("action must be add, done or failed")
+	case DirMarkCharacter:
+		var a struct {
+			CharID string `json:"character_id"`
+			Kind   string `json:"kind"`
+			Text   string `json:"text"`
+		}
+		if err := c.Decode(&a); err != nil {
+			return "", err
+		}
+		ch := w.Character(a.CharID)
+		if ch == nil || ch.Dead {
+			return "", fmt.Errorf("unknown character %q", a.CharID)
+		}
+		ok := false
+		for _, k := range game.NarratorMarkKinds {
+			ok = ok || a.Kind == k
+		}
+		if !ok {
+			return "", fmt.Errorf("kind must be scar, brand or name")
+		}
+		if ch.MarksToday(w, game.SourceGM) > 0 {
+			return "", fmt.Errorf("%s was already marked today", ch.Name)
+		}
+		text := trim(a.Text, 100)
+		mc := newCanon(w, "", nil)
+		mc.lifeOnly = true
+		if is := mc.check(text); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
+		}
+		m, err := game.AddMark(w, ch, game.Mark{Kind: a.Kind, Text: text, Source: game.SourceGM})
+		if err != nil {
+			return "", err
+		}
+		if m == nil {
+			return "", fmt.Errorf("%s already carries that mark", ch.Name)
+		}
+		return fmt.Sprintf("%s is marked for good: %s", ch.Name, m.Text), nil
 	case DirNPCGivesItem:
 		var a struct {
 			NPCID  string `json:"npc_id"`
@@ -535,8 +701,12 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		if n == nil || !n.Alive || n.LocationID != l.ID {
 			return "", fmt.Errorf("no npc %q here", a.NPCID)
 		}
-		if n.Disposition < 0 {
-			return "", fmt.Errorf("%s is not friendly enough to give gifts", n.Name)
+		to := w.Character(a.To)
+		if to == nil {
+			return "", fmt.Errorf("unknown character %q", a.To)
+		}
+		if n.AttitudeTo(to) < 0 {
+			return "", fmt.Errorf("%s is not friendly enough to give %s gifts", n.Name, to.Name)
 		}
 		it := w.FindItemOf(game.OwnerNPC, n.ID, a.ItemID)
 		if it == nil || isRewardItem(w, it.ID) {
@@ -544,10 +714,6 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 		}
 		if it.Value > 60 {
 			return "", fmt.Errorf("%s is too valuable to give away", it.Name)
-		}
-		to := w.Character(a.To)
-		if to == nil {
-			return "", fmt.Errorf("unknown character %q", a.To)
 		}
 		it.Owner = game.Owner{Kind: game.OwnerCharacter, ID: to.ID}
 		return fmt.Sprintf("%s gives %s to %s", n.Name, it.Name, to.Name), nil
@@ -568,6 +734,11 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			if a.Kind == k {
 				kind = k
 			}
+		}
+		lc := newCanon(w, "", nil)
+		lc.lifeOnly = true
+		if is := lc.check(a.Text); len(is) > 0 {
+			return "", fmt.Errorf("that contradicts the world: %s", is[0].Why)
 		}
 		ids := npcIDs(w, a.NPCIDs)
 		if kind == game.FactPromise && len(ids) == 0 {
@@ -608,6 +779,9 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 			if w.IsBoss(e.NPCID) {
 				return "", fmt.Errorf("the antagonist does not flee")
 			}
+		}
+		if ev := game.CurrentEvent(w); ev != nil && ev.EncounterID == w.Encounter.ID {
+			return "", fmt.Errorf("this fight decides %s; it ends only when it is won or lost", ev.Title)
 		}
 		w.Encounter = nil
 		w.Campaign.Turns.Budget.Free = game.Unlimited
@@ -651,7 +825,7 @@ func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.Ene
 	}
 	prompt += "Engine-resolved enemy actions:\n" + strings.Join(lines, "\n")
 	resp, err := g.LLM.Chat(ctx, llm.Request{Tag: "narrate_enemies", Temperature: 0.7, MaxTokens: 300, Messages: []llm.Message{
-		llm.System(enemySystem),
+		llm.System(styled(enemySystem, w)),
 		llm.User(prompt)}})
 	text := strings.TrimSpace(resp.Content)
 	if err != nil || text == "" {
@@ -667,6 +841,16 @@ func (g *GM) narrateEnemies(ctx context.Context, w *game.World, turns []game.Ene
 	if wordCount(text) > 160 {
 		text = g.tighten(ctx, text, 80)
 	}
+	var plain []string
+	for _, t := range turns {
+		for _, re := range t.Reactions {
+			plain = append(plain, re.Text)
+		}
+		plain = append(plain, t.Text)
+	}
+	fb := strings.Join(plain, ". ") + "."
+	text = g.polish(ctx, w, "narrate_enemies", text)
+	text, _ = g.guard(ctx, newCanon(w, "", lines, last), "narrate_enemies", text, fb)
 	return text
 }
 
@@ -752,7 +936,19 @@ func (g *GM) summarize(ctx context.Context, w *game.World, recent []string) {
 		llm.System("Summarize the story so far in at most 120 words: key events, promises, enemies and open threads. Facts only."),
 		llm.User(fmt.Sprintf("PREVIOUS SUMMARY: %s\n\nFACTS RECORDED SINCE:\n%s\n\nRECENT LOG:\n%s", w.Campaign.Summary, orNone(factsSince(w, w.Campaign.SummaryTurn)), strings.Join(recent, "\n")))}})
 	if err == nil && strings.TrimSpace(resp.Content) != "" {
-		w.Campaign.Summary = trim(resp.Content, 1200)
+		// a summary that kills the living would become canon in every
+		// later prompt: drop those sentences
+		c := newCanon(w, "", nil)
+		c.lifeOnly = true
+		sum := strings.TrimSpace(resp.Content)
+		if is := c.check(sum); len(is) > 0 {
+			g.debugf("summary canon issues:\n%s", issueList(is))
+			sum = cut(sum, is)
+		}
+		if strings.TrimSpace(sum) == "" {
+			return
+		}
+		w.Campaign.Summary = trim(sum, 1200)
 		w.Campaign.SummaryTurn = w.Campaign.Turn
 	}
 }

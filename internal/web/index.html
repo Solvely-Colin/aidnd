@@ -369,7 +369,7 @@ const seats = [1, 2, 3, 4].map(n => new Seat(n));
 async function loadCampaigns(select) {
   const r = await api("GET", "/campaigns");
   const sel = $("#camp");
-  sel.innerHTML = `<option value="">— pick a campaign —</option>` + r.campaigns.map(c => `<option value="${c.id}">${esc(c.title)} (${c.status}, ${c.players}/${c.max_players})</option>`).join("");
+  sel.innerHTML = `<option value="">— pick a campaign —</option>` + r.campaigns.map(c => `<option value="${c.id}">${esc(c.title)} (${c.status}, ${c.players} players)</option>`).join("");
   if (select) sel.value = select;
   else if (campaignId) sel.value = campaignId;
 }

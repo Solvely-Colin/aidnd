@@ -25,6 +25,16 @@ type World struct {
 	Defeats    []DefeatRecord   `json:"defeats"`
 
 	focus *focus // see Focus
+	// eventDone holds world events settled since the last TakeEventResults.
+	eventDone []*EventResult
+}
+
+// TakeEventResults returns and clears the world events settled in the
+// engine (a confrontation won) since the last call.
+func (w *World) TakeEventResults() []*EventResult {
+	out := w.eventDone
+	w.eventDone = nil
+	return out
 }
 
 // NewID returns a fresh id like "loc12", unique within the world.

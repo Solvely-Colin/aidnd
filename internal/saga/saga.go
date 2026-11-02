@@ -54,10 +54,40 @@ type Region struct {
 	Boss    Boss
 	// Factions move on world ticks once the region is built.
 	Factions []Faction
+	// Agendas are its people's own goals, also moving on world ticks.
+	Agendas []Agenda
 }
 
+// Agenda is a person's goal (see game.Agenda), by names: Who is a Person
+// of the region.
+type Agenda struct {
+	Key, Who, Goal string
+	FromWeek       int
+	Steps          []AgendaStep
+}
+
+// AgendaStep is one step of an agenda. MoveTo is a place of the region;
+// Disposition shifts On (a person's name, "" for Who); Clock pushes a
+// faction (by key) one step. The If fields hold the step back until Who
+// feels that way or worse, or that faction's clock has moved that far.
+type AgendaStep struct {
+	Text                string
+	MoveTo              string
+	Disposition         int
+	On                  string
+	Clock               string
+	IfDispositionAtMost *int
+	IfClock             string
+	IfClockAtLeast      int
+}
+
+// atMost is a pointer for AgendaStep.IfDispositionAtMost.
+func atMost(d int) *int { return &d }
+
 // Faction is a group with an agenda clock (see game.Faction). FullDanger
-// names places by name; FromWeek delays its first move.
+// names places by name; FromWeek delays its first move. Foe, Champion and
+// Call shape a world event about it (see game.WorldEvent); a faction
+// without a Foe never brings one.
 type Faction struct {
 	Key, Name, Clock string
 	Threat           bool
@@ -66,6 +96,11 @@ type Faction struct {
 	Moves            []string
 	Full             string
 	FullDanger       map[string]int
+	Foe              string
+	FoeHorror        int
+	Champion         string
+	ChampionHorror   int
+	Call             string
 }
 
 // Place is a location. From names the place it connects to (the region's
@@ -179,8 +214,8 @@ func List() []Info {
 
 // Options are the campaign settings Build doesn't take from the saga.
 type Options struct {
-	MaxSetbacks, MaxPlayers int
-	Now                     int64
+	MaxSetbacks int
+	Now         int64
 }
 
 // Build makes a new world for the saga: the start region in full, and a
@@ -193,7 +228,7 @@ func Build(s *Saga, id string, opt Options) (*game.World, error) {
 		return nil, fmt.Errorf("saga %s has no start region %q", s.Key, s.Start)
 	}
 	w := &game.World{Campaign: game.Campaign{ID: id, Title: s.Title, Premise: s.Premise, Pitch: s.Pitch,
-		Setting: s.Setting, Status: game.StatusLobby, MaxSetbacks: opt.MaxSetbacks, MaxPlayers: opt.MaxPlayers, CreatedAt: opt.Now}}
+		Setting: s.Setting, Status: game.StatusLobby, MaxSetbacks: opt.MaxSetbacks, CreatedAt: opt.Now}}
 	w.Campaign.Saga, w.Campaign.Dread, w.Campaign.Async = s.Key, true, true
 	w.Campaign.Living = &game.Living{Tide: StartTide}
 	w.Campaign.Scene = game.Scene{Day: 1, Time: 1, Tension: 2}
@@ -405,6 +440,13 @@ func buildRegion(w *game.World, r *Region, hub *game.Location) (*game.NPC, *game
 			}
 			w.Campaign.Living.Factions = append(w.Campaign.Living.Factions, gf)
 		}
+		for _, a := range r.Agendas {
+			ga, err := makeAgenda(w, r, a, mq)
+			if err != nil {
+				return nil, nil, err
+			}
+			w.Campaign.Living.Agendas = append(w.Campaign.Living.Agendas, ga)
+		}
 	}
 
 	for _, b := range r.Beats {
@@ -589,13 +631,125 @@ func EnsureLiving(w *game.World) bool {
 			}
 		}
 	}
+	EnsureAgendas(w)
 	return true
+}
+
+// eventLook copies what a faction's world event looks like.
+func eventLook(gf *game.Faction, f Faction) {
+	gf.Foe, gf.FoeHorror, gf.Champion, gf.ChampionHorror, gf.Call = f.Foe, f.FoeHorror, f.Champion, f.ChampionHorror, f.Call
+}
+
+// EnsureEventLooks gives factions placed before world events existed
+// their foes and calls. It reports whether it changed anything.
+func EnsureEventLooks(w *game.World) bool {
+	s := Get(w.Campaign.Saga)
+	lv := w.Campaign.Living
+	if s == nil || lv == nil {
+		return false
+	}
+	changed := false
+	for i := range s.Regions {
+		for _, f := range s.Regions[i].Factions {
+			gf := lv.Faction(f.Key)
+			if gf == nil || gf.Foe == f.Foe && gf.Call == f.Call && gf.Champion == f.Champion {
+				continue
+			}
+			eventLook(gf, f)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// EnsureAgendas gives a living world the agendas of the regions already
+// built that it doesn't have yet (worlds made before agendas existed). It
+// reports whether it changed anything.
+func EnsureAgendas(w *game.World) bool {
+	s := Get(w.Campaign.Saga)
+	lv := w.Campaign.Living
+	if s == nil || lv == nil {
+		return false
+	}
+	have := map[string]bool{}
+	for _, a := range lv.Agendas {
+		have[a.Key] = true
+	}
+	changed := false
+	for i := range s.Regions {
+		r := &s.Regions[i]
+		hub := exact(w, r.Hub.Name)
+		if hub == nil || hub.Stub {
+			continue
+		}
+		var mq *game.Quest
+		for _, q := range w.Quests {
+			if q.IsMain && q.Title == r.Main.Title {
+				mq = q
+			}
+		}
+		for _, a := range r.Agendas {
+			if have[a.Key] {
+				continue
+			}
+			if ga, err := makeAgenda(w, r, a, mq); err == nil {
+				lv.Agendas = append(lv.Agendas, ga)
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// makeAgenda places a region's agenda in the world.
+func makeAgenda(w *game.World, r *Region, a Agenda, storyline *game.Quest) (*game.Agenda, error) {
+	who := exactNPC(w, a.Who)
+	if who == nil {
+		return nil, fmt.Errorf("agenda %q: unknown person %q", a.Key, a.Who)
+	}
+	if len(a.Steps) == 0 {
+		return nil, fmt.Errorf("agenda %q has no steps", a.Key)
+	}
+	ga := &game.Agenda{Key: a.Key, NPCID: who.ID, Goal: a.Goal, Region: r.Key, FromWeek: a.FromWeek}
+	if storyline != nil {
+		ga.Storyline = storyline.ID
+	}
+	for _, st := range a.Steps {
+		gs := game.AgendaStep{Text: st.Text}
+		if st.IfDispositionAtMost != nil || st.IfClock != "" {
+			gs.If = &game.AgendaIf{DispositionAtMost: st.IfDispositionAtMost, Clock: st.IfClock, ClockAtLeast: st.IfClockAtLeast}
+		}
+		if st.MoveTo != "" {
+			l := exact(w, st.MoveTo)
+			if l == nil {
+				return nil, fmt.Errorf("agenda %q: unknown place %q", a.Key, st.MoveTo)
+			}
+			gs.Effects = append(gs.Effects, game.AgendaEffect{MoveTo: l.ID})
+		}
+		if st.Disposition != 0 {
+			e := game.AgendaEffect{Disposition: st.Disposition}
+			if st.On != "" {
+				on := exactNPC(w, st.On)
+				if on == nil {
+					return nil, fmt.Errorf("agenda %q: unknown person %q", a.Key, st.On)
+				}
+				e.NPCID = on.ID
+			}
+			gs.Effects = append(gs.Effects, e)
+		}
+		if st.Clock != "" {
+			gs.Effects = append(gs.Effects, game.AgendaEffect{Clock: st.Clock})
+		}
+		ga.Steps = append(ga.Steps, gs)
+	}
+	return ga, nil
 }
 
 // makeFaction places a region's faction in the world.
 func makeFaction(w *game.World, r *Region, f Faction, storyline *game.Quest) (*game.Faction, error) {
 	gf := &game.Faction{Key: f.Key, Name: f.Name, Threat: f.Threat, Region: r.Key, Clock: f.Clock,
 		Steps: f.Steps, FromWeek: f.FromWeek, Moves: f.Moves, Full: f.Full}
+	eventLook(gf, f)
 	if gf.Steps < 2 {
 		return nil, fmt.Errorf("faction %q needs at least 2 steps", f.Name)
 	}

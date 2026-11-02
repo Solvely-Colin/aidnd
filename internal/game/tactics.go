@@ -131,7 +131,7 @@ func ContestDC(c *Character) int { return 8 + c.Mod(STR) + ProficiencyBonus(c.Le
 func shove(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	l := w.Here()
-	e, err := findFoe(w, a.Target, false)
+	e, err := findFoe(w, a.Target, nil)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func shove(ctx *Ctx, c *Character, a Action, st *Step) error {
 func grapple(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	l := w.Here()
-	e, err := findFoe(w, a.Target, false)
+	e, err := findFoe(w, a.Target, nil)
 	if err != nil {
 		return err
 	}

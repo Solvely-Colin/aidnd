@@ -288,6 +288,9 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		res.CampaignEnded = true
 		res.TurnEnded = true
 	}
+	if w.InCombat() && actor.Down() {
+		res.TurnEnded = true // knocked out mid-turn (an opportunity attack, an ambush): nothing left to do
+	}
 	if res.AllFree {
 		for _, s := range res.Steps {
 			if s.OK && s.Action.Kind == ActEndTurn {
@@ -527,7 +530,10 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 		st.Changes = append(st.Changes, fmt.Sprintf("%s moves to %s", c.Name, ZoneName(l, n.ZoneID)))
 	}
 	n.LastTalked = w.Campaign.Turn
-	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.Disposition))
+	st.Info = append(st.Info, fmt.Sprintf("%s speaks with %s (%s, disposition %+d)", c.Name, n.Name, n.Role, n.AttitudeTo(c)))
+	for _, t := range n.TiesTo(c.ID) {
+		st.Info = append(st.Info, TieLine(w, n, t))
+	}
 	if a.Text != "" {
 		st.Info = append(st.Info, fmt.Sprintf("%s says: %q", c.Name, trimTo(a.Text, 300)))
 	}
@@ -542,7 +548,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	// an NPC who holds what an active quest needs hands it over when asked,
 	// unless they are hostile
 	for _, q := range w.Quests {
-		if q.Status != QuestActive || n.Disposition < 0 {
+		if q.Status != QuestActive || n.AttitudeTo(c) < 0 {
 			continue
 		}
 		for _, o := range q.Objectives {
@@ -558,7 +564,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 	if n.Merchant {
 		for _, it := range w.ItemsOf(OwnerNPC, n.ID) {
 			if !isReward(w, it.ID) && it.Kind != ItemQuest {
-				st.Info = append(st.Info, fmt.Sprintf("%s sells %s for %d gold", n.Name, it.Name, BuyPrice(it, n)))
+				st.Info = append(st.Info, fmt.Sprintf("%s sells %s for %d gold", n.Name, it.Name, BuyPrice(it, n, c)))
 			}
 		}
 	}
@@ -567,6 +573,7 @@ func talkTo(w *World, c *Character, a Action, st *Step) error {
 			Text: fmt.Sprintf("%s promised %s: %s", c.Name, n.Name, trimTo(p, 200))}); f != nil {
 			n.Remember(fmt.Sprintf("%s promised me: %s", c.Name, trimTo(p, 120)))
 			st.Info = append(st.Info, fmt.Sprintf("%s gives %s their word (%s)", c.Name, n.Name, trimTo(p, 200)))
+			Note(w, c, RecordEntry{Kind: RecChoice, Source: SourceEngine, NPCID: n.ID, Text: fmt.Sprintf("Gave %s their word: %s", n.Name, trimTo(p, 140))})
 		}
 	}
 	st.Changes = append(st.Changes, fmt.Sprintf("%s talks with %s", c.Name, n.Name))
@@ -928,11 +935,13 @@ func npcAsEnemy(w *World, n *NPC) *Enemy {
 	return e
 }
 
-func findFoe(w *World, ref string, allowNPC bool) (*Enemy, error) {
+// findFoe finds an enemy by ref. With by set, an NPC present may be
+// attacked too: they turn hostile and hold a grudge against by.
+func findFoe(w *World, ref string, by *Character) (*Enemy, error) {
 	if e := w.Enemy(ref); e != nil {
 		return e, nil
 	}
-	if allowNPC {
+	if by != nil {
 		if n := w.NPC(ref); n != nil && n.Alive && n.LocationID == w.Campaign.LocationID {
 			for _, e := range w.encounterEnemies() {
 				if e.NPCID == n.ID && !e.Defeated() {
@@ -941,6 +950,8 @@ func findFoe(w *World, ref string, allowNPC bool) (*Enemy, error) {
 			}
 			n.Disposition = -3
 			n.Keep(fmt.Sprintf("day %d: was attacked by the party", w.Campaign.Scene.Day))
+			n.Bind(w, by, TieGrudge, "attacked them", SourceEngine)
+			Note(w, by, RecordEntry{Kind: RecChoice, Source: SourceEngine, NPCID: n.ID, Text: fmt.Sprintf("Turned on %s and attacked them at %s", n.Name, placeName(w))})
 			if e := npcAsEnemy(w, n); e != nil {
 				return e, nil
 			}
@@ -962,7 +973,7 @@ func (w *World) encounterEnemies() []*Enemy {
 func attack(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	l := w.Here()
-	e, err := findFoe(w, a.Target, true)
+	e, err := findFoe(w, a.Target, c)
 	if err != nil {
 		return err
 	}
@@ -1022,7 +1033,7 @@ func nextFoeInReach(w *World, c *Character, reach Reach) *Enemy {
 func subdue(ctx *Ctx, c *Character, a Action, st *Step) error {
 	w := ctx.W
 	l := w.Here()
-	e, err := findFoe(w, a.Target, false)
+	e, err := findFoe(w, a.Target, nil)
 	if err != nil {
 		return err
 	}
@@ -1058,6 +1069,9 @@ func subdue(ctx *Ctx, c *Character, a Action, st *Step) error {
 	}
 	e.Subdued = true
 	st.Changes = append(st.Changes, defeat(w, e, true)...)
+	if e.NPCID != "" || e.Boss != nil {
+		Note(w, c, RecordEntry{Kind: RecChoice, Source: SourceEngine, NPCID: e.NPCID, Text: fmt.Sprintf("Spared %s and subdued them at %s", e.Name, placeName(w))})
+	}
 	return nil
 }
 
@@ -1079,6 +1093,7 @@ func defeat(w *World, e *Enemy, subdued bool) []string {
 		if !subdued {
 			n.Alive = false
 			w.Record(ChronicleEntry{Kind: FactDeath, Source: SourceEngine, NPCIDs: []string{n.ID}, Text: fmt.Sprintf("%s was killed by the party at %s", n.Name, where)})
+			changes = append(changes, RepairStory(w)...)
 		} else {
 			n.Keep(fmt.Sprintf("day %d: was subdued by the party", w.Campaign.Scene.Day))
 			w.Record(ChronicleEntry{Kind: FactDeed, Source: SourceEngine, NPCIDs: []string{n.ID}, Text: fmt.Sprintf("The party subdued %s at %s", n.Name, where)})
@@ -1138,6 +1153,10 @@ func endEncounter(w *World) []string {
 	}
 	changes := append([]string{"The fight is won"}, StabilizeDying(w)...)
 	changes = append(changes, rollLoot(w)...)
+	encID := ""
+	if w.Encounter != nil {
+		encID = w.Encounter.ID
+	}
 	w.Encounter = nil
 	ClearFightConditions(w)
 	for _, c := range w.Characters {
@@ -1145,6 +1164,10 @@ func endEncounter(w *World) []string {
 	}
 	AdjustTension(w, -2)
 	w.Campaign.Turns.Budget.Free = Unlimited
+	if res := eventFightWon(w, encID); res != nil {
+		changes = append(changes, res.Changes...)
+		w.eventDone = append(w.eventDone, res)
+	}
 	return changes
 }
 

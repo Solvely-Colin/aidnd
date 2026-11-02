@@ -225,17 +225,20 @@ func TestDraftCharacterRepairsInvalidSheets(t *testing.T) {
 	}
 }
 
-func TestJoinIdempotentFullAndStarted(t *testing.T) {
+func TestJoinIdempotentAndUncapped(t *testing.T) {
 	r := newRig(t, 4, 1)
 	p, created, err := r.g.Join(bg, r.id, "u1", "again")
 	must(t, err)
 	if created || p.Name != "Pu1" {
 		t.Fatal("join not idempotent")
 	}
-	if _, _, err := r.g.Join(bg, r.id, "u5", "late"); !errors.Is(err, ErrConflict) {
-		t.Fatalf("5th player: %v", err)
+	// there is no seat limit
+	for _, id := range []string{"u5", "u6", "u7"} {
+		if _, created, err := r.g.Join(bg, r.id, id, "late"); err != nil || !created {
+			t.Fatalf("player %s: %v", id, err)
+		}
 	}
-	if len(r.world(t).Players) != 4 {
+	if len(r.world(t).Players) != 7 {
 		t.Fatal("players")
 	}
 }

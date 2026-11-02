@@ -39,7 +39,6 @@ func Conflict(format string, a ...any) error {
 // Config holds tunables (from environment variables in cmd/server).
 type Config struct {
 	SceneTurnCap        int  // quiet turns before progress is forced (default 10)
-	MaxPlayers          int  // default 4
 	MaxSetbacks         int  // default 3
 	ObjectiveCheckEvery int  // run the freeform judge every N turns (default 1)
 	LoreBudget          int  // characters of lore per narrator prompt (default 1800)
@@ -61,9 +60,6 @@ func (c *Config) defaults() {
 	}
 	if c.SceneTurnCap <= 0 {
 		c.SceneTurnCap = 10
-	}
-	if c.MaxPlayers <= 0 || c.MaxPlayers > 4 {
-		c.MaxPlayers = 4
 	}
 	if c.MaxSetbacks <= 0 {
 		c.MaxSetbacks = 3
@@ -125,13 +121,18 @@ func (g *GM) lock(id string) func() {
 
 // commit saves the world with events and publishes them.
 func (g *GM) commit(ctx context.Context, w *game.World, evs ...store.Event) ([]store.Event, error) {
+	evs = append(evs, eventEvents(w)...)
 	if party := w.Focused(); party != "" {
 		for i := range evs {
 			// the shared story is everyone's news
-			if t := evs[i].Type; t != "quest_updated" && t != "campaign_ended" {
+			if t := evs[i].Type; t != "quest_updated" && t != "campaign_ended" && t != "world_event" {
 				evs[i] = tagParty(evs[i], party)
 			}
 		}
+	}
+	game.DropStaleDeathSaves(w)
+	if ch := game.RepairStory(w); len(ch) > 0 {
+		g.logf("story repaired: %v", ch) // a death outside a fight, or a campaign saved before the repair existed
 	}
 	saved, err := g.Store.Save(ctx, w, evs...)
 	if err != nil {
@@ -179,8 +180,10 @@ func (g *GM) logf(format string, a ...any) {
 	}
 }
 
-// Join seats a player. It is idempotent per player id. It fails with
-// ErrConflict if the table is full or the game has started.
+// Join seats a player. It is idempotent per player id. There is no seat
+// limit. It fails with ErrConflict once the story has ended. A player who
+// joins a campaign under way makes a character and is written in where
+// the party stands (see joinRunning).
 func (g *GM) Join(ctx context.Context, campaignID, playerID, name string) (*game.Player, bool, error) {
 	defer g.lock(campaignID)()
 	w, err := g.Store.Load(ctx, campaignID)
@@ -190,15 +193,8 @@ func (g *GM) Join(ctx context.Context, campaignID, playerID, name string) (*game
 	if p := w.Player(playerID); p != nil {
 		return p, false, nil
 	}
-	if w.Campaign.Status != game.StatusLobby {
-		return nil, false, Conflict("the campaign has already started")
-	}
-	max := w.Campaign.MaxPlayers
-	if max <= 0 {
-		max = g.Cfg.MaxPlayers
-	}
-	if len(w.Players) >= max {
-		return nil, false, Conflict("the table is full (%d players)", max)
+	if w.Campaign.Status != game.StatusLobby && w.Campaign.Status != game.StatusActive {
+		return nil, false, Conflict("the story has ended")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -226,8 +222,12 @@ func (g *GM) SaveCharacter(ctx context.Context, campaignID, playerID string, spe
 		return nil, ErrForbidden
 	}
 	if w.Campaign.Status == game.StatusActive {
-		if old := w.CharacterOf(playerID); old != nil && old.Dead {
+		old := w.CharacterOf(playerID)
+		if old != nil && old.Dead {
 			return g.replaceDead(ctx, w, playerID, old, spec)
+		}
+		if old == nil {
+			return g.joinRunning(ctx, w, playerID, spec)
 		}
 	}
 	if w.Campaign.Status != game.StatusLobby {

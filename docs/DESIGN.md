@@ -233,6 +233,21 @@ more regions join the world as they are written.
   (once per character per kind, at the start of the enemies' turns) and the
   narrator's `hazard` tool with condition `horror`. Scars are played by the
   narrator; "Hears whispers" also lowers passive Perception by 2.
+- **Visions** (`game/visions.go`, `gm/visions.go`, 2026-10-31). From strain
+  2, after each non-quick turn one party member may perceive something the
+  others don't: 8% x strain a turn (+10 with "Hears whispers"), at most one
+  a turn, never twice within three turns. The engine decides whether it is
+  true (40% false at strain 2, +10 per point, cap 85) and picks the seed:
+  true ones point at real state (a hidden exit here, a hostile NPC here, a
+  dangerous place next door); false ones are a dead NPC, an absent NPC, an
+  uncanny detail on someone present, a phantom figure, or a whisper. The
+  model only words the seed. Only that player gets the `vision` event, and
+  `Character.Visions` keeps `Real` server-side. Visions never enter the
+  narration, the recent log, the summary, the judge or the chronicle. False
+  ones from the last 40 turns are listed to the narrator as UNREAL (a player
+  who acts on one finds nothing), phantoms can't be spawned as enemies, and
+  the canon guard cuts any prose (narration, summary, lore, NPC notes) that
+  puts a phantom in the scene unless it denies or only reports it.
 
 ## Shared world: groups (2026-10-30)
 
@@ -268,7 +283,11 @@ A long campaign's world takes a turn once a real day (`game.WorldTick`), even wh
 - The narrator gets a THE WORLD line: the week, the Tide and its band, and this week's headlines.
 - The app shows a World tab in the journal (date, Tide gauge, front page) and the paper in the story feed.
 - **Downtime:** at a hub (or any danger-0 place), a character can queue one order for the next tick (`game.QueueDowntime`). Research (Investigation, DC 12) finds an open lore entry about the region, never a gated secret. Work (best ability) earns 6 gold per level on a success and 2 on a failure. Rest takes 2 strain off and ends poisoned and frightened. Work your contacts (Persuasion) and carouse (Charisma) turn up a rumor of a faction's next move, and a carouse that rolls a natural 1 costs gold. Results are `downtime_done` events in that character's group feed.
-- Not yet: training, faction standing, NPC routes and shop restocks on ticks, Tide effects on encounters and rests, and travel between regions taking world time.
+- **People's own goals (2026-10-31):** each region lists agendas for its people (`saga.Agenda` becomes `game.Agenda` on `Living.Agendas`): a goal and a short chain of authored steps. Each tick, each running agenda rolls a d6 and takes its next step on 4 or more. A step's text is recorded as news tied to the person and their place, and it can move them to another place in their region, shift someone's disposition (kept in -3..3), or push a faction's clock one step. Story safety: an agenda never kills anyone, never moves someone out of a place a group is standing in (they're in a scene), never moves anyone into a lair, out of their region or into a fight, and can push a clock but never fill it. A step whose condition (`If`: the person's disposition at most N, or a clock at least N) or effects can't happen waits for a later tick. A dead person's agenda ends; agendas stop when the region's storyline ends. Steps chain: in Innsmouth the deacon leaning on Martha Sargent lowers her disposition, and at -1 or worse she can sell the strangers out to the Order (its clock moves). `saga.EnsureAgendas` adds missing agendas to worlds made before them.
+- **Cult plots speed up in Flood:** a threat's clock moves on 4 or more instead of 5 or more while the Tide is above 66.
+- **While you were away (2026-10-31):** every tick also writes a `Living.Log` of beats (faction moves and fills, people's steps, downtime results; the newest 150). `Living.Seen[player]` is where each player last caught up (week, Tide, chronicle length); taking a turn or `POST me/seen` moves it, and the first tick after a player joins sets it. `game.BuildDispatch` turns everything since then into a short, capped list: your downtime, engine-recorded deeds, deaths and storyline ends by others (never narrator facts), steps by people the party has met (with where they are now), news from your region, and a little from further off. It is engine text only, so it can't contradict the world. The app shows it as a card at the foot of the story with a "Back to it" button.
+- **The Gazette goes through the canon guard:** a headline or classified ad that kills a living person is dropped (life-and-death check only), falling back to the facts.
+- Not yet: training, faction standing, shop restocks on ticks, Tide effects on encounters and rests, and travel between regions taking world time.
 
 ## Changes from the live play-test (deepseek-v4.1-flash)
 
@@ -315,3 +334,64 @@ The chronicle is the world's long-term memory, and the engine writes to it, not 
 - NPCs keep up to 6 permanent memories (`keeps`: attacked, subdued, gifts, quests done, promises settled, `npc_note` with important) next to the 8 rolling notes. `adjust_disposition` takes a reason, which the NPC remembers.
 - Locations store the day the party was last there; coming back on a later day adds "returns after N days away" to the resolution.
 - Each narration prompt carries a WORLD MEMORY block: up to 4 facts set in this place, 2 about each person in the scene, open promises with ids, 3 other recent facts, and the named dead. Quick answers get it too. The story summary is rebuilt from the facts recorded since the last summary as well as the log.
+
+## Canon guard (2026-10-31)
+
+The engine always owned the state, but the narrator's prose was only held to the state by its prompt. Now every piece of model prose is read against the world before anyone sees it (`gm/canon.go`).
+
+- **What is checked** (plain Go, same answer every time): a named NPC who is alive written as dying or dead; a dead NPC speaking or acting; an NPC who is somewhere else speaking or acting in this scene; someone getting, finding or being handed an item that nobody carries, nothing here matches and the engine didn't report; a gold or damage figure the engine never rolled; the party arriving at a place the engine didn't move it to. Whatever the engine's CHANGES name this turn is allowed (an NPC killed this turn may die in the prose). Past tense, memories, graves, rumours and someone else's speech about a person don't count.
+- **What happens:** one rewrite with the exact contradictions listed (`canon_repair`). If the rewrite still contradicts the state, those sentences are cut; if too little is left, the engine's own lines stand in. Fixes are logged on the turn's `action_resolved` event as `canon_fixes`, for play-test review.
+- **Shapes of acting** it recognises: "Ada nods", an aside ("Ada, the innkeeper, nods", "Ada — grey and stooped — beckons"), a dialogue tag (`"Go," says Ada`), a body part ("Ada's hand closes on yours"), and for someone lying dead here, their role ("the innkeeper nods") when nobody else here shares it. Names inside quoted speech are talk, not action.
+- **Where:** turn narration, quick answers, enemy narration and the opening.
+- **No laundering into memory:** the story summary drops sentences that kill living people before it is saved, and `record_lore` and `npc_note` refuse text that does (the model gets the reason back). Items and travel aren't checked there, because those lines are about the past.
+- Secrets were already safe: locked lore never reaches the model.
+
+## Story integrity (2026-10-31)
+
+Players may kill anyone, the saga's protected people included, but the story must stay finishable. `game.RepairStory` reroutes quests around the dead. It runs when an NPC dies (so the changes show that turn) and before every save (so campaigns from before it get fixed too), and it is idempotent.
+
+- What the dead carried falls where they died, so quest items and rewards are never lost with them.
+- A side quest still on offer from a dead giver is withdrawn (failed).
+- A quest whose giver is dead pays out as soon as it is done, reward items included (taken from where they fell). One already done and waiting for turn-in pays out at once.
+- "Talk to X" with X dead becomes "Search what X left behind": reach the place they died. "Deliver the item to X" becomes "Recover the item".
+
+## Consequences that follow characters (2026-10-31)
+
+World memory is party-wide; this adds what follows one character. Both live in JSON columns (`CharExtra.Marks`, `NPCExtra.Ties`), so there is no schema change. See `game/marks.go`.
+
+- **Marks** (`scar`, `brand`, `loss`, `name`) are lasting signs on a character, at most 12. The engine writes a scar when a character is struck down in a fight (one a day, naming the foe and place) and a loss for every living companion when a character dies. The narrator may add a scar, brand or name with `mark_character` (one a day per character, canon-checked); losses are engine-only because they need a real death.
+- **Ties** are what one NPC holds toward one character: `grudge`, `debt` (the NPC owes them) or `owed` (they owe the NPC). The engine binds a grudge when a character attacks an NPC and a debt when a character turns in a quest (clearing anything they owed the giver); a broken promise gives every living party member a grudge from the people it was made to. The narrator adds or settles ties with `npc_tie` (canon-checked reason).
+- **They change play:** `NPC.AttitudeTo(c)` is the party disposition, one worse per grudge and one better per debt. It sets that character's prices, whether a merchant refuses them, whether an NPC hands them a quest item, and whether an NPC will gift them something. Another character can still trade with a merchant who won't serve the one they hold a grudge against.
+- **The narrator sees them:** WORLD MEMORY lists the grudges and debts of the people in the scene and the marks of the party there; the snapshot shows an NPC's attitude toward the actor when it differs; talking to someone puts their ties to the speaker in the info lines.
+- **The sheet shows them:** "Marks" and "Who remembers you" sections on the character sheet.
+
+## Each character's own story (2026-10-31)
+
+Colin: track personal actions, goals, outcomes, memory and choices so nothing gets lost. See `game/record.go`; all in `CharExtra` (no schema change).
+
+- **Goals:** up to 4 open per character. Players write their own on the sheet (`POST /campaigns/{id}/me/goals`) and can let one go; the narrator can add one with `personal_goal`. Only the narrator settles a goal (done or failed), at most one per character per day; reaching one is worth 25 XP. The newest 24 goals are kept, open ones never dropped.
+- **Record:** a per-character log of choices, deeds and outcomes (max 60; deeds and outcomes go first when full, choices are kept). The engine writes promises made in conversation, turning on an NPC, sparing (subduing) or killing a named foe, finishing a quest, the party's word kept or broken, and settled goals. The narrator adds choices that matter with `record_choice` (canon-checked).
+- **Narrator:** WORLD MEMORY ends with YOUR STORY for the acting character only: open goals with ids, their last 5 choices and 3 other recent entries.
+- **Sheet:** "What you want" (with an add box for your own character) and "Your story so far" (newest 6, the rest behind "earlier").
+
+## World events (2026-10-31)
+
+Every so often the living world comes to a head, and everyone is called to one place. Nothing is scripted: `game.MaybeCallEvent` runs after each world tick and looks for a convergence between a faction's clock and what the characters have done.
+
+- **Threads** come only from engine state: NPC ties toward a character from the faction's people (everyone in its region, plus anyone whose agenda pushes its clock): a debt they owe the character (`ally`, 2), a debt the character owes them (`debt`, 2), a grudge (`grudge`, 2); the character's last record entries involving those people or naming the faction (`crossed`, 1 each, up to 2); open goals naming the faction, its clock or its people (`goal`, 2); brand marks naming it (`brand`, 2). The faction's own clock (`pressure`) and agendas that fed it (`agenda`) are listed too.
+- **When:** world week 3 on, 4 weeks after the last event, one at a time, and only for a faction with a `Foe`. It needs threads from at least 2 characters (1 in a solo world), weight 4 or more, and the clock half run; or, if the clock is one step from filling, any one character tangled up in it. The highest score (weight + progress) is called. While it is open the faction's clock can't fill on its own.
+- **The call:** a 48h muster to a site (the first place the full clock would darken, else a place in its region, never the hub or a lair). `POST me/answer` moves the caller's whole group there and joins everyone at the site into one group. When every living character is there, or a player there presses `me/begin`, or the muster runs out with anyone there, the confrontation starts.
+- **How threads play out:** each ally NPC who can come (not in another group's scene) moves to the site, gives their character temp HP (4 + 2 x level) and takes one enemy off; each debt holder comes too and is the one to get out; each grudge adds one enemy. Base strength is 2 + progress/2 foes (2..6), with the faction's `Champion` (double HP) once the clock is within two steps. The fight is one danger harder than the site. The narrator can't end it with `end_encounter`.
+- **Outcome, for good:** won (the fight ends by `EndFight`) breaks the faction (`Broken`: its clock never moves again), lowers the Tide 5 for a threat or 2, lowers the site's danger 1, gives everyone who stood EventXP 50 and a record deed, settles ally debts and debts owed by those who came. Lost (fled, fallen, or nobody came by the deadline) fills the clock with its `Full` fact and danger, raises the Tide 5 or 2, and debt holders whose character never came hold a grudge. Everyone called who didn't come gets a record choice. Settled events go to `Living.Past` (newest 12).
+- The narrator gets a WORLD EVENT line (engine threads only). Older saga worlds get foes and calls back-filled by `saga.EnsureEventLooks` on the next tick.
+
+## Drop-in play (2026-10-31)
+
+A friend can join a campaign that is already under way (`game/catchup.go`, `gm/dropin.go`).
+
+- **Seat:** `POST /players` works while the campaign is active (there is no seat limit; refused once it has ended). Saving a character for a seated player with none goes through `joinRunning`; a living character still can't be swapped mid-story.
+- **Where:** the group with the most characters on their feet (main on a tie), in the zone of its first standing member. Mid-fight they go to the end of the turn order and the turn in progress carries on, the same as a group walking into a fight.
+- **Level:** the average XP of the group's living characters, levelled the normal way (`JoinMidway`), at full HP.
+- **Their story:** a first record choice ("Threw in with ... at ...") and a chronicle deed. One starting goal: the narrator's `GOAL:` line from the arrival (life-checked by the canon guard), else "Earn the trust of ...". They start caught up for the "while you were away" letter.
+- **Story so far:** a private `catch_up` event from engine state only: the pitch, the running summary, the storyline and its next step, other active quests, who they're with and how they are, who else is there, the fight, open promises and the newest chronicle facts.
+- **Arrival:** one narration (`narrate_arrival`) that brings them in without anyone acting, canon-guarded like every narration, with plain engine text as the fallback.

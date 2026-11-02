@@ -140,7 +140,7 @@ func (g *GM) CreateCampaign(ctx context.Context, premise string) (*game.World, e
 	guess := game.InferSetting(premise)
 	req := llm.Request{Tag: "author_campaign", Temperature: 0.8, ForceTool: "create_campaign", Tools: []llm.Tool{createCampaignTool()},
 		Messages: []llm.Message{llm.System(authorSystem), llm.User(fmt.Sprintf(
-			"Premise: %s\n\nCreate the campaign for 1-4 level 1 characters. Pick the setting that fits the premise. Catalog keys for merchant stock (%s setting; other eras' gear is translated automatically): %s.",
+			"Premise: %s\n\nCreate the campaign for a party of level 1 characters (usually 1-4, sometimes more). Pick the setting that fits the premise. Catalog keys for merchant stock (%s setting; other eras' gear is translated automatically): %s.",
 			premise, guess, strings.Join(game.CatalogKeysFor(guess), ", ")))}}
 	var built *game.World
 	calls, err := g.forced(ctx, req, func(cs []llm.ToolCall) []string {
@@ -171,6 +171,9 @@ func (g *GM) CreateCampaign(ctx context.Context, premise string) (*game.World, e
 	}
 	defer g.lock(id)()
 	_, err = g.commit(ctx, built, store.NewEvent("campaign_created", "", map[string]any{"id": id, "title": built.Campaign.Title, "pitch": built.Campaign.Pitch}))
+	if err == nil {
+		g.saveOrigin(ctx, built)
+	}
 	return built, err
 }
 
@@ -184,12 +187,15 @@ func (g *GM) CreateSaga(ctx context.Context, key string) (*game.World, error) {
 		return nil, fmt.Errorf("unknown saga %q", key)
 	}
 	id := g.NewID()
-	w, err := saga.Build(s, id, saga.Options{MaxSetbacks: g.Cfg.MaxSetbacks, MaxPlayers: g.Cfg.MaxPlayers, Now: g.Now().Unix()})
+	w, err := saga.Build(s, id, saga.Options{MaxSetbacks: g.Cfg.MaxSetbacks, Now: g.Now().Unix()})
 	if err != nil {
 		return nil, err
 	}
 	defer g.lock(id)()
 	_, err = g.commit(ctx, w, store.NewEvent("campaign_created", "", map[string]any{"id": id, "title": w.Campaign.Title, "pitch": w.Campaign.Pitch, "saga": key}))
+	if err == nil {
+		g.saveOrigin(ctx, w)
+	}
 	return w, err
 }
 
@@ -218,7 +224,7 @@ func (g *GM) buildCampaign(id, premise string, spec CampaignSpec) (*game.World, 
 		return nil, p
 	}
 	w := &game.World{Campaign: game.Campaign{ID: id, Title: trim(spec.Title, 80), Premise: premise, Pitch: trim(spec.Pitch, 400), Setting: game.ChooseSetting(spec.Setting, premise),
-		Status: game.StatusLobby, MaxSetbacks: g.Cfg.MaxSetbacks, MaxPlayers: g.Cfg.MaxPlayers, CreatedAt: g.Now().Unix()}}
+		Status: game.StatusLobby, MaxSetbacks: g.Cfg.MaxSetbacks, CreatedAt: g.Now().Unix()}}
 	w.Campaign.Scene = game.Scene{Day: 1, Time: 1, Tension: 2}
 	w.Campaign.Turns.Budget = game.FullBudget(false)
 	hubKind := spec.Hub.Kind

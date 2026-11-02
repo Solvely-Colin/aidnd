@@ -146,12 +146,20 @@ type CharExtra struct {
 	Strain int      `json:"strain,omitempty"`
 	Scars  []string `json:"scars,omitempty"`
 	Faced  []string `json:"faced,omitempty"`
+	// Visions are what strain has shown this character alone, true or
+	// not (see visions.go). Never sent to players with Real.
+	Visions []Vision `json:"visions,omitempty"`
 
 	// Group is the split-off group the character travels with ("" for
 	// the main one; see groups.go).
 	Group string `json:"group,omitempty"`
 	// Downtime is the order queued for the next world tick.
 	Downtime *Downtime `json:"downtime,omitempty"`
+	// Marks are lasting signs of what happened to them (see marks.go).
+	Marks []Mark `json:"marks,omitempty"`
+	// Goals and Record are the character's own story (see record.go).
+	Goals  []Goal        `json:"goals,omitempty"`
+	Record []RecordEntry `json:"record,omitempty"`
 }
 
 // Concentration is a spell being held.
@@ -333,6 +341,8 @@ type NPCExtra struct {
 	// Protected NPCs are ones a saga's story needs: the narrator and the
 	// world may not kill, remove or turn them (players still can, in a fight).
 	Protected bool `json:"protected,omitempty"`
+	// Ties are grudges and debts toward single characters (see marks.go).
+	Ties []Tie `json:"ties,omitempty"`
 }
 
 // MaxNPCMemory is how many memory notes an NPC keeps.

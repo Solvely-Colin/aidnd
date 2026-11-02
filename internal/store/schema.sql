@@ -302,3 +302,23 @@ CREATE TABLE IF NOT EXISTS notes (
     PRIMARY KEY (campaign_id, id)
 );
 CREATE INDEX IF NOT EXISTS notes_by_player ON notes(campaign_id, player_id, created_at);
+
+-- A campaign as it was written, before anyone played it, so the GM can
+-- restart the story from the top.
+CREATE TABLE IF NOT EXISTS origins (
+    campaign_id TEXT PRIMARY KEY,
+    world       TEXT NOT NULL DEFAULT '{}',
+    created_at  INTEGER NOT NULL DEFAULT 0
+);
+
+-- Copies of deleted or restarted campaigns (every row they had, minus the
+-- rewind snapshots), so the GM can bring one back. Not campaign data: a
+-- campaign delete leaves these alone.
+CREATE TABLE IF NOT EXISTS gm_backups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id   TEXT NOT NULL DEFAULT '',
+    title       TEXT NOT NULL DEFAULT '',
+    reason      TEXT NOT NULL DEFAULT '',
+    data        TEXT NOT NULL DEFAULT '{}',
+    created_at  INTEGER NOT NULL DEFAULT 0
+);

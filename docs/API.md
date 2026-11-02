@@ -17,7 +17,6 @@ puts players in front of aidnd. All bodies are JSON. Errors are always
 | `API_KEY` | | Set it to turn on **service mode** (see Auth). Empty means open dev mode. |
 | `CORS_ORIGINS` | | Comma-separated allowed origins, or `*`. |
 | `DEV_UI` | on in open mode | Serves the testing table at `/dev/`. |
-| `MAX_PLAYERS` | 4 | Seats per campaign. |
 | `MAX_SETBACKS` | 3 | Party wipes survived; the next one fails the campaign. |
 | `SCENE_TURN_CAP` | 10 | Quiet turns in one place before the director forces progress. |
 | `OBJECTIVE_CHECK_EVERY` | 1 | How often (in turns) the judge checks freeform objectives. |
@@ -50,7 +49,12 @@ what the dev table does.
    authors the world (can take 30–90 s). A bad or failed authoring falls back
    to a built-in campaign, so this does not fail on model trouble.
 2. Each player: `POST /campaigns/{id}/players {"name": "..."}`. Idempotent per
-   player id. 409 when full or already started.
+   player id. 409 when full or the story has ended. A player can join a
+   campaign that is under way: their character (saved as below) is written
+   in where the biggest party stands, in its fight if one is on (taking
+   turns after everyone already in it), at that party's average XP, with a
+   starting goal, a first record entry, a private `catch_up` and an arrival
+   narration.
 3. Each player makes a character (replaceable until the game starts):
    - `POST /campaigns/{id}/characters/draft {"concept": "..."}` returns a
      valid draft to show in an editor, then
@@ -102,7 +106,7 @@ they/them, and drafts fill it from the concept.
 |---|---|---|
 | `GET /healthz` | anyone | `{"ok": true}` |
 | `GET /meta?setting=` | anyone | Abilities, standard array, kits with items (fantasy), `settings` (each with its own kits), item catalog, XP table, DCs, `service_mode`, and `ruleset`: every class, species, background, feat, invocation and spell named for `setting` (`rules_name` is the SRD name). |
-| `GET /campaigns` | any caller | All campaigns: `{campaigns: [{id, title, pitch, status, players, max_players, updated_at}]}` |
+| `GET /campaigns` | any caller | All campaigns: `{campaigns: [{id, title, pitch, status, players, max_players, updated_at}]}` (`max_players` is legacy: there is no seat limit) |
 | `GET /me/campaigns` | player | Campaigns this player has joined. |
 | `POST /campaigns` | any caller | `{premise, lethality?}` → 201 campaign view. `lethality` is `standard` (three failed death saves kill) or `story` (they leave you stable). `{saga: "long-dark"}` instead starts a hand-written saga's open world (listed in `GET /meta` as `sagas`); no model call, and the view carries `saga`, `dread` and `storyline` (the main quest for the region the party is in). In dread campaigns each character view has `strain: {value, max, shaken, scars: [{key, name, text}]}`. |
 | `GET /campaigns/{id}` | any caller | Campaign view, personalised by `you` when a player id is known. |
@@ -117,6 +121,9 @@ they/them, and drafts fill it from the concept.
 | `POST /campaigns/{id}/actions` | active player | `{text, target_id?, zone_id?, check?, act?}` → turn result, or a pending turn when the player rolls their own dice. |
 | `POST /campaigns/{id}/roll` | acting player | Rolls the d20s for the caller's pending turn or death save and resolves it → turn result. |
 | `POST /campaigns/{id}/roll/cancel` | acting player | Takes back a pending turn before the roll (not a death save). |
+| `POST /campaigns/{id}/me/answer` | joined player | Answers the open world event's call: your whole group goes to its site and joins whoever is there (a fight already going is joined). Once every living character is there, the confrontation begins → `{campaign}`. |
+| `POST /campaigns/{id}/me/begin` | joined player | At the site of a gathering world event, starts the confrontation without waiting for the others → `{campaign}`. |
+| `POST /campaigns/{id}/me/goals` | joined player | `{text}` adds a personal goal to your character (max 4 open), or `{drop: "goal2"}` lets one go → `{campaign}`. |
 | `POST /campaigns/{id}/me/dice` | joined player | `{auto_roll}`: true lets the engine roll for this player. |
 | `POST /campaigns/{id}/skip` | player / service | Ends the active turn. See Skipping. |
 | `GET /campaigns/{id}/map` | any caller | Known places and passable/locked paths only. |
@@ -134,6 +141,25 @@ they/them, and drafts fill it from the concept.
 | `GET /campaigns/{id}/dm/history` | joined player | DM console: `{snapshots: [{seq, event_id, turn, label, created_at}]}`, newest first. The last 30 turns are kept. `/meta` carries `magic`: the item templates, wondrous items and console actions. |
 | `POST /campaigns/{id}/dm/rewind` | joined player | `{seq}` puts the whole campaign back to just before that turn → campaign view. Events since are hidden from the log and the stream replay; a `rewound` event is sent so clients reload. 400 when the turn is no longer kept. |
 | `POST /campaigns/{id}/dm` | joined player | `{kind, amount?, target?, item?, template?, value?}` → `{text, campaign}`. `kind` is `end_fight`, `heal_party`, `award_xp` (`amount` 1-3000), `give_item` (`target` character, `item` a catalog or wondrous key, optional `template` to make it magic gear) or `lethality` (`value` standard or story). Each sends a `dm_action` event. |
+
+### GM area
+
+Only callers the Worker marks with `X-GM: 1` (the player ids in its
+`GM_PLAYERS` var; with a `GM_CODE` secret, only when signed in with that
+code). The Worker strips `X-GM` from everyone else's requests.
+
+| Route | What it does |
+|---|---|
+| `GET /gm/campaigns` | Every campaign with its players and characters, plus `backups` |
+| `POST /gm/campaigns/{id}/restart` | Back up, then start the story again from how it was written: same seats, new characters, new id. `{id, title, backup_id}` |
+| `DELETE /gm/campaigns/{id}` | Back up, then delete every row of the campaign. `{backup_id}` |
+| `DELETE /gm/campaigns/{id}/players/{pid}` | Free a seat (lobby only) |
+| `GET /gm/backups/{bid}` | Download a backup as JSON |
+| `POST /gm/backups/{bid}/restore` | Put a backed-up campaign back (it must not exist) |
+| `DELETE /gm/backups/{bid}` | Forget a backup |
+
+Open tabs on a restarted or deleted campaign get an unsaved
+`campaign_gone` event (`{how, next?}`).
 
 ### Journal
 
@@ -164,7 +190,7 @@ open mode.
 | 401 | Missing/invalid API key, player token or stream token. |
 | 403 | The player has not joined this campaign. |
 | 404 | Unknown campaign, or something players have not discovered. |
-| 409 | Not your turn, campaign full, already started, characters missing, campaign over. |
+| 409 | Not your turn, campaign full, characters missing, campaign over. |
 | 422 | Character validation failed; `problems` lists why. |
 | 500 | Internal error (logged server-side). |
 
@@ -201,7 +227,13 @@ and the main quest only shows objectives up to the first one not yet done.
                                                 // frightened | blinded | stunned; note says the effect,
                                                 // source and turns left) then derived states
                                                 // (down | bloodied | cover | acting)
-    "inventory": [{"id", "name", "kind", "equipped", "effect", "to_hit", ...}]
+    "inventory": [{"id", "name", "kind", "equipped", "effect", "to_hit", ...}],
+    "marks": [{"id", "kind": "scar | brand | loss | name", "label", "text", "day"}],  // lasting marks
+    "standing": [{"npc_id", "name", "kind": "grudge | debt | owed", "label", "text", "day", "alive"}],
+    "goals": [{"id", "text", "status": "open | done | failed | dropped", "source": "player | gm", "day", "settled", "outcome"}],
+    "record": [{"day", "turn", "kind": "choice | deed | outcome", "text", "source", "npc_id", "goal_id"}]  // newest first
+                                                // NPCs' ties to this one character: grudge (holds one
+                                                // against them), debt (owes them), owed (they owe the NPC)
   }],                                                  // every member's full sheet, so players can read each other's
   "players": [{"id", "name", "character_id"}],
   "encounter": {"round": 2, "enemies": [{"id", "display", "hp", "max_hp", "zone_id", "ranged",
@@ -231,6 +263,10 @@ In a long campaign (a saga), the campaign view's `deadline` is the unix time whe
 ### The living world
 
 A long campaign's view has `world: {week, date, tide, band, gazette: {week, headlines, classified, weather}}`. Each daily world tick sends a `world_tick` event `{week, tide, tide_from, band, idle, gazette}`. `POST /tick` also runs any world ticks that are owed.
+
+A long campaign's view also carries `dispatch` when the caller missed at least one world tick since they last played: `{weeks, from_week, week, tide_from, tide, band, lines: [{kind, week, text, where}]}`. `kind` is `you` (your downtime), `deed` (what others did), `people` (people the party has met; `where` is where they are now), `near` (your region) or `far`. `POST /campaigns/{id}/me/seen` clears it and returns `{campaign}`; taking a turn clears it too.
+
+`world.event` is the open world event, if any: `{id, title, call, faction, site, site_id, deadline, status (gathering|engaged), threads: [{kind, text, mine, who, npc}] (who: the character it ties in, npc: the person it runs through), coming: [{character_id, name, came}], here, can_answer, can_begin}`. Thread kinds: `ally`, `debt`, `grudge`, `goal`, `crossed`, `brand`, `pressure`, `agenda`. `world.past_events` lists settled ones, newest first: `{title, week, won, outcome}`. The `world_event` stream event (never party-tagged) carries `phase`: `called` `{title, call, site, site_id, deadline}`, `answered` `{character_id, character}`, `begun` `{changes}` or `settled` `{won, outcome, changes}`.
 
 `POST /campaigns/{id}/me/downtime {kind}` queues the caller's downtime order for the next world tick (`research`, `work`, `rest`, `contacts`, `carouse`; `""` cancels). It needs a safe place and no fight (otherwise 409), and returns `{campaign}`. The view's `you.downtime` is the queued order, `you.can_downtime` says whether one can be queued here, and `world.downtime` lists the orders. Results arrive as `downtime_done {character_id, name, kind, roll, text}` events.
 
@@ -404,6 +440,8 @@ data: {"id":42,"campaign_id":"c_...","type":"narration","data":{...},"created_at
 | `player_action` | `{character_id, character, text, hints}` |
 | `action_resolved` | `{character_id, steps, skipped, changes, rolls, world_changes}` |
 | `narration` | `{text, quick?, opening?, skip?, setback?, character_id?}` |
+| `catch_up` | `{for, character_id, catch_up: {title, pitch, so_far, day, time, location, lines: [{kind, text}]}}`: the story so far for a player who joined mid-story; `kind` is `quest`, `party`, `here`, `fight`, `promise` or `fact`. Engine state only. Private like `vision`. The `character_created` before it has `joins_midway: true`, `level` and `changes`; the `narration` after it has `arrival: true`. |
+| `vision` | `{for, character_id, text}`: something strain showed one character (dread campaigns). Private: `/log` and `/events` send it only to the player in `for`. It never says whether it was real. |
 | `turn_budget` | `{character_id, budget}`, sent when the turn continues |
 | `enemy_turns` | `{turns, narration}` |
 | `conditions` | `{changes, rolls, lost_turn}`: conditions ticking at a turn boundary (saves, wearing off, standing up, a stunned turn passing) |

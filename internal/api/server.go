@@ -85,9 +85,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/skip", s.auth(s.handleSkip))
 	mux.HandleFunc("POST /tick", s.auth(s.handleTick))
 	mux.HandleFunc("POST /campaigns/{id}/me/downtime", s.auth(s.handleDowntime))
+	mux.HandleFunc("POST /campaigns/{id}/me/seen", s.auth(s.handleSeen))
 	mux.HandleFunc("POST /campaigns/{id}/me/solo", s.auth(s.handleSolo))
 	mux.HandleFunc("POST /campaigns/{id}/me/together", s.auth(s.handleTogether))
+	mux.HandleFunc("POST /campaigns/{id}/me/goals", s.auth(s.handleGoal))
 	mux.HandleFunc("POST /campaigns/{id}/me/join", s.auth(s.handleJoinGroup))
+	mux.HandleFunc("POST /campaigns/{id}/me/answer", s.auth(s.handleAnswer))
+	mux.HandleFunc("POST /campaigns/{id}/me/begin", s.auth(s.handleBegin))
 	mux.HandleFunc("POST /campaigns/{id}/roll", s.auth(s.handleRoll))
 	mux.HandleFunc("POST /campaigns/{id}/roll/cancel", s.auth(s.handleCancelRoll))
 	mux.HandleFunc("POST /campaigns/{id}/me/dice", s.auth(s.handleDice))
@@ -109,6 +113,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/stream-token", s.auth(s.handleStreamToken))
 	mux.HandleFunc("GET /campaigns/{id}/events", s.handleEvents)
 	mux.HandleFunc("GET /campaigns/{id}/log", s.auth(s.handleLog))
+	mux.HandleFunc("GET /gm/campaigns", s.gmOnly(s.handleGMCampaigns))
+	mux.HandleFunc("POST /gm/campaigns/{id}/restart", s.gmOnly(s.handleGMRestart))
+	mux.HandleFunc("DELETE /gm/campaigns/{id}", s.gmOnly(s.handleGMDelete))
+	mux.HandleFunc("DELETE /gm/campaigns/{id}/players/{pid}", s.gmOnly(s.handleGMRemovePlayer))
+	mux.HandleFunc("GET /gm/backups/{bid}", s.gmOnly(s.handleGMDownloadBackup))
+	mux.HandleFunc("POST /gm/backups/{bid}/restore", s.gmOnly(s.handleGMRestoreBackup))
+	mux.HandleFunc("DELETE /gm/backups/{bid}", s.gmOnly(s.handleGMDeleteBackup))
 	if s.cfg.DevUI != nil {
 		mux.Handle("GET /dev/", http.StripPrefix("/dev", s.cfg.DevUI))
 		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/dev/", http.StatusFound) })
@@ -183,7 +194,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
 			h.Set("Vary", "Origin")
-			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Player-ID, Last-Event-ID")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Player-ID, X-GM, Last-Event-ID")
 			h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -697,7 +708,7 @@ func (s *Server) handleNPC(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	v, ok := npcView(wld, n)
+	v, ok := npcView(wld, n, wld.CharacterOf(whoFrom(r).PlayerID))
 	if !ok {
 		s.fail(w, store.ErrNotFound)
 		return
@@ -755,7 +766,7 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	if len(evs) > 0 {
 		last = evs[len(evs)-1].ID
 	}
-	writeJSON(w, 200, map[string]any{"events": evs, "last_id": last})
+	writeJSON(w, 200, map[string]any{"events": visibleOnly(evs, whoFrom(r).PlayerID), "last_id": last})
 }
 
 // --- player notes: private to their author, never shown to the model.
@@ -808,6 +819,8 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddNote(w http.ResponseWriter, r *http.Request) {
+	// a GM restart or delete must not lose a note saved mid-backup
+	defer s.gm.Lock(r.PathValue("id"))()
 	wld, pid, err := s.notePlayer(r)
 	if err != nil {
 		s.fail(w, err)
@@ -837,6 +850,8 @@ func (s *Server) handleAddNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEditNote(w http.ResponseWriter, r *http.Request) {
+	// a GM restart or delete must not lose a note saved mid-backup
+	defer s.gm.Lock(r.PathValue("id"))()
 	wld, pid, err := s.notePlayer(r)
 	if err != nil {
 		s.fail(w, err)
@@ -855,6 +870,8 @@ func (s *Server) handleEditNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
+	// a GM restart or delete must not lose a note saved mid-backup
+	defer s.gm.Lock(r.PathValue("id"))()
 	wld, pid, err := s.notePlayer(r)
 	if err != nil {
 		s.fail(w, err)
@@ -922,6 +939,36 @@ func (s *Server) handleTogether(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
 }
 
+// handleAnswer answers a world event's call: the player's group goes to
+// its site and joins whoever is there.
+func (s *Server) handleAnswer(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	wld, err := s.gm.AnswerEvent(r.Context(), r.PathValue("id"), p)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
+// handleBegin starts a world event's confrontation now, for a player at
+// its site.
+func (s *Server) handleBegin(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	wld, err := s.gm.BeginEventNow(r.Context(), r.PathValue("id"), p)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
 // handleJoinGroup brings the player's group into another one in the same
 // place.
 func (s *Server) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
@@ -955,6 +1002,21 @@ func (s *Server) handleTick(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"autopilot_turns": n})
 }
 
+// handleSeen marks the player as caught up with the world, clearing their
+// "while you were away" dispatch.
+func (s *Server) handleSeen(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	wld, err := s.gm.MarkSeen(r.Context(), r.PathValue("id"), p)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
 // handleDowntime queues (or, with kind "", cancels) the player's downtime
 // order for the next world tick.
 func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
@@ -970,6 +1032,28 @@ func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wld, err := s.gm.SetDowntime(r.Context(), r.PathValue("id"), p, body.Kind)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
+// handleGoal adds a personal goal ({text}) or drops one ({drop: id}).
+func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Text string `json:"text"`
+		Drop string `json:"drop"`
+	}
+	if err := decode(r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	wld, err := s.gm.SetGoal(r.Context(), r.PathValue("id"), p, body.Text, body.Drop)
 	if err != nil {
 		s.fail(w, err)
 		return

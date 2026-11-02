@@ -26,6 +26,8 @@ func (g *GM) worldTicks(ctx context.Context, campaignID string) (int, error) {
 		return 0, nil
 	}
 	changed := saga.EnsureLiving(w)
+	changed = saga.EnsureAgendas(w) || changed
+	changed = saga.EnsureEventLooks(w) || changed
 	lv := w.Campaign.Living
 	if lv == nil {
 		return 0, nil
@@ -40,6 +42,13 @@ func (g *GM) worldTicks(ctx context.Context, campaignID string) (int, error) {
 		}
 		return 0, nil
 	}
+	// players who have never caught up start from here, so the first tick
+	// they miss reaches them as a dispatch
+	for _, p := range w.Players {
+		if lv.Seen[p.ID] == nil {
+			game.NoteSeen(w, p.ID)
+		}
+	}
 	var evs []store.Event
 	for i := 0; i < due; i++ {
 		idle := lv.LastActed <= lv.LastTick
@@ -52,7 +61,11 @@ func (g *GM) worldTicks(ctx context.Context, campaignID string) (int, error) {
 			evs = append(evs, tagParty(store.NewEvent("downtime_done", "", d), party))
 		}
 		evs = append(evs, store.NewEvent("world_tick", "", map[string]any{
-			"week": rep.Week, "tide": rep.Tide, "tide_from": rep.TideFrom, "band": game.TideBand(rep.Tide), "idle": rep.Idle, "gazette": gz}))
+			"week": rep.Week, "tide": rep.Tide, "tide_from": rep.TideFrom, "band": game.TideBand(rep.Tide), "idle": rep.Idle, "gazette": gz,
+			"people": len(rep.People)}))
+		if e := game.MaybeCallEvent(w, now); e != nil {
+			evs = append(evs, eventCalled(w, e))
+		}
 	}
 	if _, err := g.commit(ctx, w, evs...); err != nil {
 		return 0, err
@@ -98,6 +111,22 @@ func (g *GM) gazette(ctx context.Context, w *game.World, rep *game.TickReport) *
 			}
 		}
 	}
+	// the paper is model prose every player reads: a headline or ad that
+	// kills the living or raises the dead is dropped
+	c := newCanon(w, "", nil)
+	c.lifeOnly = true
+	var heads []string
+	for _, h := range gz.Headlines {
+		if is := c.check(h); len(is) == 0 {
+			heads = append(heads, h)
+		} else {
+			g.debugf("gazette canon issue: %s", issueList(is))
+		}
+	}
+	gz.Headlines = heads
+	if gz.Classified != "" && len(c.check(gz.Classified)) > 0 {
+		gz.Classified = ""
+	}
 	if len(gz.Headlines) == 0 {
 		for _, f := range facts {
 			if len(gz.Headlines) < 4 {
@@ -117,6 +146,29 @@ var weatherLines = []string{
 	"Fair and cool. A hard frost is possible inland.",
 	"Overcast, with a heavy swell running on the outer reefs.",
 	"Warm and close, thunder in the hills by evening.",
+}
+
+// MarkSeen records that the player has read what they missed.
+func (g *GM) MarkSeen(ctx context.Context, campaignID, playerID string) (*game.World, error) {
+	defer g.lock(campaignID)()
+	w, err := g.Store.Load(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	if w.Player(playerID) == nil {
+		return nil, ErrForbidden
+	}
+	if err := w.FocusPlayer(playerID); err != nil {
+		return nil, err
+	}
+	if w.Campaign.Living == nil {
+		return w, nil
+	}
+	game.NoteSeen(w, playerID)
+	if _, err := g.commit(ctx, w); err != nil {
+		return nil, err
+	}
+	return w, nil
 }
 
 // SetDowntime queues the player's downtime order for the next world tick;
@@ -146,6 +198,32 @@ func (g *GM) SetDowntime(ctx context.Context, campaignID, playerID, kind string)
 		}
 	}
 	if err := game.QueueDowntime(w, c, kind); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	if _, err := g.commit(ctx, w); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// SetGoal lets a player write a personal goal for their character (text)
+// or let one go (drop, a goal id). Reaching or losing a goal is the
+// story's call, made by the narrator.
+func (g *GM) SetGoal(ctx context.Context, campaignID, playerID, text, drop string) (*game.World, error) {
+	defer g.lock(campaignID)()
+	w, err := g.Store.Load(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	c := w.CharacterOf(playerID)
+	if c == nil {
+		return nil, ErrForbidden
+	}
+	if drop != "" {
+		if _, err := game.SettleGoal(w, c, drop, game.GoalDropped, ""); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
+		}
+	} else if _, err := game.AddGoal(w, c, text, game.SourcePlayer); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
 	if _, err := g.commit(ctx, w); err != nil {

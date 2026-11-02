@@ -175,6 +175,86 @@ type CharacterView struct {
 	Build      BuildView        `json:"build"`
 	// Strain is set in dread campaigns (see game/strain.go).
 	Strain *StrainView `json:"strain,omitempty"`
+	// Marks are lasting signs of what happened to them; Standing is who
+	// holds a grudge against them, owes them, or is owed by them.
+	Marks    []MarkView     `json:"marks"`
+	Standing []StandingView `json:"standing"`
+	// Goals are what they want (open first); Record is their own story,
+	// newest first.
+	Goals  []game.Goal        `json:"goals"`
+	Record []game.RecordEntry `json:"record"`
+}
+
+// MarkView is one lasting mark on a character.
+type MarkView struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`  // scar | brand | loss | name
+	Label string `json:"label"` // "Scar", "Mark", "Loss", "Known as"
+	Text  string `json:"text"`
+	Day   int    `json:"day,omitempty"`
+}
+
+// StandingView is one NPC's tie to a character.
+type StandingView struct {
+	NPCID string `json:"npc_id"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`  // grudge | debt (they owe you) | owed (you owe them)
+	Label string `json:"label"` // "Holds a grudge", "Owes you", "You owe them"
+	Text  string `json:"text"`
+	Day   int    `json:"day,omitempty"`
+	Alive bool   `json:"alive"`
+}
+
+var markLabels = map[string]string{game.MarkScar: "Scar", game.MarkBrand: "Mark", game.MarkLoss: "Loss", game.MarkName: "Known as"}
+var tieLabels = map[string]string{game.TieGrudge: "Holds a grudge", game.TieDebt: "Owes you", game.TieOwed: "You owe them"}
+
+// goalsView lists open goals first, then settled ones, newest first.
+func goalsView(c *game.Character) []game.Goal {
+	out := []game.Goal{}
+	for i := len(c.Goals) - 1; i >= 0; i-- {
+		if c.Goals[i].Status == game.GoalOpen {
+			out = append(out, c.Goals[i])
+		}
+	}
+	for i := len(c.Goals) - 1; i >= 0; i-- {
+		if c.Goals[i].Status != game.GoalOpen {
+			out = append(out, c.Goals[i])
+		}
+	}
+	return out
+}
+
+func recordView(c *game.Character) []game.RecordEntry {
+	out := []game.RecordEntry{}
+	for i := len(c.Record) - 1; i >= 0; i-- {
+		out = append(out, c.Record[i])
+	}
+	return out
+}
+
+func marksView(c *game.Character) []MarkView {
+	out := []MarkView{}
+	for _, m := range c.Marks {
+		out = append(out, MarkView{ID: m.ID, Kind: m.Kind, Label: markLabels[m.Kind], Text: m.Text, Day: m.Day})
+	}
+	return out
+}
+
+// standingView lists NPC ties to c, the living first, newest first.
+func standingView(w *game.World, c *game.Character) []StandingView {
+	out := []StandingView{}
+	for _, n := range w.NPCs {
+		for _, t := range n.TiesTo(c.ID) {
+			out = append(out, StandingView{NPCID: n.ID, Name: n.Name, Kind: t.Kind, Label: tieLabels[t.Kind], Text: t.Text, Day: t.Day, Alive: n.Alive})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Alive != out[j].Alive {
+			return out[i].Alive
+		}
+		return out[i].Day > out[j].Day
+	})
+	return out
 }
 
 // StrainView is a character's mental strain and the scars it left.
@@ -341,6 +421,9 @@ type CampaignView struct {
 	Deadline int64 `json:"deadline,omitempty"`
 	// World is the long campaign's shared calendar, Tide and newspaper.
 	World *WorldView `json:"world,omitempty"`
+	// Dispatch is what the caller missed while they were away (world
+	// ticks since they last played); POST me/seen clears it.
+	Dispatch *game.Dispatch `json:"dispatch,omitempty"`
 }
 
 // WorldView is what players see of the living world.
@@ -352,6 +435,94 @@ type WorldView struct {
 	Gazette *game.Gazette `json:"gazette,omitempty"`
 	// Downtime lists the orders a character can queue at a safe place.
 	Downtime []DowntimeKind `json:"downtime"`
+	// Event is the world event now calling everyone, if any; Past are the
+	// ones settled, newest first.
+	Event *EventView      `json:"event,omitempty"`
+	Past  []PastEventView `json:"past_events,omitempty"`
+}
+
+// EventView is a world event as a player sees it.
+type EventView struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Call     string `json:"call"`
+	Faction  string `json:"faction"`
+	Site     string `json:"site"`
+	SiteID   string `json:"site_id"`
+	Deadline int64  `json:"deadline"`
+	Status   string `json:"status"`
+	// Threads are why it is happening; Mine marks the caller's own.
+	Threads []EventThreadView `json:"threads"`
+	// Coming lists everyone called and whether they have come.
+	Coming []EventMemberView `json:"coming"`
+	// Here is set when the caller stands at the site; CanAnswer when they
+	// can go there now; CanBegin when they can start it without waiting.
+	Here      bool `json:"here"`
+	CanAnswer bool `json:"can_answer"`
+	CanBegin  bool `json:"can_begin"`
+}
+
+// EventThreadView is one reason for a world event.
+type EventThreadView struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+	Mine bool   `json:"mine,omitempty"`
+	// Who is the character the thread ties in, NPC the person it runs
+	// through (the UI draws the threads converging from them).
+	Who string `json:"who,omitempty"`
+	NPC string `json:"npc,omitempty"`
+}
+
+// EventMemberView is one character called to a world event.
+type EventMemberView struct {
+	CharacterID string `json:"character_id"`
+	Name        string `json:"name"`
+	Came        bool   `json:"came"`
+}
+
+// PastEventView is a settled world event.
+type PastEventView struct {
+	Title   string `json:"title"`
+	Week    int    `json:"week"`
+	Won     bool   `json:"won"`
+	Outcome string `json:"outcome"`
+}
+
+func eventView(w *game.World, playerID string) *EventView {
+	e := game.CurrentEvent(w)
+	if e == nil {
+		return nil
+	}
+	v := &EventView{ID: e.ID, Title: e.Title, Call: e.Call, Faction: e.Faction, SiteID: e.SiteID, Deadline: e.Deadline, Status: e.Status,
+		Threads: []EventThreadView{}, Coming: []EventMemberView{}}
+	if f := w.Campaign.Living.Faction(e.Faction); f != nil {
+		v.Faction = f.Name
+	}
+	if l := w.Location(e.SiteID); l != nil {
+		v.Site = l.Name
+	}
+	me := w.CharacterOf(playerID)
+	for _, t := range e.Threads {
+		tv := EventThreadView{Kind: t.Kind, Text: t.Text, Mine: me != nil && t.CharID == me.ID}
+		if c := w.Character(t.CharID); t.CharID != "" && c != nil {
+			tv.Who = c.Name
+		}
+		if n := w.NPC(t.NPCID); t.NPCID != "" && n != nil {
+			tv.NPC = n.Name
+		}
+		v.Threads = append(v.Threads, tv)
+	}
+	for _, id := range e.Summoned {
+		if c := w.Character(id); c != nil && !c.Dead {
+			v.Coming = append(v.Coming, EventMemberView{CharacterID: c.ID, Name: c.Name, Came: e.Came(c.ID)})
+		}
+	}
+	if me != nil && !me.Dead {
+		v.Here = w.Campaign.LocationID == e.SiteID
+		v.CanAnswer = !v.Here && !w.InCombat()
+		v.CanBegin = v.Here && e.Status == game.EventGathering && !w.InCombat()
+	}
+	return v
 }
 
 // DowntimeKind is one downtime order.
@@ -373,6 +544,10 @@ func worldView(w *game.World) *WorldView {
 	v := &WorldView{Week: lv.Week, Date: d.Format("January 2, 2006"), Tide: lv.Tide, Band: game.TideBand(lv.Tide), Gazette: lv.Gazette}
 	for _, k := range game.DowntimeKinds {
 		v.Downtime = append(v.Downtime, DowntimeKind{Key: k.Key, Name: k.Name, Desc: k.Desc})
+	}
+	for i := len(lv.Past) - 1; i >= 0; i-- {
+		e := lv.Past[i]
+		v.Past = append(v.Past, PastEventView{Title: e.Title, Week: e.Settled, Won: e.Status == game.EventWon, Outcome: e.Outcome})
 	}
 	return v
 }
@@ -445,7 +620,7 @@ func itemView(w *game.World, it *game.Item, c *game.Character, n *game.NPC) Item
 		v.ToHit = &hit
 	}
 	if n != nil {
-		v.Price = game.BuyPrice(it, n)
+		v.Price = game.BuyPrice(it, n, c)
 	}
 	return v
 }
@@ -455,7 +630,7 @@ func characterView(w *game.World, c *game.Character) CharacterView {
 		Scores: c.Scores, Modifiers: map[string]int{}, Proficient: c.Proficient, ProfBonus: game.ProficiencyBonus(c.Level),
 		Level: c.Level, XP: c.XP, HP: c.HP, MaxHP: c.MaxHP, Down: c.Down(), AC: game.ArmorClass(w, c), Gold: c.Gold, ZoneID: c.ZoneID,
 		LevelXP: game.XPTable[max(c.Level, 1)-1], ACParts: game.ArmorClassParts(w, c), Conditions: conditions(w, c), Inventory: []ItemView{},
-		Strain: strainView(w, c)}
+		Strain: strainView(w, c), Marks: marksView(c), Standing: standingView(w, c), Goals: goalsView(c), Record: recordView(c)}
 	if c.Level < game.MaxLevel {
 		v.NextLevel = game.XPTable[c.Level]
 		v.LevelUp = &LevelUpView{Level: c.Level + 1, HP: game.HPPerLevel(c), ProfBonus: game.ProficiencyBonus(c.Level + 1)}
@@ -687,6 +862,10 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	v.Groups = groupsView(w, v.Group)
 	v.Deadline = turnDeadline(w)
 	v.World = worldView(w)
+	if v.World != nil {
+		v.World.Event = eventView(w, playerID)
+	}
+	v.Dispatch = game.BuildDispatch(w, playerID)
 	v.Saga, v.Dread = c.Saga, c.Dread
 	if mq := w.MainQuest(); mq != nil {
 		v.Storyline = mq.ID
@@ -788,7 +967,9 @@ type NPCView struct {
 	Stock        []ItemView `json:"stock,omitempty"`
 }
 
-func npcView(w *game.World, n *game.NPC) (NPCView, bool) {
+// npcView shows an NPC; prices are what they would charge viewer (nil for
+// a spectator).
+func npcView(w *game.World, n *game.NPC, viewer *game.Character) (NPCView, bool) {
 	l := w.Location(n.LocationID)
 	if l == nil || !l.Visited || n.Antagonist && n.LocationID != w.Campaign.LocationID {
 		return NPCView{}, false
@@ -797,7 +978,7 @@ func npcView(w *game.World, n *game.NPC) (NPCView, bool) {
 	if n.Merchant {
 		for _, it := range w.ItemsOf(game.OwnerNPC, n.ID) {
 			if !rewardItem(w, it.ID) {
-				v.Stock = append(v.Stock, itemView(w, it, nil, n))
+				v.Stock = append(v.Stock, itemView(w, it, viewer, n))
 			}
 		}
 	}
@@ -865,7 +1046,7 @@ func journalPeople(w *game.World) []JournalPerson {
 	}
 	out := []JournalPerson{}
 	for _, n := range w.NPCs {
-		v, ok := npcView(w, n)
+		v, ok := npcView(w, n, nil)
 		if !ok {
 			continue
 		}
