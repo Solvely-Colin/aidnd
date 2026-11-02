@@ -173,6 +173,8 @@ func castSpell(ctx *Ctx, c *Character, a Action, st *Step) error {
 			t.Conditions.add(cond)
 			st.Changes = append(st.Changes, fmt.Sprintf("%s is %s", t.Name, condName(s.Cond)))
 		}
+	case plan.npc != nil:
+		mindSpell(ctx, c, s, plan.npc, a, st)
 	case s.Kind == SpellUtility:
 		st.Info = append(st.Info, fmt.Sprintf("%s: %s", name, s.Desc))
 	default:
@@ -186,6 +188,7 @@ func castSpell(ctx *Ctx, c *Character, a Action, st *Step) error {
 
 // spellPlan is who and where a spell lands.
 type spellPlan struct {
+	npc    *NPC // charm person, suggestion
 	enemy  *Enemy
 	allies []*Character
 	zone   string
@@ -211,6 +214,10 @@ func planSpell(w *World, c *Character, s *SpellDef, a Action) (spellPlan, error)
 		}
 		p.zone = l.Zone(a.Zone).ID
 		return p, nil
+	case s.Key == "charm_person" || s.Key == "suggestion":
+		n, err := spellNPC(w, a, SpellName(s, w.Setting()))
+		p.npc = n
+		return p, err
 	case s.Kind == SpellUtility:
 		return p, nil
 	case s.Area && s.Range == RangeSelf || s.Key == "spirit_guardians":

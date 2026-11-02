@@ -348,6 +348,11 @@ type NPCExtra struct {
 	Protected bool `json:"protected,omitempty"`
 	// Ties are grudges and debts toward single characters (see marks.go).
 	Ties []Tie `json:"ties,omitempty"`
+	// Swayed is the day each character last tried a social check on them,
+	// keyed "charID:purpose" (see sway.go).
+	Swayed map[string]int `json:"swayed,omitempty"`
+	// Charm is a Charm Person in effect on them.
+	Charm *Charm `json:"charm,omitempty"`
 }
 
 // MaxNPCMemory is how many memory notes an NPC keeps.

@@ -68,7 +68,8 @@ func interpreterTools() []llm.Tool {
 			"option": enum("optional: smite spends a spell slot on Divine Smite if it hits (paladins); stun spends focus on Stunning Strike (monks level 5). Only when the player asks for it", "smite", "stun")}, "target")),
 		tool(game.ActCast, "Cast one of the actor's spells listed in SPELLS (cost shown there: ACTION or BONUS). Use it whenever the player casts, prays, channels or uses a power that matches a known spell, by its name in this setting. Damage spells need a target enemy or zone; healing and buffs take a party member (empty = self).", obj(map[string]any{
 			"spell":  str("spell key from SPELLS"),
-			"target": str("enemy id or party member id"),
+			"target": str("enemy id or party member id; the NPC id for charm person or suggestion"),
+			"text":   str("suggestion only: what the target is urged to do"),
 			"zone":   str("zone id for spells that fill a zone (fireball, web) or misty step's destination"),
 			"level":  num("optional slot level to cast with (higher levels are stronger); 0 = lowest available", 0, 3)}, "spell")),
 		tool(game.ActFeature, "Use a class or species ability from ABILITIES (rage, second wind, cunning action, flurry of blows, lay on hands, wild shape...). Cost is shown there; bonus actions can come before or after the main action in the same message.", obj(map[string]any{
@@ -84,8 +85,9 @@ func interpreterTools() []llm.Tool {
 			"skill":   skillEnum,
 			"ability": abilityEnum,
 			"dc":      intEnum("difficulty: 5 trivial, 10 easy, 15 medium, 20 hard, 25 very hard", 5, 10, 15, 20, 25),
-			"purpose": enum("search reveals hidden exits; unlock/force targets a locked exit; escape breaks free when the character is restrained or grappled; stabilize stops a dying ally's death saves (Medicine, DC 10); tend treats and binds wounds outside a fight, the character's own or an ally's, and heals real HP on a success (Medicine or Survival, DC 10, once per patient between rests). The engine sets those DCs", "search", "unlock", "force", "escape", "stabilize", "tend", "other"),
-			"target":  str("optional exit id for unlock/force, the dying party member's id for stabilize, or the hurt party member's id for tend (empty = self)"),
+			"purpose": enum("search reveals hidden exits; unlock/force targets a locked exit; escape breaks free when the character is restrained or grappled; stabilize stops a dying ally's death saves (Medicine, DC 10); tend treats and binds wounds outside a fight, the character's own or an ally's, and heals real HP on a success (Medicine or Survival, DC 10, once per patient between rests); persuade, deceive and intimidate work on an NPC here (target = NPC id) and really change their attitude or make them hand over what a quest needs; steal lifts an item an NPC carries (target = NPC id, item = what); sneak (Stealth, outside a fight) keeps the character unseen so a fight or ambush can't surprise them. The engine sets those DCs. other is only for checks with no lasting result (recalling lore, climbing, reading someone)", "search", "unlock", "force", "escape", "stabilize", "tend", "persuade", "deceive", "intimidate", "steal", "sneak", "other"),
+			"target":  str("optional exit id for unlock/force, the dying party member's id for stabilize, the hurt party member's id for tend (empty = self), or the NPC id for persuade/deceive/intimidate/steal"),
+			"item":    str("steal only: the item to lift, if named"),
 			"text":    str("what the check is for, in a few words")}, "dc", "purpose", "text")),
 		tool(game.ActUseItem, "ACTION. Use an item: drink a potion, apply a healer's kit (can revive a downed ally), use a key or tools on a locked exit.", obj(map[string]any{
 			"item":   str("item id from INVENTORY"),
@@ -152,7 +154,7 @@ func toAction(tc llm.ToolCall) (game.Action, error) {
 	case game.ActSubdue:
 		act.Target, act.Method = a.Target, a.Method
 	case game.ActCheck:
-		act.Ability, act.Skill, act.DC, act.Purpose, act.Target = a.Ability, a.Skill, a.DC, a.Purpose, a.Target
+		act.Ability, act.Skill, act.DC, act.Purpose, act.Target, act.Item = a.Ability, a.Skill, a.DC, a.Purpose, a.Target, a.Item
 	case game.ActHelp, game.ActReady, game.ActGrapple:
 		act.Target = a.Target
 	case game.ActShove:
