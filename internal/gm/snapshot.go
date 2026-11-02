@@ -13,6 +13,9 @@ import (
 type Hints struct {
 	TargetID string     `json:"target_id,omitempty"`
 	ZoneID   string     `json:"zone_id,omitempty"`
+	// ExitID is a way out picked on the map: going through it needs no
+	// interpreting.
+	ExitID string `json:"exit_id,omitempty"`
 	Check    *CheckHint `json:"check,omitempty"`
 	Act      *ActHint   `json:"act,omitempty"`
 	// Autopilot marks a turn played for a player who is away.

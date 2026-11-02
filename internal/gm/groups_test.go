@@ -206,3 +206,26 @@ func TestAsyncMoveLeavesFriendsBehind(t *testing.T) {
 		t.Fatalf("both chose to travel together: groups %d, at %s", len(w.Campaign.Groups), w.Here().Name)
 	}
 }
+
+// "I travel to X" for a place next door that nobody has visited is a walk
+// through its exit, however the interpreter reads it, and an exit picked on
+// the map needs no interpreting at all.
+func TestTravelToANewPlaceNextDoor(t *testing.T) {
+	r := newRig(t, 1, 1)
+	w := r.start(t)
+	hub := w.Here()
+	r.f.Default("narrate", llm.Text("The road bends."))
+	// the interpreter names the place they are standing in
+	r.act(t, "u1", "I travel to Reedmarsh", llm.Call("travel", map[string]any{"destination": hub.ID}))
+	w = r.world(t)
+	if w.Here().Name != "Reedmarsh" {
+		t.Fatalf("travel to the next place over should walk there, at %s", w.Here().Name)
+	}
+	// and back, by the map's exit
+	x := w.FindExit(w.Here().ID, hub.ID)
+	_, err := r.g.TakeAction(bg, r.id, "u1", "I travel to "+hub.Name, Hints{ExitID: x.Edge.ID})
+	must(t, err)
+	if w = r.world(t); w.Here().ID != hub.ID {
+		t.Fatalf("the map's exit should lead back, at %s", w.Here().Name)
+	}
+}
