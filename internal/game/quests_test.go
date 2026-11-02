@@ -398,3 +398,21 @@ func TestMainQuestNotTakenUpByArrival(t *testing.T) {
 		t.Fatal("main quest auto-accepted")
 	}
 }
+
+// Taken up on arrival, a quest's named foe is already waiting there.
+func TestTakenUpQuestFoeWaitsOnFirstArrival(t *testing.T) {
+	f := newFixture(t)
+	q := f.sideQuest(t,
+		ObjectiveSpec{Kind: ObjReachLocation, Text: "Go to Whisperwood", Target: "Whisperwood"},
+		ObjectiveSpec{Kind: ObjDefeatEnemy, Text: "Kill the wolf", Target: "wolf"},
+	)
+	f.elder.LastTalked = 0 // met on the first turn still counts
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	r := Resolve(f.ctx(), f.aria, []Action{{Kind: ActMove, Target: "Whisperwood"}})
+	if q.Status != QuestActive || !q.Objectives[0].Done {
+		t.Fatalf("not taken up: %s %v", q.Status, r.Changes)
+	}
+	if enc := f.w.Encounter; enc == nil || len(enc.Enemies) != 1 || !NameContains(enc.Enemies[0].Name, "wolf") {
+		t.Fatalf("quest foe not waiting on first arrival: %+v %v", f.w.Encounter, r.Changes)
+	}
+}

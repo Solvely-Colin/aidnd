@@ -706,6 +706,9 @@ func arrive(ctx *Ctx, loc *Location, via *Edge, st *Step) {
 		}
 		st.Changes = append(st.Changes, fmt.Sprintf("%s at %s (%s)", who, loc.Name, ZoneName(loc, zone)))
 	}
+	ups, ch := TakeUpQuests(w)
+	st.Quests = append(st.Quests, ups...)
+	st.Changes = append(st.Changes, ch...)
 	questFoes(ctx, loc, st)
 }
 
