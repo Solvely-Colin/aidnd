@@ -411,3 +411,7 @@ Steps only move forward from what a taker's group does (`QuestHere`): reach step
 The storyline is everyone's. Quests saved before the log have no `logged` flag and behave as before: everyone knows them once the giver's place is visited, and an active one is everyone's. Dropping or setting one aside first turns it into a kept list.
 
 The narrator has `discover_quest` (overheard, found, rumor; no giver needed, pays out on completion) alongside `offer_quest`; a group may have 4 open side quests. Its STATE splits quests into on offer here, LEADS, ACTIVE (this group's) and ones other players are on. `quest_updated` events carry `kind` (lead, taken, step, done, turned_in, dropped) and `characters` (who the news is for); the feed shows a lead as a card with Take it on / Not now. Casebook moves are `POST /campaigns/{id}/quests/{qid}/{take|drop|aside|tell|track}`.
+
+### Night watches (2026-11-02)
+
+A freeform quest step about getting through a night somewhere ("Last the night in the attic room and end what visits it") is a night watch (`game.IsNightWatch`). Sleeping at its place (the step names it, or the quest's reach step sends the party there) always brings the visitor, authored from the step text, with no random roll. The fight is tagged with the step (`encounters.quest`); winning it marks the step off. The judge never ticks a night watch from narration, so "they slept and woke fine" no longer completes it.

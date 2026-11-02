@@ -180,7 +180,8 @@ CREATE TABLE IF NOT EXISTS encounters (
     campaign_id TEXT PRIMARY KEY,
     id          TEXT NOT NULL DEFAULT '',
     location_id TEXT NOT NULL DEFAULT '',
-    round       INTEGER NOT NULL DEFAULT 1
+    round       INTEGER NOT NULL DEFAULT 1,
+    quest       TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS enemies (

@@ -431,6 +431,9 @@ type Encounter struct {
 	LocationID string   `json:"location_id"`
 	Enemies    []*Enemy `json:"enemies"`
 	Round      int      `json:"round"`
+	// Quest is "questID/objectiveID" when this fight is a quest's night
+	// watch: winning it marks that step done.
+	Quest string `json:"quest,omitempty"`
 }
 
 // Living returns enemies still in the fight.

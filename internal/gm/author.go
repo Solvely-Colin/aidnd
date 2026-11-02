@@ -726,6 +726,13 @@ func kitFor(text string) string {
 }
 
 // arrivalHooks returns engine hooks that author stubs, zones and ambushes.
+// visitor authors what comes for a quest's night watch.
+func (g *GM) visitor(ctx context.Context, w *game.World) func(*game.Location, string) []game.EnemySpec {
+	return func(l *game.Location, why string) []game.EnemySpec {
+		return g.authorEnemies(ctx, w, l, "what comes in the night for the quest step: "+why+". Make it the thing the step promises, named for what it is")
+	}
+}
+
 func (g *GM) arrivalHooks(ctx context.Context, w *game.World) (func(*game.Location), func(*game.Location) []game.EnemySpec) {
 	onArrive := func(l *game.Location) {
 		// a saga region is built from its written canon on first arrival

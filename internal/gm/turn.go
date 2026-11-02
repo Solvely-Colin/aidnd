@@ -274,7 +274,7 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 	}
 	onArrive, ambush := g.arrivalHooks(ctx, w)
 	prevLoc := w.Campaign.LocationID
-	res := game.Resolve(&game.Ctx{W: w, R: g.Dice, Now: g.Now(), OnArrive: onArrive, Ambush: ambush, Leaving: leaving}, actor, actions)
+	res := game.Resolve(&game.Ctx{W: w, R: g.Dice, Now: g.Now(), OnArrive: onArrive, Ambush: ambush, Visitor: g.visitor(ctx, w), Leaving: leaving}, actor, actions)
 	noteSceneTurn(w, res)
 	if !hints.Autopilot {
 		game.NoteActed(w, g.Now().Unix())
