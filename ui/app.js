@@ -99,7 +99,7 @@ async function repaint(t) {
     const why = r.headers.get("X-Art") || "";
     if (r.status === 202) {
       toast(why === "pending" ? "Already painting. It shows up in a moment." : "Painting your portrait. It shows up in a moment.");
-      ART.delete(src); ART_GONE.delete(src); ART_BUST.set(src, Date.now());
+      ART.delete(src); ART_BUST.set(src, Date.now());
       return render();
     }
     toast(why === "daily limit" ? "Today's picture budget is spent. Try again tomorrow."
@@ -150,17 +150,12 @@ function drawn(seed) {
 // character and a picture of the place the party stands in, the first time
 // one is asked for. Until it exists the image fails to load, the drawn art
 // or the initial underneath stays in view, and we ask again a few times.
-const ART = new Map(); // src -> "ok" | "gone" | "wait" | tries so far
-const ART_GONE = new Map(); // src -> when we gave up; we look again after ART_AGAIN
+const ART = new Map(); // src -> "ok" | "wait" | tries so far
 const ART_BUST = new Map(); // src -> version, after a repaint, to skip the cached old picture
 const ART_TRIES = 15, ART_WAIT = 6000, ART_AGAIN = 3 * 60_000;
 const artUrl = src => ART_BUST.has(src) ? `${src}?v=${ART_BUST.get(src)}` : src;
 function artImg(src) {
   const st = ART.get(src);
-  if (st === "gone") {
-    if (Date.now() - (ART_GONE.get(src) || 0) < ART_AGAIN) return "";
-    ART.delete(src);
-  }
   return `<img class="gen ${st === "ok" ? "on" : ""}" src="${artUrl(src)}" alt="" data-art="${src}">`;
 }
 const artEls = src => document.querySelectorAll(`img[data-art="${CSS.escape(src)}"]`);
@@ -172,15 +167,16 @@ document.addEventListener("load", e => {
 }, true);
 document.addEventListener("error", e => {
   const src = e.target?.dataset?.art, st = src && ART.get(src);
-  if (!src || st === "ok" || st === "gone" || st === "wait") return;
-  const tries = (typeof st === "number" ? st : 0) + 1;
-  if (tries >= ART_TRIES) { ART.set(src, "gone"); ART_GONE.set(src, Date.now()); artEls(src).forEach(img => img.remove()); return; }
+  if (!src || st === "ok" || st === "wait") return;
+  // After ART_TRIES quick tries, ask once every few minutes; the hidden
+  // image stays in place so a late picture still fades in.
+  const tries = Math.min((typeof st === "number" ? st : 0) + 1, ART_TRIES);
   ART.set(src, "wait");
   setTimeout(() => {
-    ART.set(src, tries);
+    ART.set(src, tries >= ART_TRIES ? ART_TRIES - 1 : tries);
     const u = artUrl(src);
     artEls(src).forEach(img => { img.src = `${u}${u.includes("?") ? "&" : "?"}try=${tries}`; });
-  }, ART_WAIT);
+  }, tries >= ART_TRIES ? ART_AGAIN : ART_WAIT);
 }, true);
 
 const coverArt = id => `<div class="art">${drawn(id)}${artImg(`/img/${id}/cover`)}</div>`;

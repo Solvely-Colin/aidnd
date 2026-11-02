@@ -191,9 +191,10 @@ export async function serveArt(
 	ctx: { waitUntil(p: Promise<unknown>): void },
 	loadCampaign: () => Promise<CampaignInfo | null>,
 	now = Date.now(),
+	repaint = false,
 ): Promise<Response> {
 	const key = artKey(t);
-	const hit = await env.ART.get(key);
+	const hit = repaint ? null : await env.ART.get(key);
 	if (hit) {
 		return new Response(hit.body, {
 			headers: {
@@ -235,7 +236,12 @@ export async function serveArt(
 		(async () => {
 			const errs: string[] = [];
 			try {
-				for (const p of [prompt, fallback].filter(Boolean)) {
+				for (const [n, p] of [prompt, fallback].filter(Boolean).entries()) {
+					// The fallback is a second model call, so it counts too.
+					if (n > 0 && !(await takeQuota(env, Date.now()))) {
+						errs.push("daily limit");
+						break;
+					}
 					try {
 						const img = await runModel(env, p, w, h);
 						await env.ART.put(key, img, { httpMetadata: { contentType: imageType(img) }, customMetadata: { prompt: p.slice(0, 1000) } });
@@ -254,8 +260,8 @@ export async function serveArt(
 	return later("started");
 }
 
-// repaintArt throws away an image (or a recorded failure) and paints it
-// again, for a player who wants a new portrait or whose portrait failed.
+// repaintArt paints an image again (clearing any recorded failure), for a
+// player who wants a new portrait or whose portrait failed.
 export async function repaintArt(
 	t: ArtTarget,
 	env: ArtEnv,
@@ -266,8 +272,9 @@ export async function repaintArt(
 	const key = artKey(t);
 	const pending = await markerAge(env, `pending/${key}`, now);
 	if (pending !== null && pending < PENDING_MS) return new Response(null, { status: 202, headers: { "X-Art": "pending" } });
-	await env.ART.delete([key, `failed/${key}`]);
-	const r = await serveArt(t, env, ctx, loadCampaign, now);
+	await env.ART.delete(`failed/${key}`);
+	// The old picture stays until a new one replaces it.
+	const r = await serveArt(t, env, ctx, loadCampaign, now, true);
 	// A fresh image is never served here, so say why nothing started.
 	return new Response(null, { status: r.status, headers: { "X-Art": r.headers.get("X-Art") ?? "" } });
 }
