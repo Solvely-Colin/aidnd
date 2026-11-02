@@ -90,6 +90,24 @@ async function api(method, path, body) {
   return data;
 }
 
+// repaint asks the Worker to throw away a portrait and paint it again.
+async function repaint(t) {
+  const src = `/img/${S.route}/char/${t.dataset.id}`;
+  t.disabled = true;
+  try {
+    const r = await fetch(src, { method: "POST", credentials: "same-origin" });
+    const why = r.headers.get("X-Art") || "";
+    if (r.status === 202) {
+      toast(why === "pending" ? "Already painting. It shows up in a moment." : "Painting your portrait. It shows up in a moment.");
+      ART.delete(src); ART_BUST.set(src, Date.now());
+      return render();
+    }
+    toast(why === "daily limit" ? "Today's picture budget is spent. Try again tomorrow."
+      : r.status === 403 ? "Only that character's player can repaint them."
+      : "The portrait couldn't be started. Try again in a minute.");
+  } finally { t.disabled = false; }
+}
+
 let toastTimer;
 function toast(msg) {
   let el = $(".toast");
@@ -132,12 +150,13 @@ function drawn(seed) {
 // character and a picture of the place the party stands in, the first time
 // one is asked for. Until it exists the image fails to load, the drawn art
 // or the initial underneath stays in view, and we ask again a few times.
-const ART = new Map(); // src -> "ok" | "gone" | "wait" | tries so far
-const ART_TRIES = 15, ART_WAIT = 6000;
+const ART = new Map(); // src -> "ok" | "wait" | tries so far
+const ART_BUST = new Map(); // src -> version, after a repaint, to skip the cached old picture
+const ART_TRIES = 15, ART_WAIT = 6000, ART_AGAIN = 3 * 60_000;
+const artUrl = src => ART_BUST.has(src) ? `${src}?v=${ART_BUST.get(src)}` : src;
 function artImg(src) {
   const st = ART.get(src);
-  if (st === "gone") return "";
-  return `<img class="gen ${st === "ok" ? "on" : ""}" src="${src}" alt="" data-art="${src}">`;
+  return `<img class="gen ${st === "ok" ? "on" : ""}" src="${artUrl(src)}" alt="" data-art="${src}">`;
 }
 const artEls = src => document.querySelectorAll(`img[data-art="${CSS.escape(src)}"]`);
 document.addEventListener("load", e => {
@@ -148,11 +167,16 @@ document.addEventListener("load", e => {
 }, true);
 document.addEventListener("error", e => {
   const src = e.target?.dataset?.art, st = src && ART.get(src);
-  if (!src || st === "ok" || st === "gone" || st === "wait") return;
-  const tries = (typeof st === "number" ? st : 0) + 1;
-  if (tries >= ART_TRIES) { ART.set(src, "gone"); artEls(src).forEach(img => img.remove()); return; }
+  if (!src || st === "ok" || st === "wait") return;
+  // After ART_TRIES quick tries, ask once every few minutes; the hidden
+  // image stays in place so a late picture still fades in.
+  const tries = Math.min((typeof st === "number" ? st : 0) + 1, ART_TRIES);
   ART.set(src, "wait");
-  setTimeout(() => { ART.set(src, tries); artEls(src).forEach(img => { img.src = `${src}?try=${tries}`; }); }, ART_WAIT);
+  setTimeout(() => {
+    ART.set(src, tries >= ART_TRIES ? ART_TRIES - 1 : tries);
+    const u = artUrl(src);
+    artEls(src).forEach(img => { img.src = `${u}${u.includes("?") ? "&" : "?"}try=${tries}`; });
+  }, tries >= ART_TRIES ? ART_AGAIN : ART_WAIT);
 }, true);
 
 const coverArt = id => `<div class="art">${drawn(id)}${artImg(`/img/${id}/cover`)}</div>`;
@@ -654,8 +678,10 @@ function meCardHTML(c) {
     <span class="name-l">${esc(c.name)}</span>
     <span class="sub-line">${esc(roleLine(c))} · ${esc(c.pronouns || "they/them")}</span>
     ${c.concept ? `<span class="concept">${esc(c.concept)}</span>` : ""}
-    <button class="link ink" data-act="edit" style="margin-top:4px;align-self:flex-start">Change something</button></div></div>`;
+    <span style="display:flex;gap:16px;margin-top:4px"><button class="link ink" data-act="edit">Change something</button>${repaintBtn(c)}</span></div></div>`;
 }
+
+const repaintBtn = c => `<button class="link ink" data-act="repaint" data-id="${esc(c.id)}" style="align-self:flex-start">${ART.get(`/img/${S.route}/char/${c.id}`) === "ok" ? "Paint a new portrait" : "Paint my portrait"}</button>`;
 
 const CONCEPTS = [
   "a disgraced professor of folklore who knows too much",
@@ -2189,6 +2215,7 @@ function sheetHTML() {
         <span class="nm">${esc(c.name)}</span>
         <span class="sub-line">Level ${c.level} ${esc(roleLine(c))} · ${esc(c.pronouns || "they/them")}</span>
         ${c.zone_name ? `<span class="sub-line">Last seen at ${esc(c.zone_name)}</span>` : ""}
+        ${own ? repaintBtn(c) : ""}
         ${c.conditions?.length ? `<span class="conds">${c.conditions.map(k => `<span class="cond ${esc(k.key)}" title="${esc(k.note || "")}">${esc(k.label)}</span>`).join("")}</span>` : ""}
       </div>
       ${stamps.length ? `<span class="stamp file-stamp">${esc(stamps[0])}</span>` : ""}
@@ -2687,6 +2714,7 @@ document.addEventListener("click", async e => {
         } finally { renderLobby(); }
         return;
       }
+      case "repaint": return repaint(t);
       case "build": S.draft = blankDraft(); S.prev = null; S.step = 0; return renderLobby();
       case "edit": {
         const c = mine();
