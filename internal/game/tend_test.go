@@ -58,6 +58,15 @@ func TestTendAllyAndFailure(t *testing.T) {
 
 func TestTendRefusals(t *testing.T) {
 	f := newFixture(t)
+	// no target means self, even when a friend is hurt; a bad name is refused
+	f.bram.HP = 3
+	if r := tendRun(f, f.ctx(15, 5), f.aria, []Action{{Kind: ActCheck, Purpose: "tend"}}); r.Steps[0].OK || f.bram.HP != 3 {
+		t.Fatal("unhurt actor with no target should be refused, not heal Bram")
+	}
+	if r := tendRun(f, f.ctx(15, 5), f.aria, []Action{{Kind: ActCheck, Purpose: "tend", Target: "Nobody"}}); r.Steps[0].OK || f.bram.HP != 3 {
+		t.Fatal("an unknown target should be refused")
+	}
+	f.bram.HP = f.bram.MaxHP
 	r := tendRun(f, f.ctx(15, 5), f.aria, []Action{{Kind: ActCheck, Purpose: "tend"}})
 	if r.Steps[0].OK {
 		t.Fatal("nobody hurt: should be refused")
@@ -76,7 +85,7 @@ func TestTendWords(t *testing.T) {
 			t.Errorf("%q should be tending", s)
 		}
 	}
-	for _, s := range []string{"search the room", "stabilize the dying man", "climb the wall", "bind the cultist", "recall lore about the healing cult"} {
+	for _, s := range []string{"search the room", "stabilize the dying man", "climb the wall", "bind the cultist", "recall lore about the healing cult", "examine the corpse's wounds", "track the bleeding wolf", "recall what creature causes these injuries", "clean the altar"} {
 		if tendWords(s) {
 			t.Errorf("%q should not be tending", s)
 		}

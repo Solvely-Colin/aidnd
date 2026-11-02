@@ -17,7 +17,13 @@ import (
 // lives in Character.Used, which a long rest clears; ShortRest clears it too.
 const tendedKey = "tended"
 
-var tendRe = regexp.MustCompile(`(?i)(wound|injur|bandag|first aid|splint|sutur|stitch (up|my|his|her|their)|bleeding|\b(tend|treat|heal|patch|fix|bind|doctor)( up)? (myself|himself|herself|themselves|me|him|her|them|ally|friend|companion)\b)`)
+var (
+	// treatment words that mean care on their own
+	tendSureRe = regexp.MustCompile(`(?i)(first aid|bandag|splint|sutur|tourniquet)`)
+	// a care verb, which needs a wound or a patient to go with it
+	tendVerbRe = regexp.MustCompile(`(?i)\b(tend|tends|tending|treat|treats|treating|bind|binds|binding|dress|dresses|dressing|clean|cleans|cleaning|patch|patches|patching|stitch|stitches|stitching|sew|sews|sewing|wrap|wraps|wrapping|heal|heals|healing|doctor|doctors|doctoring|nurse|nurses|nursing)\b`)
+	tendWhatRe = regexp.MustCompile(`(?i)(wound|injur|gash|cuts?\b|bleeding|burns?\b|\b(myself|himself|herself|themselves|themself|me|him|her|them|up)\b)`)
+)
 
 // tendWords reports whether a check's text is about treating wounds.
 func tendWords(text string) bool {
@@ -25,16 +31,16 @@ func tendWords(text string) bool {
 	if strings.Contains(t, "stabiliz") || strings.Contains(t, "dying") {
 		return false
 	}
-	return tendRe.MatchString(t)
+	return tendSureRe.MatchString(t) || (tendVerbRe.MatchString(t) && tendWhatRe.MatchString(t))
 }
 
-// tendPatient finds who c is tending: the named party member, else c if
-// hurt, else the most hurt companion nearby.
+// tendPatient finds who c is tending: the named party member, or c when
+// no one is named. A name that matches nobody is refused, never guessed.
 func tendPatient(w *World, c *Character, target string) (*Character, error) {
 	if w.InCombat() {
 		return nil, fmt.Errorf("there is no time to bind wounds in the middle of a fight; stabilize a dying ally or use a potion or healer's kit instead")
 	}
-	var t *Character
+	t := c
 	if target != "" {
 		t = w.Character(target)
 		if t == nil {
@@ -45,22 +51,9 @@ func tendPatient(w *World, c *Character, target string) (*Character, error) {
 				}
 			}
 		}
-	}
-	if t == nil && c.HP < c.MaxHP {
-		t = c
-	}
-	if t == nil {
-		for _, ch := range w.Party() {
-			if ch.Dead || ch.HP >= ch.MaxHP {
-				continue
-			}
-			if t == nil || ch.MaxHP-ch.HP > t.MaxHP-t.HP {
-				t = ch
-			}
+		if t == nil {
+			return nil, fmt.Errorf("there is no party member %q here to tend", target)
 		}
-	}
-	if t == nil {
-		t = c
 	}
 	if t.Dead {
 		return nil, fmt.Errorf("%s is beyond help", t.Name)
