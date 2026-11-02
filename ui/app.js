@@ -1873,6 +1873,10 @@ function trays() {
   // picked; an ability check keeps the ability and lets the game master set
   // the DC from what the player writes.
   const tools = (me.inventory || []).some(i => i.key === "thieves_tools");
+  if (!v.encounter) for (const c of v.party || []) if (!c.dead && !c.dying && c.hp > 0 && c.hp < c.max_hp && c.zone_id === me.zone_id) {
+    const self = isMe(c.id);
+    g.roll.items.push({ name: self ? "Tend your wounds" : `Tend ${firstName(c.name)}'s wounds`, bonus: `Medicine ${signed(skillMod(me, "medicine"))}`, send: self ? "I clean and bind my wounds" : `I clean and bind ${c.name}'s wounds`, hint: { check: { ability: "WIS", skill: "medicine", purpose: "tend", target: c.id } } });
+  }
   g.roll.items.push({ name: "Search for hidden ways", bonus: `Perception ${signed(skillMod(me, "perception"))}`, send: "I search the area for hidden ways", hint: { check: { ability: "WIS", skill: "perception", purpose: "search" } } });
   for (const x of loc.exits || []) {
     if (x.state !== "locked" || x.sealed) continue;
@@ -1962,7 +1966,7 @@ function checkChipHTML() {
   const c = S.hint?.check, me = mine();
   if (!c || !me) return "";
   const sk = c.skill && skillsOf(me).find(k => k.key === c.skill);
-  const what = { search: "Search", unlock: "Pick the lock", force: "Force it", other: `${sk ? sk.name : ABIL_NAME[c.ability] || c.ability} check` }[c.purpose] || "Check";
+  const what = { search: "Search", unlock: "Pick the lock", force: "Force it", tend: "Tend wounds", other: `${sk ? sk.name : ABIL_NAME[c.ability] || c.ability} check` }[c.purpose] || "Check";
   return `<div class="check-chip"><span class="hex">d20</span><b>${esc(what)}</b><span>${sk ? `${esc(sk.name)} ${signed(sk.mod)}` : `${esc(c.ability)} ${signed(checkMod(me, c.ability))}`}</span>
     <span class="grow">${c.purpose === "other" ? "say what you try" : "rolled when you send"}</span><button type="button" data-act="clear-check" aria-label="Drop the check">${ICON.close}</button></div>`;
 }

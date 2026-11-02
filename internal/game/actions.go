@@ -1201,7 +1201,25 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	var lockEdge *Edge
 	var patient *Character
 	escapeDC := 0
+	if (purpose == "" || purpose == "other") && tendWords(a.Text) {
+		purpose = "tend"
+	}
+	var tended *Character
 	switch purpose {
+	case "tend", "heal", "treat":
+		purpose = "tend"
+		t, err := tendPatient(w, c, a.Target)
+		if err != nil {
+			return err
+		}
+		if t.Dying() {
+			patient = t
+		} else {
+			tended = t
+		}
+		if !ok {
+			ab = WIS
+		}
 	case "unlock", "force", "open":
 		x := w.FindExit(l.ID, a.Target)
 		if x == nil || x.Edge.State != EdgeLocked {
@@ -1283,7 +1301,7 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if a.DC == 0 {
 		dc = 10
 	}
-	if patient != nil {
+	if patient != nil || tended != nil {
 		dc = 10
 	}
 	parts := CheckParts(c, ab)
@@ -1332,6 +1350,10 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 	if patient != nil {
 		Stabilize(patient)
 		st.Changes = append(st.Changes, fmt.Sprintf("%s stabilizes %s, who stops dying but stays unconscious", c.Name, patient.Name))
+		return nil
+	}
+	if tended != nil {
+		tendWounds(ctx, c, tended, ch.Tier == dice.CritSuccess, st)
 		return nil
 	}
 	if escapeDC > 0 {
