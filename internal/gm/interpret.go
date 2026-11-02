@@ -204,6 +204,15 @@ func describeHints(w *game.World, h Hints) string {
 // action itself, so the roll is exactly the one the player chose. It
 // returns nil when the hint is absent or is left to the interpreter.
 func directCheck(w *game.World, actor *game.Character, h Hints) ([]game.Action, error) {
+	// out of a fight only: fleeing may need a step to the exit first, which
+	// the interpreter plans
+	if h.ExitID != "" && !w.InCombat() {
+		x := w.FindExit(w.Campaign.LocationID, h.ExitID)
+		if x == nil {
+			return nil, fmt.Errorf("%w: there is no way %q here", ErrBadRequest, h.ExitID)
+		}
+		return []game.Action{{Kind: game.ActMove, Target: x.Edge.ID}}, nil
+	}
 	if h.Act != nil {
 		return directAct(w, actor, *h.Act)
 	}
@@ -306,8 +315,46 @@ func applyHints(w *game.World, a game.Action, h Hints, text string) game.Action 
 		if a.Target == "" && h.ZoneID != "" {
 			a = game.Action{Kind: game.ActReposition, Zone: h.ZoneID}
 		}
+	case game.ActTravel:
+		// fast travel only reaches places already visited; a new place next
+		// door is a walk through its exit
+		if x := travelExit(w, a.Target, text); x != nil {
+			a = game.Action{Kind: game.ActMove, Target: x.Edge.ID}
+		}
 	}
 	return a
+}
+
+// travelExit finds the exit a travel action really means when the travel
+// can't work as given: the destination is here, unvisited or unknown, and
+// either it lies through an exit here or the player's words name a place
+// one exit away ("I travel to The Witch House" read as travel to here).
+func travelExit(w *game.World, target, text string) *game.Exit {
+	here := w.Campaign.LocationID
+	d := w.Location(target)
+	if d == nil && target != "" {
+		for _, l := range w.Locations {
+			if game.NameContains(l.Name, target) {
+				d = l
+				break
+			}
+		}
+	}
+	if d != nil && d.Visited && d.ID != here {
+		return nil
+	}
+	if d != nil && d.ID != here {
+		if x := w.FindExit(here, d.ID); x != nil {
+			return x
+		}
+	}
+	exits := w.Exits(here, false)
+	for i := range exits {
+		if exits[i].To.ID != here && game.NameContains(text, exits[i].To.Name) {
+			return &exits[i]
+		}
+	}
+	return nil
 }
 
 // validateAction checks every reference against the world, normalizing

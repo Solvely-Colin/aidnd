@@ -2707,7 +2707,8 @@ document.addEventListener("click", async e => {
   if (ds.exit) {
     const x = S.view.location.exits.find(x => x.id === ds.exit);
     if (!x) return;
-    return send(x.state === "locked" ? `I try to get through ${x.label}` : S.view.encounter ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}`);
+    if (x.state === "locked") return send(`I try to get through ${x.label}`);
+    return send(S.view.encounter ? `I flee toward ${x.to_name}` : `I travel to ${x.to_name}`, { exit_id: x.id });
   }
   if (ds.send) return send(ds.send);
   if (ds.joingrp) return groupMove("join", { group: ds.joingrp }, t);

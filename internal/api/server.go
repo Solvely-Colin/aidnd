@@ -588,6 +588,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		Text     string        `json:"text"`
 		TargetID string        `json:"target_id"`
 		ZoneID   string        `json:"zone_id"`
+		ExitID   string        `json:"exit_id"`
 		Check    *gm.CheckHint `json:"check"`
 		Act      *gm.ActHint   `json:"act"`
 	}
@@ -595,7 +596,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	res, err := s.gm.TakeAction(r.Context(), r.PathValue("id"), p, body.Text, gm.Hints{TargetID: body.TargetID, ZoneID: body.ZoneID, Check: body.Check, Act: body.Act})
+	res, err := s.gm.TakeAction(r.Context(), r.PathValue("id"), p, body.Text, gm.Hints{TargetID: body.TargetID, ZoneID: body.ZoneID, ExitID: body.ExitID, Check: body.Check, Act: body.Act})
 	if err != nil {
 		s.fail(w, err)
 		return

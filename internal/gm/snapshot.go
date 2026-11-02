@@ -11,10 +11,13 @@ import (
 
 // Hints are optional map selections sent with an action.
 type Hints struct {
-	TargetID string     `json:"target_id,omitempty"`
-	ZoneID   string     `json:"zone_id,omitempty"`
-	Check    *CheckHint `json:"check,omitempty"`
-	Act      *ActHint   `json:"act,omitempty"`
+	TargetID string `json:"target_id,omitempty"`
+	ZoneID   string `json:"zone_id,omitempty"`
+	// ExitID is a way out picked on the map: going through it needs no
+	// interpreting.
+	ExitID string     `json:"exit_id,omitempty"`
+	Check  *CheckHint `json:"check,omitempty"`
+	Act    *ActHint   `json:"act,omitempty"`
 	// Autopilot marks a turn played for a player who is away.
 	Autopilot bool `json:"autopilot,omitempty"`
 }
