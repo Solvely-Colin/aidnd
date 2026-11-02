@@ -23,6 +23,7 @@ Rules:
 - Write as a storyteller, never as the engine: no game words (zone, exit, NPC, attitude, disposition, HP, AC, budget, action, step, engine, state) and no lists of who is where. Say "across the green" or "down by the steps", not "one zone off".
 - 40-100 words, plain language, lead with what happened. Second person plural or character names; present tense.
 - You may change the world only through the provided directive tools; code validates them. You cannot change player HP, gold or conditions. Conditions (poisoned, prone, restrained, frightened, blinded, stunned) come only from the engine: name a threat with the hazard tool and narrate the save result it returns; describe conditions already in STATE.
+- Quests come out of play. When someone here asks for help, call offer_quest. When the scene itself turns up trouble the party could chase (talk they overhear, a letter or notice they find, word going round), call discover_quest so it lands in their casebook as a lead; never invent a quest only in prose. Only ACTIVE QUESTS move forward from what this group does; never say a quest step is done, the engine marks steps off.
 - Use the DIRECTOR'S NOTE to steer: play any beat it names, keep the scene goal in view, but within the scene above.
 - WORLD MEMORY and each NPC's "remembers" are what already happened. Keep to them: people recall what the party did to them and act on it, places show the marks of earlier events, the dead stay dead. Grudges and debts belong to the one character they name, and a character's MARKS show on them; when one character's deed will follow them personally, record it (npc_tie, and for a true turning point mark_character). YOUR STORY is the acting character's own goals, choices and how things turned out: let it color what they notice and who reacts to them, record new choices that matter (record_choice) and settle their goals when the story clearly does (personal_goal). When a character makes a promise or deal, or an NPC shares something that matters, record it (record_lore, npc_note) so the world remembers.`
 
@@ -382,28 +383,32 @@ func (g *GM) applyDirective(ctx context.Context, w *game.World, c llm.ToolCall) 
 	case DirHazard:
 		line, _, err := g.applyHazard(w, c)
 		return line, err
-	case DirOfferQuest:
+	case DirOfferQuest, DirDiscoverQuest:
 		var a game.QuestSpec
 		if err := c.Decode(&a); err != nil {
 			return "", err
 		}
-		if n := w.NPC(a.GiverID); n == nil || n.LocationID != l.ID {
-			return "", fmt.Errorf("giver must be an NPC present")
-		}
-		open := 0
-		for _, q := range w.Quests {
-			if !q.IsMain && (q.Status == game.QuestOffered || q.Status == game.QuestActive) {
-				open++
+		if c.Function.Name == DirOfferQuest {
+			a.Source = game.SourceOffered
+			if n := w.NPC(a.GiverID); n == nil || n.LocationID != l.ID {
+				return "", fmt.Errorf("giver must be an NPC present")
 			}
+		} else if a.Source == "" || a.Source == game.SourceOffered {
+			return "", fmt.Errorf("source must be overheard, found or rumor; use offer_quest when someone asks")
+		} else if strings.TrimSpace(a.Lead) == "" {
+			return "", fmt.Errorf("lead is required: one line on how they came across it")
 		}
-		if open >= 4 {
-			return "", fmt.Errorf("too many open side quests")
+		if n := openLeads(w); n >= 4 {
+			return "", fmt.Errorf("the party already has %d open side quests; let them finish some", n)
 		}
 		q, err := game.AddQuest(w, a, false)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s offers a quest: %s", w.NPC(q.GiverID).Name, q.Title), nil
+		if q.Source == game.SourceOffered {
+			return fmt.Sprintf("%s offers a quest: %s", w.NPC(q.GiverID).Name, q.Title), nil
+		}
+		return fmt.Sprintf("New lead (%s): %s", q.Source, q.Title), nil
 	case DirRevealExit:
 		var a struct {
 			ExitID string `json:"exit_id"`
@@ -866,11 +871,38 @@ func enemyLooks(w *game.World, e *game.Enemy) string {
 const judgeSystem = `You are a strict objective judge for a tabletop game. You may only mark FREEFORM objectives complete, and only when the
 recent log clearly shows the party did it. Quote the exact evidence from the log (a short verbatim excerpt). If nothing is clearly complete, call no tool.`
 
+// openLeads counts the side quests open to the group here: ones they know
+// of and have not finished or set aside.
+func openLeads(w *game.World) int {
+	n := 0
+	for _, q := range w.Quests {
+		if q.IsMain || (q.Status != game.QuestOffered && q.Status != game.QuestActive) {
+			continue
+		}
+		for _, c := range w.Characters {
+			if game.KnowsQuest(w, q, c) && (q.Status == game.QuestActive && game.OnQuest(q, c) || q.Status == game.QuestOffered && !containsID(q.SetAside, c.ID)) {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+func containsID(xs []string, id string) bool {
+	for _, x := range xs {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
 // judge ticks freeform objectives backed by quoted evidence from the log.
 func (g *GM) judge(ctx context.Context, w *game.World, logText string) ([]game.QuestUpdate, []string) {
 	var open []string
 	for _, q := range w.Quests {
-		if q.Status != game.QuestActive {
+		if q.Status != game.QuestActive || !game.QuestHere(w, q) {
 			continue
 		}
 		for _, o := range q.Objectives {

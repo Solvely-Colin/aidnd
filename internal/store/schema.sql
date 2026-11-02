@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS quests (
     reward_xp     INTEGER NOT NULL DEFAULT 0,
     reward_items  TEXT NOT NULL DEFAULT '[]',
     accepted_turn INTEGER NOT NULL DEFAULT 0,
+    extra         TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (campaign_id, id)
 );
 

@@ -296,8 +296,8 @@ func saveWorld(ctx context.Context, tx *sql.Tx, w *game.World, now int64) error 
 		}
 	}
 	for i, q := range w.Quests {
-		if err := insert(ctx, tx, "quests", []string{"campaign_id", "id", "ord", "title", "summary", "giver_id", "is_main", "status", "objectives", "reward_gold", "reward_xp", "reward_items", "accepted_turn"},
-			id, q.ID, i, q.Title, q.Summary, q.GiverID, q.IsMain, q.Status, js(nonNil(q.Objectives)), q.RewardGold, q.RewardXP, js(nonNil(q.RewardItems)), q.AcceptedTurn); err != nil {
+		if err := insert(ctx, tx, "quests", []string{"campaign_id", "id", "ord", "title", "summary", "giver_id", "is_main", "status", "objectives", "reward_gold", "reward_xp", "reward_items", "accepted_turn", "extra"},
+			id, q.ID, i, q.Title, q.Summary, q.GiverID, q.IsMain, q.Status, js(nonNil(q.Objectives)), q.RewardGold, q.RewardXP, js(nonNil(q.RewardItems)), q.AcceptedTurn, js(q.QuestExtra)); err != nil {
 			return err
 		}
 	}
@@ -444,15 +444,15 @@ func (s *Store) Load(ctx context.Context, id string) (*game.World, error) {
 			w.Items = append(w.Items, it)
 			return unjs(extra, &it.ItemExtra)
 		}),
-		q(`SELECT id, title, summary, giver_id, is_main, status, objectives, reward_gold, reward_xp, reward_items, accepted_turn
+		q(`SELECT id, title, summary, giver_id, is_main, status, objectives, reward_gold, reward_xp, reward_items, accepted_turn, extra
 			FROM quests WHERE campaign_id=? ORDER BY ord`, func(r *sql.Rows) error {
 			qu := &game.Quest{}
-			var objs, items string
-			if err := r.Scan(&qu.ID, &qu.Title, &qu.Summary, &qu.GiverID, &qu.IsMain, &qu.Status, &objs, &qu.RewardGold, &qu.RewardXP, &items, &qu.AcceptedTurn); err != nil {
+			var objs, items, extra string
+			if err := r.Scan(&qu.ID, &qu.Title, &qu.Summary, &qu.GiverID, &qu.IsMain, &qu.Status, &objs, &qu.RewardGold, &qu.RewardXP, &items, &qu.AcceptedTurn, &extra); err != nil {
 				return err
 			}
 			w.Quests = append(w.Quests, qu)
-			return errors.Join(unjs(objs, &qu.Objectives), unjs(items, &qu.RewardItems))
+			return errors.Join(unjs(objs, &qu.Objectives), unjs(items, &qu.RewardItems), unjs(extra, &qu.QuestExtra))
 		}),
 		q(`SELECT id, location_id, round FROM encounters WHERE campaign_id=?`, func(r *sql.Rows) error {
 			w.Encounter = &game.Encounter{}

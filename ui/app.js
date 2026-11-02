@@ -995,6 +995,7 @@ function renderPlay() {
     ${stage ? `<nav class="spine" id="spine" aria-label="Sections"></nav><aside class="plate-col" id="plate" aria-label="The scene"></aside>` : ""}
     <div class="storycol">
       <div class="${stage ? "rhead" : `banner ${S.collapsed ? "collapsed" : ""}`}" id="top"></div>
+      ${stage ? "" : `<div class="trk-slot" id="trk"></div>`}
       <div class="feedwrap"><div class="feed-scroll" id="scroll"><div class="feed" id="feed"></div></div><div class="die-layer" id="die"></div></div>
       <footer class="dock" id="dock"></footer>
     </div>
@@ -1017,7 +1018,7 @@ function renderChrome() {
   const st = mine()?.strain?.value || 0, tide = S.view.world?.tide || 0;
   play.style.setProperty("--dark", Math.min(1, st / 6 * .8 + (tide > 66 ? .25 : tide > 33 ? .1 : 0)).toFixed(2));
   play.classList.toggle("unquiet", st >= 4);
-  renderTop(); renderDock(); renderPanel(); renderRails(); renderNav(); renderSummons();
+  renderTop(); renderDock(); renderPanel(); renderRails(); renderNav(); renderSummons(); renderTracker();
 }
 
 function sceneLine(upper) {
@@ -1095,6 +1096,7 @@ function renderRails() {
         ${enc ? enc.enemies.map(foeRowHTML).join("") : ""}
         ${enc ? chargeHTML(enc, mine()) : ""}
       </section>
+      ${trackerHTML()}
       ${sceneHTML(true)}
     </div></div>`;
   el.querySelector(".plate-scroll").scrollTop = keep;
@@ -1359,8 +1361,12 @@ function feedItems(evs) {
         break;
       }
       case "quest_updated": {
-        const label = d.status === "completed" ? "QUEST DONE" : d.objective_id ? "QUEST" : d.status === "active" ? "NEW QUEST" : "QUEST";
-        out.push({ k: "quest", label, text: d.text || d.title });
+        // side-quest news is for the characters on it (or who just heard)
+        const me = S.view?.you?.character_id;
+        if (d.characters?.length && me && !d.characters.includes(me)) break;
+        const kind = d.kind || (d.status === "completed" ? "done" : d.objective_id ? "step" : d.status === "active" ? "taken" : "");
+        if (kind === "lead") { out.push({ k: "lead", q: d.quest_id, title: d.title, lead: d.lead, text: d.text }); break; }
+        out.push({ k: "quest", kind, q: d.quest_id, label: QKIND[kind] || "Quest", title: d.title, text: d.text || d.title });
         break;
       }
       case "campaign_ended": out.push({ k: "place", name: d.status === "completed" ? "The story is complete" : "The story ends in failure" }); break;
@@ -1412,7 +1418,8 @@ function itemHTML(it, latest) {
     case "catchup": return catchUpHTML(it.c);
     case "gazette": return it.g ? `<div class="ev-gazette">${gazetteHTML(it.g)}<span class="ty-k">The Tide ${it.tide} · ${esc(it.band || "")}</span></div>` : "";
     case "roll": return rollHTML(it);
-    case "quest": return `<div class="ev-quest"><span class="stamp">${esc(it.label)}</span><span>${esc(it.text)}</span></div>`;
+    case "quest": return questNewsHTML(it);
+    case "lead": return leadNewsHTML(it);
     case "warn": return `<div class="ev-warn ${it.hit ? "hit" : ""}"><b>${it.hit ? "Its worst" : "Something gathers"}</b><span>${esc(it.text)}</span></div>`;
     case "dm": return `<div class="ev-dm"><b>The table</b><span>${esc(it.text)}</span></div>`;
     case "wevent": return weventHTML(it);
@@ -2166,7 +2173,7 @@ function topics(n) {
   given.forEach(q => {
     out.push({ key: "q" + q.id, label: q.title, ask: `about ${q.title.toLowerCase().replace(/^the /, "the ")}` });
     // an offer only counts once it is taken up, so say so plainly
-    if (q.status === "offered") out.push({ key: "a" + q.id, label: `Take on ${q.title}`, say: `I accept the quest "${q.title}" from ${n.name}` });
+    if (q.status === "offered" && q.can_take !== false) out.push({ key: "a" + q.id, label: `Take on ${q.title}`, say: `I accept the quest "${q.title}" from ${n.name}` });
   });
   const main = (v.quests || []).find(q => q.id === v.storyline && q.status === "active") || (v.quests || []).find(q => q.is_main && q.status === "active");
   if (main && !given.includes(main)) out.push({ key: "main", label: main.title, ask: `about ${main.title.replace(/^The /, "the ")}` });
@@ -2476,7 +2483,8 @@ function journalHTML() {
   else body = ({ people: peopleTab, places: placesTab, clues: cluesTab })[J.tab](j);
   if (J.tab === "world") J.tab = "quests";
   const tabs = JTABS;
-  return `<div class="tabs">${tabs.map(([k, l]) => `<button class="${J.tab === k ? "on" : ""}" data-act="jtab" data-k="${k}">${l}</button>`).join("")}</div>${find}<div id="j-body" style="display:flex;flex-direction:column;gap:22px">${body}</div>`;
+  const nLeads = leadsOf().length;
+  return `<div class="tabs">${tabs.map(([k, l]) => `<button class="${J.tab === k ? "on" : ""}" data-act="jtab" data-k="${k}">${l}${k === "quests" && nLeads ? `<span class="qseal">${nLeads}</span>` : ""}</button>`).join("")}</div>${find}<div id="j-body" style="display:flex;flex-direction:column;gap:22px">${body}</div>`;
 }
 
 const match = (...parts) => !J.q || parts.join(" ").toLowerCase().includes(J.q.toLowerCase());
@@ -2508,16 +2516,149 @@ function gazetteHTML(g, date) {
     ${g.weather ? `<p class="weather">${esc(g.weather)}</p>` : ""}</article>`;
 }
 
+// ---- quests. Each character keeps their own quest log: leads they have
+// heard of (asked of them, overheard, found, rumored), quests they took on
+// with steps marked off as they happen, friends' quests they can join, and
+// what is settled. The tracker keeps the quest you follow in view while you
+// play, and new leads arrive in the story as cards you answer there.
+
+const QSRC = { offered: "Asked of you", overheard: "Overheard", found: "Found", rumor: "Rumor" };
+const QKIND = { taken: "Taken on", step: "Step ✓", done: "All done", turned_in: "Settled", dropped: "Dropped" };
+const questOf = id => (S.view?.quests || []).find(q => q.id === id);
+const qStamp = q => q.is_main ? "The storyline" : QSRC[q.source] || "Side matter";
+const qClosed = q => q.status === "turned_in" || q.status === "failed";
+const leadsOf = () => (S.view?.quests || []).filter(q => q.status === "offered" && q.can_take && !q.aside);
+
+function trackedQuest() {
+  const qs = S.view?.quests || [];
+  return qs.find(q => q.tracked && q.mine && !qClosed(q))
+    || qs.find(q => q.id === S.view.storyline && q.status === "active")
+    || qs.find(q => q.is_main && q.status === "active")
+    || qs.find(q => q.mine && !q.is_main && !qClosed(q));
+}
+
+// nextLine says what to do now on a quest: its open step and where, or who
+// to go back to once every step is done.
+function nextLine(q) {
+  if (q.status === "completed") return { text: q.giver_name ? `Go back to ${q.giver_name}` : "Done", where: q.giver_here ? "Here now" : q.giver_at ? `At ${q.giver_at}` : "" };
+  const o = q.objectives.find(x => x.next);
+  if (!o) return { text: "", where: "" };
+  return { text: o.text, where: o.where && o.where === S.view.location?.name ? "You are here" : o.where ? `At ${o.where}` : "" };
+}
+
+const pipsHTML = q => `<span class="qpips" role="img" aria-label="${q.steps_done} of ${q.steps} steps done">${Array.from({ length: q.steps }, (_, i) => `<i class="${i < q.steps_done ? "on" : ""}"></i>`).join("")}</span>`;
+
+function trackerHTML() {
+  const q = trackedQuest(), leads = leadsOf();
+  if (!q && !leads.length) return "";
+  const n = q && nextLine(q);
+  return `<section class="tracker"><p class="sh">The matter at hand</p>
+    ${q ? `<button class="trk" data-act="quest-open" data-q="${esc(q.id)}">
+      <span class="trk-k"><span class="ty-k">${esc(qStamp(q))}</span>${pipsHTML(q)}</span>
+      <b class="trk-t">${esc(q.title)}</b>
+      ${n.text ? `<span class="trk-next"><i></i><span>${esc(n.text)}${n.where ? `<em>${esc(n.where)}</em>` : ""}</span></span>` : ""}
+    </button>` : ""}
+    ${leads.length ? `<button class="trk-leads" data-act="quest-leads"><span class="qseal">${leads.length}</span>${leads.length === 1 ? `New lead: ${esc(leads[0].title)}` : `${leads.length} leads waiting in the casebook`}</button>` : ""}
+  </section>`;
+}
+
+// renderTracker draws the slim quest bar over the story on a phone.
+function renderTracker() {
+  const el = $("#trk");
+  if (!el) return;
+  const q = trackedQuest(), leads = leadsOf();
+  if (!q && !leads.length) { el.innerHTML = ""; return; }
+  const n = q && nextLine(q);
+  el.innerHTML = `<div class="trk-bar">
+    ${q ? `<button class="trk-b" data-act="quest-open" data-q="${esc(q.id)}">${pipsHTML(q)}<span class="trk-bt"><b>${esc(q.title)}</b><span>${esc(n.text || qStamp(q))}${n.where ? ` · ${esc(n.where)}` : ""}</span></span></button>` : `<span class="grow"></span>`}
+    ${leads.length ? `<button class="trk-lead" data-act="quest-leads" aria-label="${leads.length} new leads"><span class="qseal">${leads.length}</span>Lead${leads.length > 1 ? "s" : ""}</button>` : ""}
+  </div>`;
+}
+
+function questNewsHTML(it) {
+  const step = it.kind === "step", t = String(it.text || "").replace(/^(Step done|Objective complete): /, "");
+  return `<div class="ev-quest ${esc(it.kind || "")}"><span class="stamp">${esc(it.label)}</span>
+    <span class="q-n">${step ? `<b>${esc(t)}</b><em>${esc(it.title)}</em>` : esc(t)}</span>
+    ${it.q && questOf(it.q) ? `<button class="q-look" data-act="quest-open" data-q="${esc(it.q)}">Casebook</button>` : ""}</div>`;
+}
+
+function leadNewsHTML(it) {
+  const q = questOf(it.q);
+  const open = q && q.status === "offered" && q.can_take && !q.aside;
+  const state = !q ? "" : q.mine ? "You took it on" : q.aside ? "Set aside for now" : q.status !== "offered" ? "Others are on it" : "";
+  return `<article class="ev-lead"><span class="stamp">New lead</span>
+    <div class="lead-b"><span class="ty-k">${esc(q ? qStamp(q) : "A lead")}${q?.giver_name ? ` · ${esc(q.giver_name)}` : ""}</span>
+      <b>${esc(it.title)}</b>
+      ${it.lead || q?.lead ? `<p>${esc(it.lead || q.lead)}</p>` : ""}
+      ${q?.objectives?.length ? `<span class="lead-first"><i></i>${esc(q.objectives[0].text)}${q.steps > 1 ? ` <em>+${q.steps - 1} more</em>` : ""}</span>` : ""}
+      ${open ? `<div class="lead-acts"><button class="btn primary" data-act="quest" data-op="take" data-q="${esc(q.id)}">Take it on</button><button class="btn" data-act="quest" data-op="aside" data-q="${esc(q.id)}">Not now</button><button class="q-look" data-act="quest-open" data-q="${esc(q.id)}">Read it</button></div>`
+        : state ? `<span class="ty-k lead-state">${esc(state)}</span>` : ""}
+    </div></article>`;
+}
+
 function questsTab() {
-  const qs = S.view.quests.filter(q => q.status !== "available" || q.is_main).sort((a, b) => (a.status === "completed") - (b.status === "completed") || b.is_main - a.is_main);
-  if (!qs.length) return none("No quests yet. Talk to people and they will ask things of you.");
-  return qs.map(q => `<div class="quest ${q.status === "completed" || q.status === "failed" ? "done-q" : ""}">
-    <span class="mono-k">${q.is_main ? "Main quest" : "Side quest"}${q.giver_name ? ` · from ${esc(q.giver_name)}` : ""}${q.status !== "active" ? ` · ${esc(q.status.replace("_", " "))}` : ""}</span>
-    <span class="q-title">${esc(q.title)}</span>
+  const qs = S.view.quests || [];
+  if (!qs.length) return none("Nothing in the casebook yet. Listen to people, read what you find and ask what is troubling them: leads come out of the story.");
+  const yours = qs.filter(q => (q.mine || q.is_main) && !qClosed(q)).sort((a, b) => b.tracked - a.tracked || b.is_main - a.is_main);
+  const leads = qs.filter(q => q.status === "offered" && !q.aside && !q.mine);
+  const friends = qs.filter(q => !q.mine && !q.is_main && (q.status === "active" || q.status === "completed"));
+  const aside = qs.filter(q => q.status === "offered" && q.aside);
+  const closed = qs.filter(qClosed);
+  const sec = (title, list, note, mode) => list.length ? `<section class="qsec ${mode}"><p class="sh">${title}<span>${list.length}</span></p>${note ? `<p class="qsec-note">${note}</p>` : ""}${list.map(q => questCardHTML(q, mode)).join("")}</section>` : "";
+  return `<div class="qlog">
+    ${sec("On your hands", yours, "", "yours")}
+    ${sec("Leads", leads, "Heard of, not taken on. Take one on and its steps start counting for you.", "leads")}
+    ${sec("Friends’ business", friends, "Quests friends are on. Join them and the steps count for you too.", "friends")}
+    ${aside.length ? `<details class="qsec aside"><summary class="sh">Set aside<span>${aside.length}</span></summary>${aside.map(q => questCardHTML(q, "aside")).join("")}</details>` : ""}
+    ${closed.length ? `<details class="qsec closed"><summary class="sh">Settled<span>${closed.length}</span></summary>${closed.map(q => questCardHTML(q, "closed")).join("")}</details>` : ""}
+  </div>`;
+}
+
+function questCardHTML(q, mode) {
+  const found = [q.found_day ? `Day ${q.found_day}` : "", q.found_at].filter(Boolean).join(" · ");
+  const steps = q.objectives.map(o => `<li class="${o.done ? "done" : o.next ? "next" : ""}"><i></i><span class="st">${esc(o.text)}</span>${o.done
+    ? `<em>${esc(["✓", o.done_day ? `Day ${o.done_day}` : "", o.done_by].filter(Boolean).join(" · "))}</em>`
+    : o.next && mode !== "leads" && mode !== "aside" ? `<em class="now">${esc(o.where ? (o.where === S.view.location?.name ? "You are here" : o.where) : "Next")}</em>` : ""}</li>`).join("");
+  const hidden = q.is_main && q.objectives.length < q.steps ? `<li class="later"><i></i><span class="st">${q.steps - q.objectives.length} more, not yet known</span></li>` : "";
+  const reward = [q.reward_gold && `${q.reward_gold} gold`, q.reward_xp && `${q.reward_xp} XP`, ...(q.reward_items || [])].filter(Boolean).join(" · ");
+  const pays = q.giver_name ? `${q.status === "completed" ? "Go back to" : "Answers to"} ${q.giver_name}${q.giver_here ? " (here)" : q.giver_at ? `, at ${q.giver_at}` : ""}` : q.is_main ? "" : "Nobody asked: it pays out when it is done";
+  const who = q.takers?.length ? `On it: ${list(q.takers)}` : "";
+  const acts = [];
+  if (q.can_take) acts.push(`<button class="btn primary" data-act="quest" data-op="take" data-q="${esc(q.id)}">${q.status === "active" ? "Join them" : "Take it on"}</button>`);
+  if (mode === "leads" && q.can_take) acts.push(`<button class="btn" data-act="quest" data-op="aside" data-q="${esc(q.id)}">Not now</button>`);
+  if (q.mine && !q.tracked && !qClosed(q)) acts.push(`<button class="q-act" data-act="quest" data-op="track" data-q="${esc(q.id)}">Follow</button>`);
+  if (q.tracked && !q.is_main) acts.push(`<span class="q-act on">Following</span>`);
+  if (q.can_tell && S.view.party?.length > 1) acts.push(`<button class="q-act" data-act="quest" data-op="tell" data-q="${esc(q.id)}">Tell the others</button>`);
+  if (q.mine && !q.is_main && q.status === "active") acts.push(`<button class="q-act quiet" data-act="quest" data-op="drop" data-q="${esc(q.id)}">Give it up</button>`);
+  return `<article class="qcard ${mode} ${q.tracked ? "tracked" : ""} ${q.status === "completed" ? "ready" : ""}" id="q-${esc(q.id)}">
+    <header><span class="stamp src-${esc(q.is_main ? "main" : q.source || "offered")}">${esc(qStamp(q))}</span>${q.personal ? `<span class="ty-k">Yours alone</span>` : ""}${found ? `<span class="ty-k">${esc(found)}</span>` : ""}${q.steps ? pipsHTML(q) : ""}</header>
+    <h3 class="q-title">${esc(q.title)}</h3>
+    ${q.lead ? `<p class="q-lead">${esc(q.lead)}</p>` : ""}
     ${q.summary ? `<p class="q-sum">${esc(q.summary)}</p>` : ""}
-    ${q.objectives.map(o => `<div class="obj ${o.done ? "done" : ""}"><i></i><span>${esc(o.text)}</span></div>`).join("")}
-    ${q.reward_gold || q.reward_xp ? `<span class="reward">Reward ${[q.reward_gold && q.reward_gold + " gold", q.reward_xp && q.reward_xp + " XP"].filter(Boolean).join(" · ")}</span>` : ""}
-  </div>`).join("");
+    ${mode === "closed" ? "" : `<ol class="steps">${steps}${hidden}</ol>`}
+    <footer class="q-foot">
+      ${[pays, who, reward && `Reward ${reward}`].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join("")}
+      ${acts.length ? `<div class="q-acts">${acts.join("")}</div>` : ""}
+    </footer>
+  </article>`;
+}
+
+async function questMove(qid, op, t) {
+  if (t) t.disabled = true;
+  try {
+    const r = await api("POST", `/campaigns/${S.route}/quests/${encodeURIComponent(qid || "-")}/${op}`, {});
+    S.view = r.campaign;
+    S.journal = null;
+    if (op === "take") toast(`Taken on. Its steps count for you now.`);
+    if (op === "tell") toast("Told.");
+    renderChrome(); renderFeed();
+  } catch (e) { toast(e.message); if (t) t.disabled = false; }
+}
+
+function openQuest(qid) {
+  J.tab = "quests"; J.q = "";
+  if (S.panel !== "journal") openPanel("journal"); else refreshJournal();
+  if (qid) requestAnimationFrame(() => { const el = document.getElementById("q-" + qid); if (el) { el.scrollIntoView({ block: "start", behavior: "smooth" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1400); } });
 }
 
 function peopleTab(j) {
@@ -2849,6 +2990,9 @@ document.addEventListener("click", async e => {
         return restartFeed();
       case "dm": case "dm-give": return dmAct(ds, t);
       case "jtab": J.tab = ds.k; J.q = ""; J.editing = ""; return refreshJournal();
+      case "quest": return questMove(ds.q, ds.op, t);
+      case "quest-open": return openQuest(ds.q);
+      case "quest-leads": { const l = leadsOf()[0]; return openQuest(l?.id); }
       case "note-edit": J.editing = ds.id; refreshJournal(); return $("#n-edit")?.focus();
       case "note-cancel": J.editing = ""; return refreshJournal();
       case "note-del":

@@ -330,10 +330,16 @@ type ConditionView struct {
 }
 
 type ObjectiveView struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
-	Text string `json:"text"`
-	Done bool   `json:"done"`
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Text    string `json:"text"`
+	Done    bool   `json:"done"`
+	DoneDay int    `json:"done_day,omitempty"`
+	DoneBy  string `json:"done_by,omitempty"`
+	// Next marks the step to do now.
+	Next bool `json:"next,omitempty"`
+	// Where is the place a reach step points to, when it is known.
+	Where string `json:"where,omitempty"`
 }
 
 type QuestView struct {
@@ -348,6 +354,22 @@ type QuestView struct {
 	RewardGold  int             `json:"reward_gold"`
 	RewardXP    int             `json:"reward_xp"`
 	RewardItems []string        `json:"reward_items,omitempty"`
+	// The quest log, as the viewing character sees it.
+	Source    string   `json:"source,omitempty"` // offered, overheard, found, rumor
+	Lead      string   `json:"lead,omitempty"`
+	FoundAt   string   `json:"found_at,omitempty"` // place name
+	FoundDay  int      `json:"found_day,omitempty"`
+	Personal  bool     `json:"personal,omitempty"`
+	GiverAt   string   `json:"giver_at,omitempty"` // where the giver is
+	GiverHere bool     `json:"giver_here,omitempty"`
+	Takers    []string `json:"takers,omitempty"` // names of who is on it
+	Mine      bool     `json:"mine"`             // the viewer is on it
+	Aside     bool     `json:"aside,omitempty"`  // the viewer set it aside
+	Tracked   bool     `json:"tracked,omitempty"`
+	CanTake   bool     `json:"can_take,omitempty"`
+	CanTell   bool     `json:"can_tell,omitempty"`
+	Steps     int      `json:"steps"`
+	StepsDone int      `json:"steps_done"`
 }
 
 type PlayerView struct {
@@ -782,43 +804,88 @@ func locationView(w *game.World, l *game.Location, detail bool) LocationView {
 	return v
 }
 
-func questVisible(w *game.World, q *game.Quest) bool {
-	if q.Status != game.QuestOffered {
-		return true
+func questVisible(w *game.World, q *game.Quest, me *game.Character) bool {
+	if me == nil {
+		// no character yet: what the old shared log would show
+		return game.KnowsQuest(w, q, nil) || q.Status != game.QuestOffered && !q.Logged
 	}
-	g := w.NPC(q.GiverID)
-	if g == nil {
-		return false
-	}
-	l := w.Location(g.LocationID)
-	return l != nil && l.Visited
+	return game.KnowsQuest(w, q, me)
 }
 
-func questView(w *game.World, q *game.Quest) QuestView {
+func questView(w *game.World, q *game.Quest, me *game.Character) QuestView {
 	v := QuestView{ID: q.ID, Title: q.Title, Summary: q.Summary, IsMain: q.IsMain, Status: q.Status, GiverID: q.GiverID,
-		RewardGold: q.RewardGold, RewardXP: q.RewardXP, Objectives: []ObjectiveView{}}
+		RewardGold: q.RewardGold, RewardXP: q.RewardXP, Objectives: []ObjectiveView{},
+		Source: q.Source, Lead: q.Lead, FoundDay: q.FoundDay, Personal: q.Personal}
 	if g := w.NPC(q.GiverID); g != nil {
 		v.GiverName = g.Name
-	}
-	for _, o := range q.Objectives {
-		v.Objectives = append(v.Objectives, ObjectiveView{ID: o.ID, Kind: o.Kind, Text: o.Text, Done: o.Done})
-		if q.IsMain && !o.Done {
-			break // later storyline steps stay hidden until reached
+		if l := w.Location(g.LocationID); l != nil && g.Alive {
+			v.GiverAt = l.Name
 		}
+		v.GiverHere = g.Alive && g.LocationID == w.Campaign.LocationID
+	}
+	if l := w.Location(q.FoundAt); l != nil {
+		v.FoundAt = l.Name
+	}
+	next := false
+	for _, o := range q.Objectives {
+		v.Steps++
+		ov := ObjectiveView{ID: o.ID, Kind: o.Kind, Text: o.Text, Done: o.Done, DoneDay: o.DoneDay, DoneBy: o.DoneBy}
+		if o.Done {
+			v.StepsDone++
+		} else if !next {
+			ov.Next, next = true, true
+		}
+		if o.Kind == game.ObjReachLocation {
+			if l := w.Location(o.Target); l != nil && l.Visited {
+				ov.Where = l.Name
+			}
+		}
+		if q.IsMain && !o.Done && !ov.Next {
+			continue // later storyline steps stay hidden until reached
+		}
+		v.Objectives = append(v.Objectives, ov)
 	}
 	for _, id := range q.RewardItems {
 		if it := w.Item(id); it != nil {
 			v.RewardItems = append(v.RewardItems, it.Name)
 		}
 	}
+	if !q.IsMain {
+		for _, id := range q.Takers {
+			for _, c := range w.Everyone() {
+				if c.ID == id {
+					v.Takers = append(v.Takers, c.Name)
+				}
+			}
+		}
+	}
+	v.Mine = game.OnQuest(q, me)
+	if me != nil {
+		v.Aside = containsStr(q.SetAside, me.ID)
+		v.Tracked = me.Tracked == q.ID
+		live := q.Status == game.QuestOffered || q.Status == game.QuestActive
+		v.CanTake = !q.IsMain && live && !v.Mine && !(q.Personal && len(q.Takers) > 0) && !(q.Status == game.QuestActive && len(q.Takers) == 0)
+		v.CanTell = !q.IsMain && !q.Personal && q.Logged && live
+	}
 	return v
 }
 
-func questsView(w *game.World) []QuestView {
+func containsStr(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// questsView is the viewer's quest log: the storyline, and the side
+// quests their character has heard of.
+func questsView(w *game.World, me *game.Character) []QuestView {
 	out := []QuestView{}
 	for _, q := range w.Quests {
-		if questVisible(w, q) {
-			out = append(out, questView(w, q))
+		if questVisible(w, q, me) {
+			out = append(out, questView(w, q, me))
 		}
 	}
 	return out
@@ -842,7 +909,7 @@ func campaignView(w *game.World, playerID string) CampaignView {
 	v := CampaignView{ID: c.ID, Title: c.Title, Pitch: c.Pitch, Premise: c.Premise, Setting: w.Setting(), Status: c.Status, Turn: c.Turn,
 		Setbacks: c.Setbacks, MaxSetbacks: c.MaxSetbacks, MaxPlayers: c.MaxPlayers,
 		Scene: SceneView{Day: c.Scene.Day, Time: c.Scene.TimeName(), Tension: c.Scene.Tension, Goal: c.Scene.Goal},
-		Party: []CharacterView{}, Players: []PlayerView{}, Quests: questsView(w), Encounter: encounterView(w)}
+		Party: []CharacterView{}, Players: []PlayerView{}, Quests: questsView(w, w.CharacterOf(playerID)), Encounter: encounterView(w)}
 	if c.Status != game.StatusLobby {
 		if l := w.Here(); l != nil {
 			lv := locationView(w, l, true)
@@ -1037,10 +1104,10 @@ type JournalPlace struct {
 // journalPeople lists the NPCs a player may see: those at visited places,
 // with the antagonist only while the party faces them (as in npcView).
 // People nearby come first, then the most recently spoken to.
-func journalPeople(w *game.World) []JournalPerson {
+func journalPeople(w *game.World, me *game.Character) []JournalPerson {
 	gave := map[string][]string{}
 	for _, q := range w.Quests {
-		if q.GiverID != "" && questVisible(w, q) {
+		if q.GiverID != "" && questVisible(w, q, me) {
 			gave[q.GiverID] = append(gave[q.GiverID], q.Title)
 		}
 	}

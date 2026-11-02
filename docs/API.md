@@ -129,7 +129,8 @@ they/them, and drafts fill it from the concept.
 | `GET /campaigns/{id}/map` | any caller | Known places and passable/locked paths only. |
 | `GET /campaigns/{id}/locations/{lid}` | any caller | A visited or known location; 404 otherwise. |
 | `GET /campaigns/{id}/npcs/{nid}` | any caller | Public NPC view and merchant stock. |
-| `GET /campaigns/{id}/quests` | any caller | `{quests: [...]}` |
+| `GET /campaigns/{id}/quests` | any caller | `{quests: [...]}`: the caller's quest log (storyline plus side quests their character has heard of) |
+| `POST /campaigns/{id}/quests/{qid}/{op}` | seated player | `op` is `take`, `drop`, `aside` (not now), `tell` (pass a party quest on to friends standing with you) or `track` (`qid` `-` follows the storyline). Free, no turn. Returns `{campaign}` |
 | `GET /campaigns/{id}/journal` | any caller | `{summary, chronicle: [{id, turn, day, kind, text, location_id, npc_ids, source, quest_id, status, outcome}], quests, setbacks, people, places}`; `kind` is fact, deed, death, promise or rumor; promises have `status` open, kept or broken. See Journal. |
 | `GET /campaigns/{id}/notes` | joined player | `{notes: [{id, text, turn, day, time, created_at, updated_at}]}`, the caller's own notes, oldest first. |
 | `POST /campaigns/{id}/notes` | joined player | `{text}` → 201 note, stamped with the current turn, day and time of day. |

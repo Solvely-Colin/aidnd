@@ -681,7 +681,7 @@ func TestObjectiveJudge(t *testing.T) {
 	q, err := game.AddQuest(w, game.QuestSpec{Title: "Word to the Elder", GiverID: "Elder Corbin",
 		Objectives: []game.ObjectiveSpec{{Kind: game.ObjFreeform, Text: "Warn the town about the bell"}}}, false)
 	must(t, err)
-	_, err = game.AcceptQuest(w, q.ID)
+	_, _, err = game.AcceptQuest(w, q.ID, w.Characters[0])
 	must(t, err)
 	_, err = r.g.Store.Save(bg, w)
 	must(t, err)
@@ -1106,7 +1106,7 @@ func TestLookAtSomethingAbsentOrSomeone(t *testing.T) {
 	corbin := w.NPC("Elder Corbin")
 	q, err := game.AddQuest(w, game.QuestSpec{Title: "See him", GiverID: "Tamsin Hale", Objectives: []game.ObjectiveSpec{{Kind: game.ObjTalkToNPC, Text: "Examine Corbin", Target: corbin.ID}}}, false)
 	must(t, err)
-	_, err = game.AcceptQuest(w, q.ID)
+	_, _, err = game.AcceptQuest(w, q.ID, w.Characters[0])
 	must(t, err)
 	_, err = r.g.Store.Save(bg, w)
 	must(t, err)

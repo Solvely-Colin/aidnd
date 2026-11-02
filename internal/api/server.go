@@ -105,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /campaigns/{id}/locations/{lid}", s.auth(s.handleLocation))
 	mux.HandleFunc("GET /campaigns/{id}/npcs/{nid}", s.auth(s.handleNPC))
 	mux.HandleFunc("GET /campaigns/{id}/quests", s.auth(s.handleQuests))
+	mux.HandleFunc("POST /campaigns/{id}/quests/{qid}/{op}", s.auth(s.handleQuestAct))
 	mux.HandleFunc("GET /campaigns/{id}/journal", s.auth(s.handleJournal))
 	mux.HandleFunc("GET /campaigns/{id}/notes", s.auth(s.handleNotes))
 	mux.HandleFunc("POST /campaigns/{id}/notes", s.auth(s.handleAddNote))
@@ -723,7 +724,7 @@ func (s *Server) handleQuests(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"quests": questsView(wld)})
+	writeJSON(w, 200, map[string]any{"quests": questsView(wld, wld.CharacterOf(whoFrom(r).PlayerID))})
 }
 
 func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
@@ -732,8 +733,9 @@ func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	j := JournalView{Summary: wld.Campaign.Summary, Chronicle: wld.Chronicle, Quests: questsView(wld), Setbacks: wld.Campaign.Setbacks,
-		People: journalPeople(wld), Places: journalPlaces(wld)}
+	me := wld.CharacterOf(whoFrom(r).PlayerID)
+	j := JournalView{Summary: wld.Campaign.Summary, Chronicle: wld.Chronicle, Quests: questsView(wld, me), Setbacks: wld.Campaign.Setbacks,
+		People: journalPeople(wld, me), Places: journalPlaces(wld)}
 	if j.Chronicle == nil {
 		j.Chronicle = []game.ChronicleEntry{}
 	}
@@ -902,6 +904,25 @@ func (s *Server) loadFor(r *http.Request) (*game.World, error) {
 		return nil, err
 	}
 	return wld, wld.FocusPlayer(whoFrom(r).PlayerID)
+}
+
+// handleQuestAct is a casebook move on one quest: take, drop, aside,
+// tell or track.
+func (s *Server) handleQuestAct(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	qid := r.PathValue("qid")
+	if qid == "-" {
+		qid = "" // track nothing: follow the storyline
+	}
+	wld, err := s.gm.QuestAct(r.Context(), r.PathValue("id"), p, qid, r.PathValue("op"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
 }
 
 // handleSolo splits the player's character off to go on alone.

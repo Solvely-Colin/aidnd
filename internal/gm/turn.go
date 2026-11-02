@@ -242,6 +242,7 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 		game.NoteActed(w, g.Now().Unix())
 	}
 	quick := res.AllFree && !res.TurnEnded
+	questsBefore := len(w.Quests)
 	g.progress(campaignID, "narrating", map[string]any{"character_id": actor.ID, "rolls": res.Rolls()})
 	out := &TurnResult{Resolution: res, Quick: quick, Skipped: res.Skipped}
 	// 3. direct
@@ -270,6 +271,12 @@ func (g *GM) resolveTurn(ctx context.Context, w *game.World, actor *game.Charact
 		evs = append(evs, g.vision(ctx, w)...)
 	}
 	quests := append([]game.QuestUpdate{}, res.Quests...)
+	// side quests the story just turned up are new leads in the casebook
+	for _, q := range w.Quests[min(questsBefore, len(w.Quests)):] {
+		if up, ok := game.NewLead(w, q, actor); ok {
+			quests = append(quests, up)
+		}
+	}
 	// 5. judge freeform objectives
 	if !quick && w.Campaign.Status == game.StatusActive && (w.Campaign.Turn+1)%g.Cfg.ObjectiveCheckEvery == 0 {
 		ups, ch := g.judge(ctx, w, recentText+"\n"+nar.Text)

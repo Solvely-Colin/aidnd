@@ -395,3 +395,19 @@ A friend can join a campaign that is already under way (`game/catchup.go`, `gm/d
 - **Their story:** a first record choice ("Threw in with ... at ...") and a chronicle deed. One starting goal: the narrator's `GOAL:` line from the arrival (life-checked by the canon guard), else "Earn the trust of ...". They start caught up for the "while you were away" letter.
 - **Story so far:** a private `catch_up` event from engine state only: the pitch, the running summary, the storyline and its next step, other active quests, who they're with and how they are, who else is there, the fight, open promises and the newest chronicle facts.
 - **Arrival:** one narration (`narrate_arrival`) that brings them in without anyone acting, canon-guarded like every narration, with plain engine text as the fallback.
+
+## Quest log (2026-11-02)
+
+Quests are still world rows (the DB is the truth), but each character keeps their own log. `QuestExtra` (the quest's `extra` column) holds:
+
+- `source` (offered, overheard, found, rumor) and a one-line `lead` saying how it was come by, plus where and on which day.
+- `known`: who has heard of it. Everyone in the group present when it comes up hears of it; talking to a giver who has a quest on offer tells that character; picking up the thing an unheard quest is after tells the group standing there (`discoverByFinding`). Friends can pass a party quest on to whoever stands with them (`tell`).
+- `takers`: who took it on. Taking on (button, or `accept_quest` in the story) puts the character and the group members with them who know of it on the quest. Joining an active quest adds you. Dropping takes you off; when the last one drops it the quest is a lead again and the promise to its giver is broken.
+- `set_aside`: "not now". Nobody who set a lead aside is put on it by PR #44's take-up-on-arrival rule.
+- `personal`: one character's alone (a letter addressed to them). It cannot be told or joined.
+
+Steps only move forward from what a taker's group does (`QuestHere`): reach steps need a taker standing there (the old `Visited` shortcut is kept only for the storyline and old quests), the freeform judge only sees quests the group is on, and quest foes only appear for them. Each step records `done_day` and `done_by`. Step and completion XP go to the takers wherever they are, rewards to whoever turns it in (a taker).
+
+The storyline is everyone's. Quests saved before the log have no `logged` flag and behave as before: everyone knows them once the giver's place is visited, and an active one is everyone's. Dropping or setting one aside first turns it into a kept list.
+
+The narrator has `discover_quest` (overheard, found, rumor; no giver needed, pays out on completion) alongside `offer_quest`; a group may have 4 open side quests. Its STATE splits quests into on offer here, LEADS, ACTIVE (this group's) and ones other players are on. `quest_updated` events carry `kind` (lead, taken, step, done, turned_in, dropped) and `characters` (who the news is for); the feed shows a lead as a card with Take it on / Not now. Casebook moves are `POST /campaigns/{id}/quests/{qid}/{take|drop|aside|tell|track}`.

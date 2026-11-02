@@ -192,7 +192,7 @@ func BuildCatchUp(w *World, c *Character) *CatchUp {
 		}
 	}
 	for _, q := range w.Quests {
-		if !q.IsMain && q.Status == QuestActive {
+		if !q.IsMain && q.Status == QuestActive && QuestHere(w, q) {
 			add(CatchQuest, "Also: "+q.Title+".")
 		}
 	}
