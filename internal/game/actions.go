@@ -152,6 +152,9 @@ type Ctx struct {
 	OnArrive func(loc *Location)
 	// Ambush supplies enemies for a random encounter at loc.
 	Ambush func(loc *Location) []EnemySpec
+	// Visitor supplies what comes for a quest's night watch at loc; why is
+	// the step's text.
+	Visitor func(loc *Location, why string) []EnemySpec
 	// Leaving is called outside a fight once c's move to another place has
 	// been checked and is about to happen. It may refocus the world on a
 	// new group so that only some of the party goes (see gm leaveAlone).
@@ -265,6 +268,9 @@ func Resolve(ctx *Ctx, actor *Character, actions []Action) *Resolution {
 		if w.Encounter != nil && len(w.Encounter.Living()) == 0 {
 			st.Changes = append(st.Changes, endEncounter(w)...)
 			st.CombatEnded = true
+			ups, ch := EvaluateQuests(w) // a won night watch ticks now
+			st.Quests = append(st.Quests, ups...)
+			st.Changes = append(st.Changes, ch...)
 		}
 		if !wasCombat && w.InCombat() {
 			st.CombatStarted = true
@@ -1171,6 +1177,7 @@ func endEncounter(w *World) []string {
 	encID := ""
 	if w.Encounter != nil {
 		encID = w.Encounter.ID
+		changes = append(changes, nightWatchWon(w, w.Encounter)...)
 	}
 	w.Encounter = nil
 	ClearFightConditions(w)
@@ -1432,6 +1439,12 @@ func rest(ctx *Ctx, c *Character, a Action, st *Step) error {
 		return fmt.Errorf("you can't rest during a fight")
 	}
 	l := w.Here()
+	if a.Method == RestNight || l.Danger == 0 {
+		if q, o := NightWatch(w, l); q != nil {
+			nightVisit(ctx, l, q, o, st)
+			return nil
+		}
+	}
 	if l.Danger > 0 && a.Method == RestNight {
 		sleepRough(ctx, l, st)
 		return nil
