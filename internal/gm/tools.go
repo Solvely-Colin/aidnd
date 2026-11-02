@@ -101,7 +101,8 @@ func interpreterTools() []llm.Tool {
 		tool(game.ActPickUp, "ACTION. Pick up an item from the ground.", obj(map[string]any{"item": str("item id from GROUND")}, "item")),
 		tool(game.ActGiveItem, "ACTION. Hand a carried item to a party member or an NPC here.", obj(map[string]any{
 			"item": str("item id from INVENTORY"), "to": str("party member id or NPC id")}, "item", "to")),
-		tool(game.ActRest, "ACTION. Rest the party (not in combat). Full rest only in safe places.", obj(map[string]any{})),
+		tool(game.ActRest, "ACTION. Rest the party (not in combat). A safe place always gives a full night's rest. Elsewhere a rest is short unless the player beds down for the night.", obj(map[string]any{
+			"length": enum("short for a breather of an hour or so; night when the player sleeps, beds down or spends the night (a long rest, which at an unsafe place may be broken by what comes in the dark)", game.RestShort, game.RestNight)})),
 		tool(game.ActDodge, "ACTION, combat only. Dodge: focus on defense; attacks against the character have disadvantage until their next turn.", obj(map[string]any{})),
 		tool(game.ActDisengage, "ACTION, combat only. Disengage: back off carefully so leaving an enemy's zone this turn draws no opportunity attacks. Usually followed by a reposition.", obj(map[string]any{})),
 		tool(game.ActHelp, "ACTION. Help a party member: they get advantage on their next attack or check (in combat they must share the zone).", obj(map[string]any{
@@ -123,7 +124,7 @@ var skillEnum = enum("the skill the check uses (it sets the ability): athletics 
 func toAction(tc llm.ToolCall) (game.Action, error) {
 	var a struct {
 		Target, Weapon, Method, Ability, Skill, Purpose, Text, Item, Exit, Zone, Destination, NPC, Quest, To, Promise string
-		Spell, Feature, Option                                                                                        string
+		Spell, Feature, Option, Length                                                                                string
 		DC, Level, Amount                                                                                             int
 	}
 	if err := tc.Decode(&a); err != nil {
@@ -166,6 +167,8 @@ func toAction(tc llm.ToolCall) (game.Action, error) {
 		act.Target = firstOf(a.Quest, a.Target)
 	case game.ActGiveItem:
 		act.Item, act.Target = a.Item, firstOf(a.To, a.Target)
+	case game.ActRest:
+		act.Method = a.Length
 	}
 	return act, nil
 }

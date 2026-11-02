@@ -1875,6 +1875,7 @@ function trays() {
   for (const i of loc.items || []) if (!enc || b.free !== 0) g.use.items.push({ name: `Take the ${i.name}`, sub: i.rarity ? `${i.rarity.replace("_", " ")} magic · ${i.magic}` : "on the ground", send: `I pick up ${the(i.name)}` });
   for (const i of me.inventory || []) if (i.kind === "consumable") g.use.items.push({ name: i.name, sub: effectText(i.effect), send: `I use the ${i.name}` });
   if (me.hp < me.max_hp && !enc) g.use.items.push({ name: "Rest a while", sub: "recover", send: "I rest for a while" });
+  if (!enc) g.use.items.push({ name: "Sleep the night", sub: "long rest", send: "I bed down and sleep through the night" });
   magicTrays(g, me);
   if (S.tray === "next" && S._next) g.next = S._next;
   return g;
@@ -2162,7 +2163,11 @@ function sceneHTML(inPlate) {
 function topics(n) {
   const v = S.view, out = [];
   const given = (v.quests || []).filter(q => q.giver_name === n.name && q.status !== "completed");
-  given.forEach(q => out.push({ key: "q" + q.id, label: q.title, ask: `about ${q.title.toLowerCase().replace(/^the /, "the ")}` }));
+  given.forEach(q => {
+    out.push({ key: "q" + q.id, label: q.title, ask: `about ${q.title.toLowerCase().replace(/^the /, "the ")}` });
+    // an offer only counts once it is taken up, so say so plainly
+    if (q.status === "offered") out.push({ key: "a" + q.id, label: `Take on ${q.title}`, say: `I accept the quest "${q.title}" from ${n.name}` });
+  });
   const main = (v.quests || []).find(q => q.id === v.storyline && q.status === "active") || (v.quests || []).find(q => q.is_main && q.status === "active");
   if (main && !given.includes(main)) out.push({ key: "main", label: main.title, ask: `about ${main.title.replace(/^The /, "the ")}` });
   out.push({ key: "want", label: "What they want", ask: "what they want" });
@@ -2202,7 +2207,7 @@ function askTopic(key) {
   const t = n && topics(n).find(x => x.key === key);
   if (!t) return;
   S.asked[n.id + key] = true;
-  send(`I ask ${n.name} ${t.ask}`, { target_id: n.id });
+  send(t.say || `I ask ${n.name} ${t.ask}`, { target_id: n.id });
 }
 
 // character sheet: yours to act from, the rest of the party read-only

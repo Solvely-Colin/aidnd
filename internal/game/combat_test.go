@@ -307,6 +307,37 @@ func TestRest(t *testing.T) {
 	}
 }
 
+// Sleeping the night somewhere unsafe is a long rest unless something
+// comes; a plain rest there stays short.
+func TestSleepTheNightAtADangerousPlace(t *testing.T) {
+	f := newFixture(t)
+	f.goTo(f.wood, 0)
+	f.aria.HP = 1
+	f.w.Campaign.Scene.Time = 1
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	r := Resolve(f.ctx(100, 100), f.aria, []Action{{Kind: ActRest}})
+	if f.aria.HP == f.aria.MaxHP || f.w.Campaign.Scene.Day != 0 || !hasChange(r, "short rest") {
+		t.Fatalf("plain rest in the wood: hp %d/%d day %d %v", f.aria.HP, f.aria.MaxHP, f.w.Campaign.Scene.Day, r.Changes)
+	}
+	f.aria.HP = 1
+	f.aria.Strain = 2
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	r = Resolve(f.ctx(100), f.aria, []Action{{Kind: ActRest, Method: RestNight}})
+	if f.aria.HP != f.aria.MaxHP || f.w.Campaign.Scene.Day != 1 || f.w.Campaign.Scene.Time != 0 || !hasChange(r, "sleeps the night") {
+		t.Fatalf("night in the wood: hp %d/%d day %d time %d %v %s", f.aria.HP, f.aria.MaxHP, f.w.Campaign.Scene.Day, f.w.Campaign.Scene.Time, r.Changes, stepErr(r, 0))
+	}
+	if f.aria.Strain != 2 {
+		t.Errorf("strain eased away from safety: %d", f.aria.Strain)
+	}
+	// woken: no rest, a fight at night
+	f.aria.HP = 1
+	f.w.Campaign.Turns.Budget = FullBudget(false)
+	r = Resolve(f.ctx(1), f.aria, []Action{{Kind: ActRest, Method: RestNight}})
+	if !f.w.InCombat() || f.aria.HP != 1 || f.w.Campaign.Scene.TimeName() != "night" || !hasChange(r, "comes in the night") {
+		t.Fatalf("woken: combat %v hp %d time %s %v", f.w.InCombat(), f.aria.HP, f.w.Campaign.Scene.TimeName(), r.Changes)
+	}
+}
+
 func TestEnemiesSpreadOverTheRound(t *testing.T) {
 	f := newFixture(t)
 	f.fight(t, 0, 0, wolf)
