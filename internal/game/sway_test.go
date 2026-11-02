@@ -159,3 +159,39 @@ func TestSuggestionHandsOver(t *testing.T) {
 		t.Fatalf("suggestion should get the quest item: %s", changes(st))
 	}
 }
+
+// Review follow-ups: the daily guard covers stealing, speaking or a failed
+// repeat sneak gives a sneak away, an omitted ability uses the purpose's,
+// and mind spells respect range.
+func TestSwayReviewFollowUps(t *testing.T) {
+	f := newFixture(t)
+	NewItem(f.w, "healing_potion", Owner{Kind: OwnerNPC, ID: f.elder.ID})
+	swayRun(f, f.ctx(2), f.bram, Action{Kind: ActCheck, Purpose: "steal", Target: f.elder.ID})
+	if st := swayRun(f, f.ctx(20), f.bram, Action{Kind: ActCheck, Purpose: "steal", Target: f.elder.ID}); st.OK {
+		t.Fatal("a second theft attempt the same day should be refused")
+	}
+
+	swayRun(f, f.ctx(18), f.aria, Action{Kind: ActCheck, Purpose: "sneak"})
+	if !f.aria.Conditions.Has(CondHidden) {
+		t.Fatal("sneak should hide")
+	}
+	tendRun(f, f.ctx(), f.aria, []Action{{Kind: ActSay, Text: "Over here!"}})
+	if f.aria.Conditions.Has(CondHidden) {
+		t.Fatal("shouting should give the sneak away")
+	}
+	swayRun(f, f.ctx(18), f.aria, Action{Kind: ActCheck, Purpose: "sneak"})
+	swayRun(f, f.ctx(1), f.aria, Action{Kind: ActCheck, Purpose: "sneak"})
+	if f.aria.Conditions.Has(CondHidden) {
+		t.Fatal("a failed sneak should leave them seen")
+	}
+
+	st := swayRun(f, f.ctx(15), f.bram, Action{Kind: ActCheck, Purpose: "persuade", Target: f.elder.ID})
+	if !strings.Contains(st.Rolls[0].Label, "Persuasion") {
+		t.Fatalf("persuade with no ability should roll Persuasion: %s", st.Rolls[0].Label)
+	}
+
+	f.elder.ZoneID = f.hub.Zones[2].ID // two zones from the square
+	if _, err := spellNPC(f.w, f.aria, Action{Target: f.elder.ID}, "Suggestion", 1); err == nil {
+		t.Fatal("suggestion two zones away should be out of range")
+	}
+}

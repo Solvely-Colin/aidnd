@@ -477,7 +477,7 @@ func validateAction(w *game.World, c *game.Character, a *game.Action) string {
 			a.Skill = ""
 		}
 		if _, ok := game.ParseAbility(a.Ability); !ok {
-			a.Ability = "WIS"
+			a.Ability = "" // the engine picks the purpose's own ability (WIS for other)
 		}
 		if a.Target != "" {
 			if x := w.FindExit(l.ID, a.Target); x != nil {

@@ -306,11 +306,11 @@ func sneakDC(w *World) int {
 }
 
 func sneakResult(c *Character, ok bool, st *Step) {
+	c.Conditions.remove(CondHidden)
 	if !ok {
 		st.Changes = append(st.Changes, fmt.Sprintf("%s is noticed", c.Name))
 		return
 	}
-	c.Conditions.remove(CondHidden)
 	addStance(c, CondHidden, "sneaking")
 	st.Changes = append(st.Changes, fmt.Sprintf("%s moves unseen: until their next message ends, a fight that starts finds them hidden, and an ambush can't catch the party off guard", c.Name))
 }
@@ -351,7 +351,7 @@ type Charm struct {
 
 // spellNPC finds the NPC a mind spell targets; they must be here and not
 // fighting the party.
-func spellNPC(w *World, a Action, name string) (*NPC, error) {
+func spellNPC(w *World, c *Character, a Action, name string, reach int) (*NPC, error) {
 	n := socialNPC(w, a)
 	if n == nil {
 		if a.Target == "" {
@@ -365,6 +365,9 @@ func spellNPC(w *World, a Action, name string) (*NPC, error) {
 	}
 	if npcFoe(w, n) != nil {
 		return nil, fmt.Errorf("%s is fighting you; %s won't take hold in the fray", n.Name, name)
+	}
+	if l := w.Here(); l != nil && l.Zone(n.ZoneID) != nil && ZoneDistance(l, c.ZoneID, n.ZoneID) > reach {
+		return nil, fmt.Errorf("%s is too far away for %s; get closer", n.Name, name)
 	}
 	return n, nil
 }

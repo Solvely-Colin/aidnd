@@ -215,7 +215,7 @@ func planSpell(w *World, c *Character, s *SpellDef, a Action) (spellPlan, error)
 		p.zone = l.Zone(a.Zone).ID
 		return p, nil
 	case s.Key == "charm_person" || s.Key == "suggestion":
-		n, err := spellNPC(w, a, SpellName(s, w.Setting()))
+		n, err := spellNPC(w, c, a, SpellName(s, w.Setting()), reach)
 		p.npc = n
 		return p, err
 	case s.Kind == SpellUtility:

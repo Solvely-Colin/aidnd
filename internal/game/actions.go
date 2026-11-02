@@ -367,6 +367,9 @@ func execute(ctx *Ctx, c *Character, a Action, st *Step) error {
 			return fmt.Errorf("say what?")
 		}
 		st.Info = append(st.Info, fmt.Sprintf("%s says: %q", c.Name, trimTo(a.Text, 300)))
+		if !w.InCombat() {
+			c.Conditions.remove(CondHidden) // speaking up gives a sneak away
+		}
 		return nil
 	case ActEndTurn:
 		st.Changes = append(st.Changes, c.Name+" ends their turn")
@@ -1237,6 +1240,9 @@ func abilityCheck(ctx *Ctx, c *Character, a Action, st *Step) error {
 		it, err := stealTarget(w, n, a)
 		if err != nil {
 			return err
+		}
+		if triedToday(w, n, c, purpose) {
+			return fmt.Errorf("%s already tried to rob %s today; they are watching their things now", c.Name, n.Name)
 		}
 		swayed, lifted, fixedDC = n, it, stealDC(n, c)
 		if !ok {
