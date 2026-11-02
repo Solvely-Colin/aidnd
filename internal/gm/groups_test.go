@@ -122,3 +122,87 @@ func TestJoinSomeoneElsesFight(t *testing.T) {
 		t.Fatalf("C goes last and B's turn carries on: %v index %d %+v", o, w.Campaign.Turns.Index, w.Campaign.Turns.Budget)
 	}
 }
+
+// In async play a player's move takes only them: their friend stays where
+// they were. Once two players join up, they travel together.
+func TestAsyncMoveLeavesFriendsBehind(t *testing.T) {
+	r := newRig(t, 2, 1)
+	w := r.start(t)
+	w.Campaign.Async = true
+	x := w.FindExit(w.Here().ID, "Reedmarsh")
+	x.Edge.State = game.EdgeLocked
+	_, err := r.g.Store.Save(bg, w)
+	must(t, err)
+	hub := w.Here().ID
+	r.f.Default("narrate", llm.Text("The road bends."))
+
+	// a move that fails splits nobody off
+	r.act(t, "u2", "I head to the marsh", llm.Call("move", map[string]any{"exit": "Reedmarsh"}))
+	w = r.world(t)
+	if len(w.Campaign.Groups) != 0 || len(r.events(t, "group_split")) != 0 {
+		t.Fatal("a locked way must not split the group")
+	}
+	w.FindExit(hub, "Reedmarsh").Edge.State = game.EdgeOpen
+	_, err = r.g.Store.Save(bg, w)
+	must(t, err)
+
+	r.act(t, "u2", "I head to the marsh", llm.Call("move", map[string]any{"exit": "Reedmarsh"}))
+	w = r.world(t)
+	if w.Here().ID != hub {
+		t.Fatalf("Aria was carried along to %s", w.Here().Name)
+	}
+	if len(w.Campaign.Groups) != 1 || game.GroupOf(w.CharacterOf("u2")) == game.MainGroup {
+		t.Fatal("Bram should have gone off alone")
+	}
+	if game.GroupOf(w.CharacterOf("u1")) != game.MainGroup {
+		t.Fatal("Aria should stay in her group")
+	}
+	must(t, w.FocusPlayer("u2"))
+	if w.Here().Name != "Reedmarsh" {
+		t.Fatalf("Bram is at %s", w.Here().Name)
+	}
+	w.Settle()
+	splits := r.events(t, "group_split")
+	if len(splits) != 1 {
+		t.Fatalf("group_split events: %d", len(splits))
+	}
+	var d map[string]any
+	_ = json.Unmarshal(splits[0].Data, &d)
+	if d["location"] != "Harrowmere" || d["character_id"] != w.CharacterOf("u2").ID {
+		t.Fatalf("split event: %v", d)
+	}
+	for _, e := range r.events(t, "action_resolved") {
+		if strings.Contains(string(e.Data), "The party arrives") {
+			t.Fatalf("a lone traveller arrives as a party: %s", e.Data)
+		}
+	}
+
+	// Aria walks there too and joins up: she chose to go with Bram, so
+	// when he heads back to town she comes along
+	r.act(t, "u1", "I go to the marsh", llm.Call("move", map[string]any{"exit": "Reedmarsh"}))
+	solo := game.GroupOf(r.world(t).CharacterOf("u2"))
+	_, err = r.g.JoinGroup(bg, r.id, "u1", solo)
+	must(t, err)
+	r.act(t, "u2", "Back to town", llm.Call("move", map[string]any{"exit": "Harrowmere"}))
+	w = r.world(t)
+	if len(w.Campaign.Groups) != 0 || w.Here().ID != hub || len(w.Characters) != 2 {
+		t.Fatalf("Aria joined up and should come along: groups %d, at %s", len(w.Campaign.Groups), w.Here().Name)
+	}
+	// Bram never chose to follow her: her next move leaves him in town
+	r.act(t, "u1", "Off to the marsh", llm.Call("move", map[string]any{"exit": "Reedmarsh"}))
+	w = r.world(t)
+	if w.Here().ID != hub || len(w.Campaign.Groups) != 1 {
+		t.Fatalf("Bram was carried along: at %s, groups %d", w.Here().Name, len(w.Campaign.Groups))
+	}
+	// once he does choose it, he goes where she goes
+	r.act(t, "u2", "I follow", llm.Call("move", map[string]any{"exit": "Reedmarsh"}))
+	_, err = r.g.JoinGroup(bg, r.id, "u2", game.GroupOf(r.world(t).CharacterOf("u1")))
+	must(t, err)
+	_, err = r.g.SetTravelTogether(bg, r.id, "u2", true)
+	must(t, err)
+	r.act(t, "u1", "Back to town", llm.Call("move", map[string]any{"exit": "Harrowmere"}))
+	w = r.world(t)
+	if len(w.Campaign.Groups) != 0 || w.Here().ID != hub {
+		t.Fatalf("both chose to travel together: groups %d, at %s", len(w.Campaign.Groups), w.Here().Name)
+	}
+}

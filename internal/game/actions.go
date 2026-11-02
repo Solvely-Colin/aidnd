@@ -152,6 +152,10 @@ type Ctx struct {
 	OnArrive func(loc *Location)
 	// Ambush supplies enemies for a random encounter at loc.
 	Ambush func(loc *Location) []EnemySpec
+	// Leaving is called outside a fight once c's move to another place has
+	// been checked and is about to happen. It may refocus the world on a
+	// new group so that only some of the party goes (see gm leaveAlone).
+	Leaving func(c *Character) error
 }
 
 // SlotFor says what an action costs given the current situation. For
@@ -629,6 +633,11 @@ func moveThrough(ctx *Ctx, c *Character, ref string, st *Step) error {
 			return fmt.Errorf("the way to %s is locked; use a key or try an ability_check to open it", x.To.Name)
 		}
 	}
+	if !w.InCombat() && ctx.Leaving != nil {
+		if err := ctx.Leaving(c); err != nil {
+			return err
+		}
+	}
 	if w.InCombat() {
 		if c.ZoneID != x.Zone && x.Zone != "" {
 			return fmt.Errorf("to flee through %s you must stand in %s; reposition first", x.Label, ZoneName(here, x.Zone))
@@ -691,7 +700,11 @@ func arrive(ctx *Ctx, loc *Location, via *Edge, st *Step) {
 	s.Turns, s.Quiet, s.StartTurn, s.Goal = 0, 0, w.Campaign.Turn, ""
 	st.Arrived = loc.ID
 	if from != loc.ID {
-		st.Changes = append(st.Changes, fmt.Sprintf("The party arrives at %s (%s)", loc.Name, ZoneName(loc, zone)))
+		who := "The party arrives"
+		if p := w.Party(); len(p) == 1 {
+			who = p[0].Name + " arrives"
+		}
+		st.Changes = append(st.Changes, fmt.Sprintf("%s at %s (%s)", who, loc.Name, ZoneName(loc, zone)))
 	}
 	questFoes(ctx, loc, st)
 }
@@ -729,31 +742,44 @@ func questFoes(ctx *Ctx, loc *Location, st *Step) bool {
 	return false
 }
 
+// findDestination finds a place by id or by name.
+func findDestination(w *World, ref string) *Location {
+	if l := w.Location(ref); l != nil {
+		return l
+	}
+	for _, l := range w.Locations {
+		if NameContains(l.Name, ref) {
+			return l
+		}
+	}
+	return nil
+}
+
 func travel(ctx *Ctx, c *Character, ref string, st *Step) error {
 	w := ctx.W
 	if w.InCombat() {
 		return fmt.Errorf("you can't travel during a fight; flee through an exit instead")
 	}
-	dest := w.Location(ref)
-	if dest == nil {
-		for _, l := range w.Locations {
-			if NameContains(l.Name, ref) {
-				dest = l
-				break
-			}
-		}
-	}
+	dest := findDestination(w, ref)
 	if dest == nil {
 		return fmt.Errorf("unknown destination %q", ref)
+	}
+	if err := CanMove(c.Conditions); err != nil {
+		return fmt.Errorf("%s is %v", c.Name, err)
+	}
+	path, err := w.TravelPath(w.Campaign.LocationID, dest.ID)
+	if err != nil {
+		return err
+	}
+	if len(path) > 0 && ctx.Leaving != nil {
+		if err := ctx.Leaving(c); err != nil {
+			return err
+		}
 	}
 	for _, ch := range w.Party() {
 		if err := CanMove(ch.Conditions); err != nil {
 			return fmt.Errorf("%s is %v", ch.Name, err)
 		}
-	}
-	path, err := w.TravelPath(w.Campaign.LocationID, dest.ID)
-	if err != nil {
-		return err
 	}
 	prev := w.Campaign.LocationID
 	for _, hop := range path {
@@ -776,7 +802,11 @@ func travel(ctx *Ctx, c *Character, ref string, st *Step) error {
 	}
 	AdvanceTime(w, max(1, (len(path)+1)/2))
 	if w.Campaign.LocationID == dest.ID {
-		st.Changes = append(st.Changes, fmt.Sprintf("%s leads the party to %s", c.Name, dest.Name))
+		if len(w.Party()) == 1 {
+			st.Changes = append(st.Changes, fmt.Sprintf("%s travels to %s", c.Name, dest.Name))
+		} else {
+			st.Changes = append(st.Changes, fmt.Sprintf("%s leads the party to %s", c.Name, dest.Name))
+		}
 	} else {
 		st.Changes = append(st.Changes, fmt.Sprintf("The journey to %s is interrupted at %s", dest.Name, w.Here().Name))
 	}

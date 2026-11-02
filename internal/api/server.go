@@ -87,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /campaigns/{id}/me/downtime", s.auth(s.handleDowntime))
 	mux.HandleFunc("POST /campaigns/{id}/me/seen", s.auth(s.handleSeen))
 	mux.HandleFunc("POST /campaigns/{id}/me/solo", s.auth(s.handleSolo))
+	mux.HandleFunc("POST /campaigns/{id}/me/together", s.auth(s.handleTogether))
 	mux.HandleFunc("POST /campaigns/{id}/me/goals", s.auth(s.handleGoal))
 	mux.HandleFunc("POST /campaigns/{id}/me/join", s.auth(s.handleJoinGroup))
 	mux.HandleFunc("POST /campaigns/{id}/me/answer", s.auth(s.handleAnswer))
@@ -909,6 +910,28 @@ func (s *Server) handleSolo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wld, err := s.gm.GoSolo(r.Context(), r.PathValue("id"), p)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"campaign": campaignView(wld, p)})
+}
+
+// handleTogether sets whether the player's character goes along when
+// someone in their group leaves for another place.
+func (s *Server) handleTogether(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.needPlayer(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		On bool `json:"on"`
+	}
+	if err := decode(r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	wld, err := s.gm.SetTravelTogether(r.Context(), r.PathValue("id"), p, body.On)
 	if err != nil {
 		s.fail(w, err)
 		return

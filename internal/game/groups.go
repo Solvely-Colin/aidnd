@@ -278,6 +278,9 @@ func SplitOff(w *World, ids []string, now int64) (*Group, error) {
 	g.Scene.Goal, g.Scene.Turns, g.Scene.Quiet = "", 0, 0
 	moving := map[string]bool{}
 	for _, c := range movers {
+		if len(movers) == 1 {
+			c.TravelTogether = false // going off alone
+		}
 		c.Group = g.ID
 		moving[c.ID] = true
 		g.Turns.Order = append(g.Turns.Order, c.ID)

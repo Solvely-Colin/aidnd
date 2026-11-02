@@ -109,6 +109,10 @@ type CharExtra struct {
 	// Death is set while the character lies at 0 HP and not yet dead.
 	Death *DeathSaves `json:"death,omitempty"`
 	Dead  bool        `json:"dead,omitempty"`
+	// TravelTogether: the player chose to go wherever their group goes. In
+	// a long campaign anyone without it stays put when a friend leaves for
+	// another place (see gm leaveAlone).
+	TravelTogether bool `json:"travel_together,omitempty"`
 	// ReactedRound is the encounter round of their last reaction
 	// (opportunity attack or readied attack); one per round.
 	ReactedRound int `json:"reacted_round,omitempty"`

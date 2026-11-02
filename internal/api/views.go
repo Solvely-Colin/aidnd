@@ -366,6 +366,11 @@ type YouView struct {
 	// is set where one can be queued.
 	Downtime    string `json:"downtime,omitempty"`
 	CanDowntime bool   `json:"can_downtime,omitempty"`
+	// TravelChoice is set in a long campaign while others share your
+	// group: leaving for another place takes only you unless they chose
+	// TravelTogether, and the same goes for you.
+	TravelChoice   bool `json:"travel_choice,omitempty"`
+	TravelTogether bool `json:"travel_together,omitempty"`
 }
 
 type SceneView struct {
@@ -895,6 +900,14 @@ func campaignView(w *game.World, playerID string) CampaignView {
 				v.You.Downtime = me.Downtime.Kind
 			}
 			v.You.CanDowntime = !w.InCombat() && game.CanDowntime(w, me, w.Here()) == nil
+			v.You.TravelTogether = me.TravelTogether
+			if c.LongForm() {
+				for _, o := range w.Characters {
+					if o.ID != me.ID && !o.Dead {
+						v.You.TravelChoice = true
+					}
+				}
+			}
 		}
 		if c.Status == game.StatusActive {
 			if v.FreeRoam {

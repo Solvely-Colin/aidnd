@@ -88,12 +88,27 @@ func (g *GM) AnswerEvent(ctx context.Context, campaignID, playerID string) (*gam
 		onArrive, _ := g.arrivalHooks(ctx, w)
 		onArrive(site)
 	}
+	// answering takes the player and whoever chose to travel with them, not
+	// friends who stay where they are
+	var evs []store.Event
+	if err := w.FocusPlayer(playerID); err != nil {
+		return nil, err
+	}
+	if w.Campaign.LocationID != e.SiteID {
+		ev, err := g.leaveAlone(w, c, playerID)
+		if err != nil {
+			return nil, err
+		}
+		if ev != nil {
+			evs = append(evs, *ev)
+		}
+	}
+	w.Settle()
 	from := game.GroupOf(c)
 	grp, moved, joins, err := game.AnswerCall(w, c)
 	if err != nil {
 		return nil, Conflict("%s", err.Error())
 	}
-	var evs []store.Event
 	if moved {
 		site := w.Location(e.SiteID)
 		evs = append(evs, tagParty(store.NewEvent("location_changed", playerID, map[string]any{"location_id": site.ID, "name": site.Name}), from))
