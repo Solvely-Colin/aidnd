@@ -1155,25 +1155,39 @@ function travelChoiceHTML(on) {
     <span class="verb">${on ? "Stay put instead" : "Travel together"}</span></button>`;
 }
 
-// downtimeHTML: at a safe place in a long campaign, one thing to do before
-// the world's next turn (each morning).
+// downtimeHTML: one thing to do before the world's next turn (each
+// morning). The plan stays on show wherever the character goes, so a
+// player can always see what will happen overnight. Picking is never a
+// toggle: undoing takes its own button, so a double tap can't cancel it.
 function downtimeHTML() {
   const v = S.view, you = v.you || {}, kinds = v.world?.downtime || [];
-  if (!kinds.length || (!you.can_downtime && !you.downtime)) return "";
+  if (!kinds.length) return "";
+  const plan = kinds.find(k => k.key === you.downtime);
+  if (!plan && !you.can_downtime) {
+    return `<section class="downtime"><p class="sh">Before morning</p>
+    <span class="hint-line">Overnight plans can only be made somewhere safe, like your lodgings. Head back to pick one.</span></section>`;
+  }
   return `<section class="downtime"><p class="sh">Before morning</p>
-    <span class="hint-line">Pick one thing to do overnight. It happens when the world takes its turn, around 5am Eastern.</span>
-    ${kinds.map(k => `<button class="row-line ${you.downtime === k.key ? "on" : ""}" data-downtime="${you.downtime === k.key ? "" : esc(k.key)}" ${you.can_downtime || you.downtime === k.key ? "" : "disabled"}>
-      <span class="nm">${esc(k.name)}<small>${esc(k.desc)}</small></span><span class="verb">${you.downtime === k.key ? "Planned · undo" : "Plan"}</span></button>`).join("")}
+    ${plan ? `<div class="planned"><span class="nm">Tonight: <b>${esc(plan.name)}</b><small>It happens when the world takes its turn, around 5am Eastern.</small></span>
+      <button class="link" data-downtime="">Cancel</button></div>`
+      : `<span class="hint-line">Pick one thing to do overnight. It happens when the world takes its turn, around 5am Eastern.</span>`}
+    ${you.can_downtime ? kinds.map(k => `<button class="row-line ${plan === k ? "on" : ""}" data-downtime="${esc(k.key)}" ${plan === k ? "disabled" : ""}>
+      <span class="nm">${esc(k.name)}<small>${esc(k.desc)}</small></span><span class="verb">${plan === k ? "Planned" : plan ? "Switch" : "Plan"}</span></button>`).join("") : ""}
   </section>`;
 }
 
 async function setDowntime(kind, t) {
+  if (S.downtimeBusy) return;
+  S.downtimeBusy = true;
   if (t) t.disabled = true;
   try {
     const r = await api("POST", `/campaigns/${S.route}/me/downtime`, { kind });
     S.view = r.campaign;
     renderChrome();
+    const k = (r.campaign.world?.downtime || []).find(x => x.key === r.campaign.you?.downtime);
+    toast(k ? `Planned for tonight: ${k.name}` : "Overnight plan cancelled");
   } catch (e) { toast(e.message); if (t) t.disabled = false; }
+  finally { S.downtimeBusy = false; }
 }
 
 async function setTogether(on, t) {

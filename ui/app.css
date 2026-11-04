@@ -1023,6 +1023,10 @@ details.feat p { margin: 0 0 12px; font: italic 16px/1.5 var(--sans); color: var
 .downtime .row-line .nm small { display: block; margin-top: 2px; }
 .downtime .row-line.on .nm { color: var(--acc); }
 .downtime .row-line:disabled { opacity: .45; }
+.downtime .row-line.on:disabled { opacity: 1; }
+.downtime .planned { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 6px 0 8px; }
+.downtime .planned .nm small { display: block; margin-top: 2px; color: var(--ink2); }
+.downtime .planned .link { font-size: 15px; flex: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
