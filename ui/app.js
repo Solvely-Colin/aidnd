@@ -1164,6 +1164,9 @@ function downtimeHTML() {
   if (!kinds.length) return "";
   const plan = kinds.find(k => k.key === you.downtime);
   if (!plan && !you.can_downtime) {
+    // only say "head back" when the place is what stands in the way
+    const loc = v.location || {};
+    if (v.encounter || loc.is_hub || !(loc.danger > 0)) return "";
     return `<section class="downtime"><p class="sh">Before morning</p>
     <span class="hint-line">Overnight plans can only be made somewhere safe, like your lodgings. Head back to pick one.</span></section>`;
   }
